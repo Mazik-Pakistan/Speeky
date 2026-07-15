@@ -21,7 +21,7 @@ try:
     from .fluency import FluencyAnalyzer
     from .response import ConversationEngine
     from .tts import TextToSpeech
-    from .confidence import ConfidenceScoreEngine, SessionScore
+    from .confidence import ConfidenceScoreEngine, SessionScore, ConfidenceGrammarAnalyzer
 except ImportError:
     # For standalone testing
     try:
@@ -33,7 +33,7 @@ except ImportError:
         from fluency import FluencyAnalyzer
         from response import ConversationEngine
         from tts import TextToSpeech
-        from confidence import ConfidenceScoreEngine, SessionScore
+        from confidence import ConfidenceScoreEngine, SessionScore, ConfidenceGrammarAnalyzer
     except ImportError:
         # If dependencies not available, create dummy classes for testing
         VoiceActivityDetector = None
@@ -45,14 +45,14 @@ except ImportError:
         ConversationEngine = None
         TextToSpeech = None
         try:
-            from .confidence import ConfidenceScoreEngine, SessionScore
+            from .confidence import ConfidenceScoreEngine, SessionScore, ConfidenceGrammarAnalyzer
         except ImportError:
-            from confidence import ConfidenceScoreEngine, SessionScore
+            from confidence import ConfidenceScoreEngine, SessionScore, ConfidenceGrammarAnalyzer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Context types treated as high-stakes/professional for US-21's E-02
+# Context types treated as high-stakes/professional for BAS-US-11's E-02
 # (Professional Context Violation). ASSUMPTION: pipeline.py's docstring
 # only documents context_type values as (hr, technical, functional,
 # general) with no further definition of what each represents. This set
@@ -382,7 +382,7 @@ class SpeekyPipeline:
                 result['corrected_text'] = result['original_text']
                 grammar_result = {}
 
-            # Step 6.5: Confidence vs. Grammar analysis (US-21)
+            # Step 6.5: Confidence vs. Grammar analysis (BAS-US-11)
             # Reuses fluency_result (step 5) and grammar_result (step 6) —
             # no new signal extraction, just scoring/feedback on top.
             self._ensure_component("confidence")

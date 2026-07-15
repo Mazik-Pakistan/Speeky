@@ -35,7 +35,7 @@ except ImportError as e:
     TextToSpeech = None
 
 from .pipeline import SpeekyPipeline
-from .confidence import ConfidenceScoreEngine, ScoringWeights, SessionScore
+from .confidence import ConfidenceScoreEngine, ScoringWeights, SessionScore, ConfidenceGrammarAnalyzer
 from .storage import InMemoryStorage, LearningLevel, AssessmentStatus
 from .assessment import InitialCommunicationAssessment
 from .results import ResultsSummaryView
