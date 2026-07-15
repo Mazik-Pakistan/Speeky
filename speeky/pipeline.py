@@ -12,14 +12,42 @@ from typing import Dict, Optional, List
 import os
 from datetime import datetime
 
-from .vad import VoiceActivityDetector
-from .asr import AutomaticSpeechRecognition
-from .alignment import WordAligner
-from .pronunciation import PronunciationScorer
-from .grammar import GrammarCorrector
-from .fluency import FluencyAnalyzer
-from .response import ConversationEngine
-from .tts import TextToSpeech
+try:
+    from .vad import VoiceActivityDetector
+    from .asr import AutomaticSpeechRecognition
+    from .alignment import WordAligner
+    from .pronunciation import PronunciationScorer
+    from .grammar import GrammarCorrector
+    from .fluency import FluencyAnalyzer
+    from .response import ConversationEngine
+    from .tts import TextToSpeech
+    from .confidence import ConfidenceScoreEngine, SessionScore
+except ImportError:
+    # For standalone testing
+    try:
+        from vad import VoiceActivityDetector
+        from asr import AutomaticSpeechRecognition
+        from alignment import WordAligner
+        from pronunciation import PronunciationScorer
+        from grammar import GrammarCorrector
+        from fluency import FluencyAnalyzer
+        from response import ConversationEngine
+        from tts import TextToSpeech
+        from confidence import ConfidenceScoreEngine, SessionScore
+    except ImportError:
+        # If dependencies not available, create dummy classes for testing
+        VoiceActivityDetector = None
+        AutomaticSpeechRecognition = None
+        WordAligner = None
+        PronunciationScorer = None
+        GrammarCorrector = None
+        FluencyAnalyzer = None
+        ConversationEngine = None
+        TextToSpeech = None
+        try:
+            from .confidence import ConfidenceScoreEngine, SessionScore
+        except ImportError:
+            from confidence import ConfidenceScoreEngine, SessionScore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,7 +67,8 @@ class SpeekyPipeline:
         tts_voice: str = "en_GB-alan-medium",
         use_llm: bool = True,
         ollama_url: str = "http://localhost:11434",
-        lazy_loading: bool = True
+        lazy_loading: bool = True,
+        confidence_engine: Optional[ConfidenceScoreEngine] = None
     ):
         """
         Initialize the Speeky pipeline.
@@ -50,6 +79,7 @@ class SpeekyPipeline:
             use_llm: Whether to use LLM for enhancement
             ollama_url: URL for Ollama API
             lazy_loading: Whether to load models lazily
+            confidence_engine: Optional confidence score engine
         """
         self.asr_model_size = asr_model_size
         self.tts_voice = tts_voice
@@ -67,6 +97,9 @@ class SpeekyPipeline:
         self.conversation_engine = None
         self.tts = None
         
+        # Confidence score engine
+        self.confidence_engine = confidence_engine or ConfidenceScoreEngine()
+        
         # Load components if not lazy loading
         if not lazy_loading:
             self._load_all_components()
@@ -75,74 +108,82 @@ class SpeekyPipeline:
         """Load all pipeline components."""
         logger.info("Loading all pipeline components...")
         
-        try:
-            self.vad = VoiceActivityDetector()
-            logger.info("VAD loaded")
-        except Exception as e:
-            logger.error(f"Failed to load VAD: {e}")
+        if VoiceActivityDetector:
+            try:
+                self.vad = VoiceActivityDetector()
+                logger.info("VAD loaded")
+            except Exception as e:
+                logger.error(f"Failed to load VAD: {e}")
         
-        try:
-            self.asr = AutomaticSpeechRecognition(model_size=self.asr_model_size)
-            logger.info("ASR loaded")
-        except Exception as e:
-            logger.error(f"Failed to load ASR: {e}")
+        if AutomaticSpeechRecognition:
+            try:
+                self.asr = AutomaticSpeechRecognition(model_size=self.asr_model_size)
+                logger.info("ASR loaded")
+            except Exception as e:
+                logger.error(f"Failed to load ASR: {e}")
         
-        try:
-            self.aligner = WordAligner()
-            logger.info("Word aligner loaded")
-        except Exception as e:
-            logger.error(f"Failed to load aligner: {e}")
+        if WordAligner:
+            try:
+                self.aligner = WordAligner()
+                logger.info("Word aligner loaded")
+            except Exception as e:
+                logger.error(f"Failed to load aligner: {e}")
         
-        try:
-            self.pronunciation_scorer = PronunciationScorer()
-            logger.info("Pronunciation scorer loaded")
-        except Exception as e:
-            logger.error(f"Failed to load pronunciation scorer: {e}")
+        if PronunciationScorer:
+            try:
+                self.pronunciation_scorer = PronunciationScorer()
+                logger.info("Pronunciation scorer loaded")
+            except Exception as e:
+                logger.error(f"Failed to load pronunciation scorer: {e}")
         
-        try:
-            self.grammar_corrector = GrammarCorrector(use_llm=self.use_llm, ollama_url=self.ollama_url)
-            logger.info("Grammar corrector loaded")
-        except Exception as e:
-            logger.error(f"Failed to load grammar corrector: {e}")
+        if GrammarCorrector:
+            try:
+                self.grammar_corrector = GrammarCorrector(use_llm=self.use_llm, ollama_url=self.ollama_url)
+                logger.info("Grammar corrector loaded")
+            except Exception as e:
+                logger.error(f"Failed to load grammar corrector: {e}")
         
-        try:
-            self.fluency_analyzer = FluencyAnalyzer()
-            logger.info("Fluency analyzer loaded")
-        except Exception as e:
-            logger.error(f"Failed to load fluency analyzer: {e}")
+        if FluencyAnalyzer:
+            try:
+                self.fluency_analyzer = FluencyAnalyzer()
+                logger.info("Fluency analyzer loaded")
+            except Exception as e:
+                logger.error(f"Failed to load fluency analyzer: {e}")
         
-        try:
-            self.conversation_engine = ConversationEngine(ollama_url=self.ollama_url)
-            logger.info("Conversation engine loaded")
-        except Exception as e:
-            logger.error(f"Failed to load conversation engine: {e}")
+        if ConversationEngine:
+            try:
+                self.conversation_engine = ConversationEngine(ollama_url=self.ollama_url)
+                logger.info("Conversation engine loaded")
+            except Exception as e:
+                logger.error(f"Failed to load conversation engine: {e}")
         
-        try:
-            self.tts = TextToSpeech(voice=self.tts_voice)
-            logger.info("TTS loaded")
-        except Exception as e:
-            logger.error(f"Failed to load TTS: {e}")
+        if TextToSpeech:
+            try:
+                self.tts = TextToSpeech(voice=self.tts_voice)
+                logger.info("TTS loaded")
+            except Exception as e:
+                logger.error(f"Failed to load TTS: {e}")
         
         logger.info("All components loaded")
     
     def _ensure_component(self, component_name: str):
         """Ensure a component is loaded (for lazy loading)."""
         if self.lazy_loading:
-            if component_name == "vad" and self.vad is None:
+            if component_name == "vad" and self.vad is None and VoiceActivityDetector:
                 self.vad = VoiceActivityDetector()
-            elif component_name == "asr" and self.asr is None:
+            elif component_name == "asr" and self.asr is None and AutomaticSpeechRecognition:
                 self.asr = AutomaticSpeechRecognition(model_size=self.asr_model_size)
-            elif component_name == "aligner" and self.aligner is None:
+            elif component_name == "aligner" and self.aligner is None and WordAligner:
                 self.aligner = WordAligner()
-            elif component_name == "pronunciation" and self.pronunciation_scorer is None:
+            elif component_name == "pronunciation" and self.pronunciation_scorer is None and PronunciationScorer:
                 self.pronunciation_scorer = PronunciationScorer()
-            elif component_name == "grammar" and self.grammar_corrector is None:
+            elif component_name == "grammar" and self.grammar_corrector is None and GrammarCorrector:
                 self.grammar_corrector = GrammarCorrector(use_llm=self.use_llm, ollama_url=self.ollama_url)
-            elif component_name == "fluency" and self.fluency_analyzer is None:
+            elif component_name == "fluency" and self.fluency_analyzer is None and FluencyAnalyzer:
                 self.fluency_analyzer = FluencyAnalyzer()
-            elif component_name == "conversation" and self.conversation_engine is None:
+            elif component_name == "conversation" and self.conversation_engine is None and ConversationEngine:
                 self.conversation_engine = ConversationEngine(ollama_url=self.ollama_url)
-            elif component_name == "tts" and self.tts is None:
+            elif component_name == "tts" and self.tts is None and TextToSpeech:
                 self.tts = TextToSpeech(voice=self.tts_voice)
     
     def process(
@@ -166,27 +207,27 @@ class SpeekyPipeline:
         Returns:
             Dictionary with complete analysis results
         """
-        logger.info("Starting pipeline processing...")
-        
-        # Create output directory if needed
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Initialize result dictionary
-        result = {
-            'timestamp': datetime.now().isoformat(),
-            'context_type': context_type,
-            'original_text': '',
-            'corrected_text': '',
-            'pronunciation_score': 0.0,
-            'fluency_score': 0.0,
-            'grammar_errors': {},
-            'explanation': '',
-            'response_text': '',
-            'audio_filename': '',
-            'errors': []
-        }
-        
         try:
+            logger.info("Starting pipeline processing...")
+            
+            # Create output directory if needed
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Initialize result dictionary
+            result = {
+                'timestamp': datetime.now().isoformat(),
+                'context_type': context_type,
+                'original_text': '',
+                'corrected_text': '',
+                'pronunciation_score': None,
+                'fluency_score': 0.0,
+                'grammar_errors': {},
+                'explanation': '',
+                'response_text': '',
+                'audio_filename': '',
+                'errors': []
+            }
+            
             # Step 1: VAD and segmentation (if not skipped)
             if not skip_vad:
                 self._ensure_component("vad")
@@ -249,6 +290,43 @@ class SpeekyPipeline:
                 result['fluency_details'] = fluency_result
             else:
                 result['errors'].append("Fluency analyzer not available")
+                result['fluency_score'] = 0.0
+            
+            # Step 5.5: Vocabulary score estimation
+            vocabulary_score = self._estimate_vocabulary_score(result['original_text'])
+            result['vocabulary_score'] = vocabulary_score
+            
+            # Step 5.6: Confidence score calculation
+            try:
+                # Create session score for confidence calculation
+                session_score = SessionScore(
+                    timestamp=datetime.now(),
+                    fluency_score=result.get('fluency_score', 0.0),
+                    vocabulary_score=vocabulary_score,
+                    pronunciation_score=result.get('pronunciation_score'),
+                    is_text_only=False,
+                    is_complete=True
+                )
+                
+                # Add to confidence engine
+                self.confidence_engine.add_session_score(session_score)
+                
+                # Get current confidence score
+                result['confidence_score'] = self.confidence_engine.get_confidence_score()
+                result['confidence_breakdown'] = self.confidence_engine.get_confidence_breakdown()
+                
+            except Exception as e:
+                logger.error(f"Error calculating confidence score: {e}")
+                result['confidence_score'] = 0.0
+                result['errors'].append(f"Confidence score calculation failed: {str(e)}")
+            
+            # Use default values if components not available
+            if 'fluency_score' not in result:
+                result['fluency_score'] = 0.0
+            if 'vocabulary_score' not in result:
+                result['vocabulary_score'] = 0.0
+            if 'confidence_score' not in result:
+                result['confidence_score'] = 0.0
             
             # Step 6: Grammar correction
             self._ensure_component("grammar")
@@ -298,8 +376,19 @@ class SpeekyPipeline:
             
         except Exception as e:
             logger.error(f"Pipeline processing error: {e}")
-            result['errors'].append(f"Pipeline error: {str(e)}")
-            return result
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'context_type': context_type,
+                'original_text': '',
+                'corrected_text': '',
+                'pronunciation_score': None,
+                'fluency_score': 0.0,
+                'grammar_errors': {},
+                'explanation': '',
+                'response_text': '',
+                'audio_filename': '',
+                'errors': [f"Pipeline error: {str(e)}"]
+            }
     
     def process_batch(
         self,
@@ -376,3 +465,35 @@ class SpeekyPipeline:
         with open(output_path, 'w') as f:
             json.dump(result, f, indent=2)
         logger.info(f"Result saved to {output_path}")
+    
+    def _estimate_vocabulary_score(self, text: str) -> float:
+        """
+        Estimate vocabulary score from transcription.
+        
+        Args:
+            text: Transcribed text
+            
+        Returns:
+            Vocabulary score (0-100)
+        """
+        if not text:
+            return 0.0
+        
+        words = text.split()
+        if not words:
+            return 0.0
+        
+        # Simple heuristics
+        unique_words = len(set(word.lower() for word in words))
+        total_words = len(words)
+        
+        # Lexical diversity
+        lexical_diversity = unique_words / total_words if total_words > 0 else 0
+        
+        # Word length complexity
+        avg_word_length = sum(len(word) for word in words) / total_words if total_words > 0 else 0
+        
+        # Combine metrics
+        vocabulary_score = (lexical_diversity * 50) + (min(avg_word_length / 8, 1) * 50)
+        
+        return round(vocabulary_score, 2)
