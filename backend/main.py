@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -45,9 +46,10 @@ app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.environ.get("CLIENT_ORIGIN", "http://localhost:5173")],
+    # allow_origins=[os.environ.get("CLIENT_ORIGIN", "http://localhost:3000")],
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST","PATCH", "DELETE"],
+    allow_methods=["GET", "POST","PATCH", "DELETE", "OPTIONS"],
 )
 
 app.add_exception_handler(AppError, app_error_handler)
@@ -67,6 +69,11 @@ async def health():
 
 app.include_router(auth_router, prefix="/api/auth")
 app.include_router(user_router, prefix="/api/users")
+
+# Local-folder avatar storage, exposed to frontend as static files
+_uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(os.path.join(_uploads_dir, "avatars"), exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=_uploads_dir), name="uploads")
 
 
 # Port of app.js's `app.all("/{*path}", ...)` catch-all 404 — must stay the LAST
