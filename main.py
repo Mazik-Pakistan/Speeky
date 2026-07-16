@@ -1,460 +1,626 @@
-#!/usr/bin/env python3
-"""
-Speeky - Main entry point for the AI-assisted English language practice pipeline.
-
-This script provides a command-line interface for recording speech from microphone
-or processing audio files, then running the complete analysis pipeline.
-"""
-
-import argparse
-import logging
-import sys
-import numpy as np
-import sounddevice as sd
-from scipy.io import wavfile
-import json
 import os
-from pathlib import Path
-
-# Import Speeky components
-from speeky import SpeekyPipeline
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+import time
+from datetime import date
+from typing import Optional
+from fastapi import FastAPI, UploadFile, File, Form
+from pydantic import BaseModel
+from openai import OpenAI, APITimeoutError
+from dotenv import load_dotenv
+from prompts import (
+    build_system_prompt,
+    TOPICS,
+    build_interview_prompt,
+    build_topic_validation_prompt,
+    build_level_judge_prompt,
+    VALID_LEVELS,
 )
-logger = logging.getLogger(__name__)
+
+load_dotenv()
+
+client = OpenAI(
+    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1",
+)
+
+app = FastAPI()
+
+# in-memory stores (v1 only — swap for DB later)
+sessions = {}
+daily_challenge = {}  # key: (session_id, date) -> accumulated seconds
+
+# GAP-01: simple in-memory log of custom topics for future "recently practiced"
+# suggestions. Stub only — same spirit as the Daily Challenge counter.
+custom_topics_log = []  # list of {"session_id", "topic", "ts"}
+
+# GAP-02: transcripts must survive past /chat/end (sessions dict gets popped
+# there), so completed sessions are archived here for later review/replay.
+# v1 in-memory only — no real 90-day retention window yet, that needs the DB.
+transcript_store = {}  # session_id -> {"topic", "history", "ended_at"}
 
 
-def record_audio(duration: int = 5, sample_rate: int = 16000) -> tuple:
+class ChatRequest(BaseModel):
+    session_id: str
+    topic: str          # key from TOPICS, e.g. "daily_life", or "custom"
+    message: str
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    session_duration_sec: float
+    status: str = "ok"          # ok | timeout | error
+    daily_challenge_sec: float = 0.0
+    level: Optional[str] = None
+    level_adjustment_note: Optional[str] = None
+
+
+class StartResponse(BaseModel):
+    status: str
+    topic: str
+    session_id: Optional[str] = None
+    opening_message: Optional[str] = None
+    needs_clarification: bool = False
+    reason: Optional[str] = None
+    level: Optional[str] = None
+    level_note: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# GAP-01: Custom Topic validation (LLM-judged)
+# ---------------------------------------------------------------------------
+
+def validate_custom_topic(topic: str) -> dict:
+    """Ask the LLM to judge a user-submitted custom topic.
+
+    Returns dict: {"verdict": SAFE|UNSAFE|VAGUE, "preset_match": key|NONE, "reason": str}
+    Fails open (SAFE/NONE) if the validation call itself errors out, so a flaky
+    LLM call never silently blocks a legitimate custom topic session.
     """
-    Record audio from microphone.
-    
-    Args:
-        duration: Recording duration in seconds
-        sample_rate: Sample rate for recording
-        
-    Returns:
-        Tuple of (audio_data, sample_rate)
-    """
-    logger.info(f"Recording for {duration} seconds...")
-    
+    prompt = build_topic_validation_prompt(topic)
     try:
-        # Record audio
-        audio = sd.rec(
-            int(duration * sample_rate),
-            samplerate=sample_rate,
-            channels=1,
-            dtype='float32'
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            timeout=10,
         )
-        sd.wait()  # Wait until recording is finished
-        
-        # Flatten to 1D array
-        audio = audio.flatten()
-        
-        logger.info(f"Recording complete: {len(audio)} samples")
-        return audio, sample_rate
-        
-    except Exception as e:
-        logger.error(f"Error recording audio: {e}")
-        raise
+        text = completion.choices[0].message.content.strip()
+    except Exception:
+        return {
+            "verdict": "SAFE",
+            "preset_match": "NONE",
+            "reason": "validation service unavailable, defaulted to allow",
+        }
+
+    verdict = "SAFE"
+    preset_match = "NONE"
+    reason = ""
+    for line in text.splitlines():
+        line = line.strip()
+        if line.upper().startswith("VERDICT:"):
+            verdict = line.split(":", 1)[1].strip().upper()
+        elif line.upper().startswith("PRESET_MATCH:"):
+            preset_match = line.split(":", 1)[1].strip().lower()
+        elif line.upper().startswith("REASON:"):
+            reason = line.split(":", 1)[1].strip()
+
+    return {"verdict": verdict, "preset_match": preset_match, "reason": reason}
 
 
-def record_until_silence(
-    max_duration: int = 30,
-    sample_rate: int = 16000,
-    silence_threshold: float = 0.01,
-    silence_duration: float = 1.0
-) -> tuple:
+def judge_user_level(recent_messages: list) -> Optional[str]:
+    """GAP-03: LLM-judged proficiency drift check, based on a rolling window of
+    the user's last 3 turns. Fails closed (returns None -> no adjustment) on
+    any error, so a flaky LLM call never causes a spurious level flip.
     """
-    Record audio until silence is detected.
-    
-    Args:
-        max_duration: Maximum recording duration in seconds
-        sample_rate: Sample rate for recording
-        silence_threshold: Amplitude threshold for silence detection
-        silence_duration: Duration of silence to stop recording
-        
-    Returns:
-        Tuple of (audio_data, sample_rate)
-    """
-    logger.info("Recording until silence (press Ctrl+C to stop)...")
-    
+    if not recent_messages:
+        return None
+    prompt = build_level_judge_prompt(recent_messages)
     try:
-        audio_chunks = []
-        chunk_size = int(sample_rate * 0.1)  # 100ms chunks
-        silence_counter = 0
-        max_silence_chunks = int(silence_duration * sample_rate / chunk_size)
-        total_chunks = int(max_duration * sample_rate / chunk_size)
-        
-        def callback(indata, frames, time, status):
-            if status:
-                logger.warning(f"Recording status: {status}")
-            
-            audio_chunks.append(indata.copy())
-            
-            # Check for silence
-            if len(indata) > 0:
-                amplitude = np.max(np.abs(indata))
-                if amplitude < silence_threshold:
-                    nonlocal silence_counter
-                    silence_counter += 1
-                    if silence_counter >= max_silence_chunks:
-                        raise sd.CallbackStop
-                else:
-                    silence_counter = 0
-        
-        # Start recording
-        with sd.InputStream(
-            samplerate=sample_rate,
-            channels=1,
-            dtype='float32',
-            callback=callback,
-            blocksize=chunk_size
-        ):
-            while len(audio_chunks) < total_chunks:
-                sd.sleep(100)
-        
-        # Combine chunks
-        audio = np.concatenate(audio_chunks).flatten()
-        
-        logger.info(f"Recording complete: {len(audio)} samples")
-        return audio, sample_rate
-        
-    except sd.CallbackStop:
-        # Normal stop due to silence
-        audio = np.concatenate(audio_chunks).flatten()
-        logger.info(f"Silence detected, recording stopped: {len(audio)} samples")
-        return audio, sample_rate
-    except KeyboardInterrupt:
-        # User interrupted
-        if audio_chunks:
-            audio = np.concatenate(audio_chunks).flatten()
-            logger.info(f"Recording stopped by user: {len(audio)} samples")
-            return audio, sample_rate
-        else:
-            logger.warning("No audio recorded")
-            return np.array([]), sample_rate
-    except Exception as e:
-        logger.error(f"Error recording audio: {e}")
-        raise
-
-
-def load_audio(file_path: str) -> tuple:
-    """
-    Load audio from file.
-    
-    Args:
-        file_path: Path to audio file
-        
-    Returns:
-        Tuple of (audio_data, sample_rate)
-    """
-    logger.info(f"Loading audio from {file_path}...")
-    
-    try:
-        sample_rate, audio = wavfile.read(file_path)
-        
-        # Convert to float32 if needed
-        if audio.dtype == np.int16:
-            audio = audio.astype(np.float32) / 32768.0
-        elif audio.dtype == np.int32:
-            audio = audio.astype(np.float32) / 2147483648.0
-        elif audio.dtype == np.float64:
-            audio = audio.astype(np.float32)
-        
-        # Convert stereo to mono if needed
-        if len(audio.shape) > 1:
-            audio = np.mean(audio, axis=1)
-        
-        logger.info(f"Audio loaded: {len(audio)} samples at {sample_rate} Hz")
-        return audio, sample_rate
-        
-    except Exception as e:
-        logger.error(f"Error loading audio file: {e}")
-        raise
-
-
-def play_audio(file_path: str):
-    """
-    Play audio file using sounddevice.
-    
-    Args:
-        file_path: Path to audio file
-    """
-    try:
-        sample_rate, audio = wavfile.read(file_path)
-        
-        # Convert to float32 if needed
-        if audio.dtype == np.int16:
-            audio = audio.astype(np.float32) / 32768.0
-        elif audio.dtype == np.int32:
-            audio = audio.astype(np.float32) / 2147483648.0
-        
-        # Convert stereo to mono if needed
-        if len(audio.shape) > 1:
-            audio = np.mean(audio, axis=1)
-        
-        logger.info(f"Playing audio: {file_path}")
-        sd.play(audio, sample_rate)
-        sd.wait()
-        
-    except Exception as e:
-        logger.error(f"Error playing audio: {e}")
-
-
-def print_result(result: dict):
-    """
-    Print pipeline result in a formatted way.
-    
-    Args:
-        result: Result dictionary from pipeline
-    """
-    print("\n" + "="*60)
-    print("SPEEKY ANALYSIS RESULTS")
-    print("="*60)
-    
-    print(f"\nOriginal Text:")
-    print(f"  {result.get('original_text', 'N/A')}")
-    
-    print(f"\nCorrected Text:")
-    print(f"  {result.get('corrected_text', 'N/A')}")
-    
-    print(f"\nExplanation:")
-    print(f"  {result.get('explanation', 'N/A')}")
-    
-    print(f"\nScores:")
-    print(f"  Pronunciation: {result.get('pronunciation_score', 0):.1f}/100")
-    print(f"  Fluency: {result.get('fluency_score', 0):.1f}/100")
-    
-    if 'grammar_errors' in result:
-        print(f"\nGrammar Analysis:")
-        print(f"  Error Density: {result['grammar_errors'].get('error_density', 0):.3f}")
-    
-    print(f"\nConversational Response:")
-    print(f"  {result.get('response_text', 'N/A')}")
-    
-    if result.get('audio_filename'):
-        print(f"\nAudio Output:")
-        print(f"  {result['audio_filename']}")
-    
-    if result.get('errors'):
-        print(f"\nWarnings/Errors:")
-        for error in result['errors']:
-            print(f"  - {error}")
-    
-    print("\n" + "="*60 + "\n")
-
-
-def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Speeky - AI-assisted English language practice pipeline",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Process a pre-recorded audio file
-  python main.py --file input.wav --context hr
-  
-  # Record from microphone for 5 seconds
-  python main.py --record --duration 5 --context technical
-  
-  # Record until silence is detected
-  python main.py --live --context functional
-  
-  # Process file and save detailed JSON output
-  python main.py --file input.wav --output results.json
-        """
-    )
-    
-    # Input options
-    input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument(
-        '--file',
-        type=str,
-        help='Input audio file path (WAV format)'
-    )
-    input_group.add_argument(
-        '--record',
-        action='store_true',
-        help='Record from microphone for fixed duration'
-    )
-    input_group.add_argument(
-        '--live',
-        action='store_true',
-        help='Record from microphone until silence detected'
-    )
-    
-    # Recording options
-    parser.add_argument(
-        '--duration',
-        type=int,
-        default=5,
-        help='Recording duration in seconds (for --record mode, default: 5)'
-    )
-    parser.add_argument(
-        '--sample-rate',
-        type=int,
-        default=16000,
-        help='Audio sample rate (default: 16000)'
-    )
-    
-    # Context options
-    parser.add_argument(
-        '--context',
-        type=str,
-        choices=['hr', 'technical', 'functional', 'general'],
-        default='general',
-        help='Conversation context type (default: general)'
-    )
-    
-    # Pipeline options
-    parser.add_argument(
-        '--no-llm',
-        action='store_true',
-        help='Disable LLM enhancement (use only Gramformer)'
-    )
-    parser.add_argument(
-        '--ollama-url',
-        type=str,
-        default='http://localhost:11434',
-        help='Ollama API URL (default: http://localhost:11434)'
-    )
-    parser.add_argument(
-        '--skip-vad',
-        action='store_true',
-        help='Skip VAD (useful for pre-segmented audio)'
-    )
-    
-    # Output options
-    parser.add_argument(
-        '--output',
-        type=str,
-        help='Save JSON result to file'
-    )
-    parser.add_argument(
-        '--output-dir',
-        type=str,
-        default='output',
-        help='Directory for audio output files (default: output)'
-    )
-    parser.add_argument(
-        '--play-audio',
-        action='store_true',
-        help='Play TTS audio after processing'
-    )
-    parser.add_argument(
-        '--no-audio',
-        action='store_true',
-        help='Skip TTS audio generation'
-    )
-    
-    # Model options
-    parser.add_argument(
-        '--asr-model',
-        type=str,
-        default='distil-large-v3',
-        choices=['tiny', 'base', 'small', 'medium', 'large-v3', 'distil-large-v3'],
-        help='ASR model size (default: distil-large-v3)'
-    )
-    parser.add_argument(
-        '--tts-voice',
-        type=str,
-        default='en_GB-alan-medium',
-        help='TTS voice model (default: en_GB-alan-medium)'
-    )
-    
-    # Other options
-    parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='Enable verbose logging'
-    )
-    parser.add_argument(
-        '--check-status',
-        action='store_true',
-        help='Check component status and exit'
-    )
-    
-    args = parser.parse_args()
-    
-    # Set logging level
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-    
-    # Initialize pipeline
-    logger.info("Initializing Speeky pipeline...")
-    
-    try:
-        pipeline = SpeekyPipeline(
-            asr_model_size=args.asr_model,
-            tts_voice=args.tts_voice,
-            use_llm=not args.no_llm,
-            ollama_url=args.ollama_url,
-            lazy_loading=True
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            timeout=10,
         )
-        
-        # Check status if requested
-        if args.check_status:
-            status = pipeline.get_status()
-            print("\nComponent Status:")
-            print("="*40)
-            for component, available in status.items():
-                status_str = "✓ Available" if available else "✗ Not available"
-                print(f"  {component.ljust(20)}: {status_str}")
-            print("="*40 + "\n")
-            return
-        
-        # Get audio input
-        if args.file:
-            audio, sample_rate = load_audio(args.file)
-        elif args.record:
-            audio, sample_rate = record_audio(args.duration, args.sample_rate)
-        elif args.live:
-            audio, sample_rate = record_until_silence(
-                max_duration=30,
-                sample_rate=args.sample_rate
+        text = completion.choices[0].message.content.strip().lower()
+    except Exception:
+        return None
+
+    for lvl in VALID_LEVELS:
+        if lvl in text:
+            return lvl
+    return None
+
+
+def resolve_level(level: Optional[str]):
+    """GAP-03: figure out which proficiency level a session should start at.
+
+    Returns (used_level, note). `level` simulates whatever the real Baseline
+    Assessment / Confidence Score engine will eventually inject; this engine
+    just consumes it.
+    """
+    level = level.lower() if level else None
+    note = None
+
+    if level in VALID_LEVELS:
+        return level, note
+
+    # E-01: no baseline score on file at all
+    note = "No baseline score on file — defaulting to Intermediate. Consider completing the Baseline Assessment."
+    return "intermediate", note
+
+
+@app.post("/chat/start", response_model=StartResponse)
+def start_session(
+    session_id: str,
+    topic: str = "",
+    custom_topic: Optional[str] = None,
+    level: Optional[str] = None,
+):
+    used_level, level_note = resolve_level(level)
+
+    # ------------------------------------------------------------------
+    # GAP-01: Custom / User-Defined Topic Input
+    # ------------------------------------------------------------------
+    if custom_topic is not None and custom_topic.strip():
+        custom_topic = custom_topic.strip()
+
+        # E-04: Empty Custom Topic Submission (backend guard; UI should already
+        # disable Start under 3 chars, but never trust the client alone)
+        if len(custom_topic) < 3:
+            return StartResponse(
+                status="rejected_too_short",
+                topic=custom_topic,
+                needs_clarification=True,
+                reason="Please enter at least 3 characters.",
             )
-        else:
-            parser.error("No input method specified")
-        
-        # Check if audio was captured
-        if len(audio) == 0:
-            logger.error("No audio data captured")
-            return
-        
-        # Process audio
-        logger.info("Processing audio through pipeline...")
-        result = pipeline.process(
-            audio_input=audio,
-            sample_rate=sample_rate,
-            context_type=args.context,
-            skip_vad=args.skip_vad,
-            output_dir=args.output_dir
+
+        check = validate_custom_topic(custom_topic)
+
+        # E-01: Inappropriate Custom Topic — reject before session starts
+        if check["verdict"] == "UNSAFE":
+            return StartResponse(
+                status="rejected_unsafe",
+                topic=custom_topic,
+                reason="Please choose a different topic.",
+            )
+
+        # E-02: Topic Too Vague — ask a clarifying question, don't start yet
+        if check["verdict"] == "VAGUE":
+            return StartResponse(
+                status="needs_clarification",
+                topic=custom_topic,
+                needs_clarification=True,
+                reason=f"Could you tell me a bit more about \"{custom_topic}\"?",
+            )
+
+        # E-03: Topic Matches an Existing Preset — silently route into that flow
+        if check["preset_match"] in TOPICS:
+            matched_key = check["preset_match"]
+            sessions[session_id] = {
+                "topic": matched_key,
+                "custom_topic": None,
+                "history": [],
+                "start_time": time.time(),
+                "level": used_level,
+                "level_adjusted": False,
+            }
+            return StartResponse(
+                status="started",
+                topic=TOPICS[matched_key],
+                session_id=session_id,
+                level=used_level,
+                level_note=level_note,
+            )
+
+        # SAFE, no preset match -> genuine custom topic session
+        sessions[session_id] = {
+            "topic": "custom",
+            "custom_topic": custom_topic,
+            "history": [],
+            "start_time": time.time(),
+            "level": used_level,
+            "level_adjusted": False,
+        }
+
+        custom_topics_log.append({
+            "session_id": session_id,
+            "topic": custom_topic,
+            "ts": time.time(),
+        })
+
+        # AI opens with a tailored opening question (happy path step 4,
+        # must land within ~3 seconds per acceptance criteria)
+        system_msg = build_system_prompt("custom", custom_topic=custom_topic, level=used_level)
+        try:
+            completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": "Start the conversation."},
+                ],
+                timeout=10,
+            )
+            opening_reply = completion.choices[0].message.content
+        except Exception:
+            opening_reply = f"So, tell me a bit about {custom_topic} — what got you into it?"
+
+        sessions[session_id]["history"].append({"role": "assistant", "content": opening_reply})
+
+        return StartResponse(
+            status="started",
+            topic=custom_topic,
+            session_id=session_id,
+            opening_message=opening_reply,
+            level=used_level,
+            level_note=level_note,
         )
-        
-        # Print results
-        print_result(result)
-        
-        # Save JSON output if requested
-        if args.output:
-            pipeline.save_result(result, args.output)
-            logger.info(f"JSON result saved to {args.output}")
-        
-        # Play audio if requested
-        if args.play_audio and result.get('audio_filename'):
-            try:
-                play_audio(result['audio_filename'])
-            except Exception as e:
-                logger.error(f"Could not play audio: {e}")
-        
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user")
-        sys.exit(0)
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        sys.exit(1)
+
+    # ------------------------------------------------------------------
+    # Standard preset flow
+    # ------------------------------------------------------------------
+    sessions[session_id] = {
+        "topic": topic,
+        "custom_topic": None,
+        "history": [],
+        "start_time": time.time(),
+        "level": used_level,
+        "level_adjusted": False,
+    }
+    return StartResponse(
+        status="started",
+        topic=TOPICS.get(topic, topic),
+        session_id=session_id,
+        level=used_level,
+        level_note=level_note,
+    )
 
 
-if __name__ == "__main__":
-    main()
+def run_chat_turn(session_id: str, topic: str, message: str) -> ChatResponse:
+    # E-04: Empty Submission
+    if not message or len(message.strip()) == 0:
+        return ChatResponse(reply="Say something first — I'm listening!", session_duration_sec=0)
+
+    session = sessions.get(session_id)
+    if session is None:
+        sessions[session_id] = {
+            "topic": topic,
+            "custom_topic": None,
+            "history": [],
+            "start_time": time.time(),
+            "level": "intermediate",
+            "level_adjusted": False,
+        }
+        session = sessions[session_id]
+
+    # GAP-03: mid-session difficulty drift check. Rolling window of the user's
+    # last 3 turns (including this one), judged by the LLM as a stand-in for
+    # the real Confidence-Score engine. Allowed to fire at most once per
+    # session (per acceptance criteria — no jarring repeated shifts) and
+    # fails closed (no adjustment) on any judging error.
+    level_adjustment_note = None
+    if not session.get("level_adjusted", False):
+        user_turns = [m["content"] for m in session["history"] if m["role"] == "user"]
+        user_turns.append(message)
+        if len(user_turns) >= 3:
+            judged = judge_user_level(user_turns[-3:])
+            if judged and judged != session.get("level"):
+                session["level"] = judged
+                session["level_adjusted"] = True
+                level_adjustment_note = f"Difficulty adjusted to {judged.capitalize()} based on your recent responses."
+
+    # Session is the source of truth for topic once /chat/start has run —
+    # this matters for GAP-01 custom-topic sessions where `topic` == "custom".
+    custom_topic = session.get("custom_topic")
+    current_level = session.get("level", "intermediate")
+    system_msg = build_system_prompt(
+        session.get("topic", topic), custom_topic=custom_topic, level=current_level
+    )
+
+    messages = [{"role": "system", "content": system_msg}]
+    messages += session["history"]
+    messages.append({"role": "user", "content": message})
+
+    status = "ok"
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            timeout=10,
+        )
+        reply = completion.choices[0].message.content
+    except APITimeoutError:
+        reply = "Connection slow, retrying..."
+        status = "timeout"
+    except Exception:
+        reply = "Connection slow, retrying..."
+        status = "error"
+
+    session["history"].append({"role": "user", "content": message})
+    session["history"].append({"role": "assistant", "content": reply})
+
+    duration = time.time() - session["start_time"]
+
+    key = (session_id, str(date.today()))
+    running_total = daily_challenge.get(key, 0.0) + duration
+
+    return ChatResponse(
+        reply=reply,
+        session_duration_sec=duration,
+        status=status,
+        daily_challenge_sec=running_total,
+        level=current_level,
+        level_adjustment_note=level_adjustment_note,
+    )
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(req: ChatRequest):
+    return run_chat_turn(req.session_id, req.topic, req.message)
+
+
+@app.post("/chat/voice", response_model=ChatResponse)
+async def chat_voice(session_id: str = Form(...), topic: str = Form(...), audio: UploadFile = File(...)):
+    audio_bytes = await audio.read()
+
+    # E-01: AI Transcription Failure
+    if len(audio_bytes) == 0:
+        return ChatResponse(
+            reply="I didn't quite catch that, could you say it one more time?",
+            session_duration_sec=0,
+            status="transcription_failed",
+        )
+
+    try:
+        transcript = client.audio.transcriptions.create(
+            model="whisper-large-v3",
+            file=(audio.filename, audio_bytes),
+        )
+        text = transcript.text.strip()
+    except Exception:
+        return ChatResponse(
+            reply="I didn't quite catch that, could you say it one more time?",
+            session_duration_sec=0,
+            status="transcription_failed",
+        )
+
+    if not text:
+        return ChatResponse(
+            reply="I didn't quite catch that, could you say it one more time?",
+            session_duration_sec=0,
+            status="transcription_failed",
+        )
+
+    return run_chat_turn(session_id, topic, text)
+
+
+@app.post("/chat/end")
+def end_session(session_id: str):
+    session = sessions.pop(session_id, None)
+    if session is None:
+        return {"status": "no active session"}
+    duration = time.time() - session["start_time"]
+
+    key = (session_id, str(date.today()))
+    daily_challenge[key] = daily_challenge.get(key, 0.0) + duration
+
+    # GAP-02: archive the transcript before the live session is gone for good
+    transcript_store[session_id] = {
+        "topic": session.get("custom_topic") or session.get("topic"),
+        "history": session["history"],
+        "ended_at": time.time(),
+        "level": session.get("level", "intermediate"),
+        "level_adjusted": session.get("level_adjusted", False),
+    }
+
+    return {
+        "status": "ended",
+        "duration_sec": duration,
+        "daily_challenge_total_sec": daily_challenge[key],
+        # GAP-03 happy path step 5: feedback notes the level the session ran at
+        "level": session.get("level", "intermediate"),
+        "level_adjusted_mid_session": session.get("level_adjusted", False),
+    }
+
+
+class TranscriptTurn(BaseModel):
+    index: int
+    role: str
+    content: str
+    corrections: list = []   # stub — filled by NLP/Scoring engine, not this engine's job
+    audio: Optional[str] = None  # stub — filled once audio storage exists (Speech-to-Text engineer)
+
+
+class TranscriptResponse(BaseModel):
+    status: str
+    session_id: str
+    topic: Optional[str] = None
+    total_turns: int = 0
+    offset: int = 0
+    limit: int = 50
+    turns: list[TranscriptTurn] = []
+    note: Optional[str] = None
+
+
+@app.get("/chat/transcript/{session_id}", response_model=TranscriptResponse)
+def get_transcript(session_id: str, offset: int = 0, limit: int = 50):
+    """GAP-02: Conversation Transcript Review & Replay.
+
+    Reads from the archived store (post /chat/end) or, if the session is
+    still live, from the active sessions dict — so a user can preview an
+    in-progress transcript too. Grammar/vocabulary highlighting and audio
+    playback are left as stubs for the NLP/Scoring and Speech-to-Text
+    engineers respectively; this engine's job is just to expose the turns.
+    """
+    record = transcript_store.get(session_id)
+    if record is not None:
+        topic = record["topic"]
+        history = record["history"]
+    else:
+        # E-04-style case: not archived yet — check if it's still an active session
+        live = sessions.get(session_id)
+        if live is None:
+            return TranscriptResponse(
+                status="not_found",
+                session_id=session_id,
+                note="No transcript found for this session.",
+            )
+        topic = live.get("custom_topic") or live.get("topic")
+        history = live["history"]
+
+    turns = [
+        TranscriptTurn(index=i, role=msg["role"], content=msg["content"])
+        for i, msg in enumerate(history)
+    ]
+
+    # E-03: paginate/lazy-load long transcripts rather than dumping everything
+    paged = turns[offset: offset + limit]
+
+    return TranscriptResponse(
+        status="ok",
+        session_id=session_id,
+        topic=topic,
+        total_turns=len(turns),
+        offset=offset,
+        limit=limit,
+        turns=paged,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Interview Coach — job interview -> salary negotiation flow
+# ---------------------------------------------------------------------------
+
+interview_sessions = {}  # session_id -> {history, stage, exchange_count, start_time}
+
+# transcript archive for interview sessions, same pattern as GAP-02 transcript_store —
+# /interview/end pops interview_sessions, so archive here first for later review/replay.
+interview_transcript_store = {}  # session_id -> {"role", "history", "final_stage", "ended_at"}
+
+
+class InterviewRequest(BaseModel):
+    session_id: str
+    message: str
+    role: str = "a professional role"  # e.g. "Software Engineer" — user-provided, no file parsing
+
+
+class InterviewResponse(BaseModel):
+    reply: str
+    stage: str
+    status: str = "ok"
+
+
+@app.post("/interview/start")
+def interview_start(session_id: str, role: str = "a professional role"):
+    interview_sessions[session_id] = {
+        "history": [],
+        "stage": "job_interview",
+        "exchange_count": 0,
+        "role": role,
+        "start_time": time.time(),
+    }
+    return {"status": "started", "stage": "job_interview", "role": role}
+
+
+@app.post("/interview/chat", response_model=InterviewResponse)
+def interview_chat(req: InterviewRequest):
+    if not req.message or len(req.message.strip()) == 0:
+        return InterviewResponse(reply="Take your time — go ahead when ready.", stage="job_interview")
+
+    session = interview_sessions.get(req.session_id)
+    if session is None:
+        interview_sessions[req.session_id] = {
+            "history": [],
+            "stage": "job_interview",
+            "exchange_count": 0,
+            "role": req.role,
+            "start_time": time.time(),
+        }
+        session = interview_sessions[req.session_id]
+
+    system_msg = build_interview_prompt(session["stage"])
+    # tell the model the target role being interviewed for
+    system_msg = f"{system_msg}\n\nRole being interviewed for: {session['role']}."
+
+    messages = [{"role": "system", "content": system_msg}]
+    messages += session["history"]
+    messages.append({"role": "user", "content": req.message})
+
+    status = "ok"
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            timeout=10,
+        )
+        reply = completion.choices[0].message.content
+    except APITimeoutError:
+        reply = "Connection slow, retrying..."
+        status = "timeout"
+    except Exception:
+        reply = "Connection slow, retrying..."
+        status = "error"
+
+    session["history"].append({"role": "user", "content": req.message})
+    session["history"].append({"role": "assistant", "content": reply})
+
+    # Stage transition: after enough exchanges in job_interview stage, flip to negotiation.
+    if session["stage"] == "job_interview":
+        session["exchange_count"] += 1
+        if session["exchange_count"] >= 4:
+            session["stage"] = "salary_negotiation"
+
+    return InterviewResponse(reply=reply, stage=session["stage"], status=status)
+
+
+@app.post("/interview/end")
+def interview_end(session_id: str):
+    session = interview_sessions.pop(session_id, None)
+    if session is None:
+        return {"status": "no active session"}
+    duration = time.time() - session["start_time"]
+
+    interview_transcript_store[session_id] = {
+        "role": session.get("role"),
+        "history": session["history"],
+        "final_stage": session["stage"],
+        "ended_at": time.time(),
+    }
+
+    return {"status": "ended", "duration_sec": duration, "final_stage": session["stage"]}
+
+
+@app.get("/interview/transcript/{session_id}", response_model=TranscriptResponse)
+def get_interview_transcript(session_id: str, offset: int = 0, limit: int = 50):
+    """Interview Coach transcript review — same pattern as GAP-02's
+    /chat/transcript. Reads from the archived store (post /interview/end) or,
+    if the interview is still live, from the active interview_sessions dict.
+    """
+    record = interview_transcript_store.get(session_id)
+    if record is not None:
+        topic = record["role"]
+        history = record["history"]
+    else:
+        live = interview_sessions.get(session_id)
+        if live is None:
+            return TranscriptResponse(
+                status="not_found",
+                session_id=session_id,
+                note="No transcript found for this session.",
+            )
+        topic = live.get("role")
+        history = live["history"]
+
+    turns = [
+        TranscriptTurn(index=i, role=msg["role"], content=msg["content"])
+        for i, msg in enumerate(history)
+    ]
+
+    paged = turns[offset: offset + limit]
+
+    return TranscriptResponse(
+        status="ok",
+        session_id=session_id,
+        topic=topic,
+        total_turns=len(turns),
+        offset=offset,
+        limit=limit,
+        turns=paged,
+    )
