@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="dashboard">
+    <h2>Your Assessment Status</h2>
+    
+    <div class="score-card">
+        <p><strong>Status:</strong> 
+            <span class="status-badge status-{{ assessment_status }}">{{ assessment_status|title }}</span>
+        </p>
+        
+        {% if has_active_assessment %}
+        <p><strong>Active Assessment:</strong> Assessment in progress</p>
+        {% endif %}
+        
+        {% if latest_assessment and latest_assessment.completed_at %}
+        <p><strong>Last Assessment:</strong> {{ latest_assessment.completed_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        <p><strong>Confidence Score:</strong> {{ latest_assessment.confidence_score|round(1) }}/100</p>
+        <p><strong>Learning Level:</strong> {{ latest_assessment.learning_level.value|title }}</p>
+        {% endif %}
+    </div>
+    
+    <div class="score-card">
+        <h3>Current Confidence Score</h3>
+        <p><strong>Score:</strong> {{ confidence_breakdown.current_score|round(1) }}/100</p>
+        <p><em>{{ confidence_breakdown.explanation }}</em></p>
+        
+        <h4>Score Breakdown:</h4>
+        <ul>
+            <li><strong>Fluency:</strong> {{ confidence_breakdown.components.fluency.weight }}% - {{ confidence_breakdown.components.fluency.recent_average|round(1) }}/100</li>
+            <li><strong>Vocabulary:</strong> {{ confidence_breakdown.components.vocabulary.weight }}% - {{ confidence_breakdown.components.vocabulary.recent_average|round(1) }}/100</li>
+            {% if confidence_breakdown.components.pronunciation.recent_average %}
+            <li><strong>Pronunciation:</strong> {{ confidence_breakdown.components.pronunciation.weight }}% - {{ confidence_breakdown.components.pronunciation.recent_average|round(1) }}/100</li>
+            {% endif %}
+        </ul>
+    </div>
+    
+    {% if assessment_status == 'unassessed' and not has_active_assessment %}
+    <div class="score-card">
+        <h3>Start Your Baseline Assessment</h3>
+        <p>Complete a 5-minute AI-led evaluation to establish your communication baseline.</p>
+        <button class="btn" onclick="startAssessment()">Start Assessment</button>
+        <button class="btn btn-secondary" onclick="skipAssessment()">Skip for Now</button>
+    </div>
+    {% endif %}
+    
+    {% if has_active_assessment %}
+    <div class="score-card">
+        <h3>Assessment In Progress</h3>
+        <p>You have an assessment in progress. Continue where you left off.</p>
+        <button class="btn" onclick="continueAssessment()">Continue Assessment</button>
+        <button class="btn btn-secondary" onclick="resetAssessment()">Reset Assessment</button>
+    </div>
+    {% endif %}
+    
+    {% if reassessment_summary.eligibility.is_eligible %}
+    <div class="score-card">
+        <h3>📅 Time for Re-Assessment</h3>
+        <p>Your 30-day cycle is complete. Take a new assessment to track your progress!</p>
+        <button class="btn" onclick="startReAssessment()">Start Re-Assessment</button>
+    </div>
+    {% endif %}
+    
+    <div class="score-card">
+        <h3>Feature Access</h3>
+        <p><strong>Access Level:</strong> {{ feature_summary.access_level|title }}</p>
+        
+        <h4>Accessible Features:</h4>
+        <ul>
+            {% for feature in feature_summary.accessible_features %}
+            <li>{{ feature|replace('_', ' ')|title }}</li>
+            {% endfor %}
+        </ul>
+        
+        {% if feature_summary.inaccessible_features %}
+        <h4>Locked Features (Complete Assessment to Unlock):</h4>
+        <ul>
+            {% for feature in feature_summary.inaccessible_features %}
+            <li>{{ feature|replace('_', ' ')|title }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function startAssessment() {
+    apiCall('/assessment/start')
+        .then(data => {
+            if (data.success) {
+                window.location.href = '/assessment/progress';
+            } else {
+                alert('Error starting assessment: ' + data.error);
+            }
+        });
+}
+
+function skipAssessment() {
+    if (confirm('Are you sure you want to skip the assessment? You will not be able to access coaching features without it.')) {
+        apiCall('/assessment/skip', {})
+            .then(data => {
+                if (data.success) {
+                    alert('Assessment skipped. Complete it later to unlock all features.');
+                    location.reload();
+                } else {
+                    alert('Error: ' + (data.reason || data.error));
+                }
+            });
+    }
+}
+
+function startReAssessment() {
+    apiCall('/api/reassessment/start', {})
+        .then(data => {
+            if (data.success) {
+                window.location.href = '/assessment/progress';
+            } else {
+                alert('Error starting re-assessment: ' + data.reason);
+            }
+        });
+}
+
+function continueAssessment() {
+    window.location.href = '/assessment';
+}
+
+function resetAssessment() {
+    if (confirm('Are you sure you want to reset the assessment? This will discard your progress.')) {
+        fetch('/assessment/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        })
+        .then(() => {
+            window.location.href = '/';
+        })
+        .catch(error => {
+            alert('Error resetting assessment');
+            console.error(error);
+        });
+    }
+}
+</script>
+{% endblock %}

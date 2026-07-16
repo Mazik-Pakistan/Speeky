@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="results">
+    <h2>🎯 Assessment Results</h2>
+    
+    <div class="score-card">
+        <h3>{{ summary.positive_framing.title }}</h3>
+        <p><em>{{ summary.positive_framing.subtitle }}</em></p>
+        <p>{{ summary.positive_framing.message }}</p>
+    </div>
+    
+    <div class="score-card">
+        <h3>Overall Confidence Score</h3>
+        <h1 style="color: #3498db;">{{ summary.confidence_score.display }}</h1>
+        <p><em>{{ summary.confidence_score.message }}</em></p>
+    </div>
+    
+    <div class="score-card">
+        <h3>Skill Breakdown</h3>
+        <ul>
+            <li>
+                <strong>{{ summary.skill_breakdown.fluency.label }}:</strong> 
+                {{ summary.skill_breakdown.fluency.display }} - {{ summary.skill_breakdown.fluency.description }}
+            </li>
+            <li>
+                <strong>{{ summary.skill_breakdown.vocabulary.label }}:</strong> 
+                {{ summary.skill_breakdown.vocabulary.display }} - {{ summary.skill_breakdown.vocabulary.description }}
+            </li>
+            {% if summary.skill_breakdown.pronunciation %}
+            <li>
+                <strong>{{ summary.skill_breakdown.pronunciation.label }}:</strong> 
+                {{ summary.skill_breakdown.pronunciation.display }} - {{ summary.skill_breakdown.pronunciation.description }}
+            </li>
+            {% endif %}
+        </ul>
+    </div>
+    
+    <div class="score-card">
+        <h3>Your Learning Level</h3>
+        <p><strong>{{ summary.learning_level.label }}</strong></p>
+        <p>Based on your confidence score, you're at the {{ summary.learning_level.label|lower }} level.</p>
+    </div>
+    
+    <div class="score-card">
+        <h3>Next Steps</h3>
+        <ul>
+            {% for step in summary.next_steps %}
+            <li>{{ step }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    
+    {% if progress_comparison %}
+    <div class="score-card">
+        <h3>📈 Your Progress</h3>
+        <p><strong>Days Between Assessments:</strong> {{ progress_comparison.days_between }}</p>
+        <p><strong>Total Assessments:</strong> {{ progress_comparison.assessment_count }}</p>
+        
+        <h4>Improvements:</h4>
+        <ul>
+            <li>
+                <strong>Confidence:</strong> 
+                <span style="color: {% if progress_comparison.improvements.confidence.positive %}green{% else %}red{% endif %}">
+                    {{ progress_comparison.improvements.confidence.display }}
+                </span>
+            </li>
+            <li>
+                <strong>Fluency:</strong> 
+                <span style="color: {% if progress_comparison.improvements.fluency.positive %}green{% else %}red{% endif %}">
+                    {{ progress_comparison.improvements.fluency.display }}
+                </span>
+            </li>
+            <li>
+                <strong>Vocabulary:</strong> 
+                <span style="color: {% if progress_comparison.improvements.vocabulary.positive %}green{% else %}red{% endif %}">
+                    {{ progress_comparison.improvements.vocabulary.display }}
+                </span>
+            </li>
+        </ul>
+        
+        {% if progress_comparison.level_progression.improved %}
+        <p style="color: green;"><strong>🎉 Level Up! You progressed from {{ progress_comparison.level_progression.from }} to {{ progress_comparison.level_progression.to }}!</strong></p>
+        {% endif %}
+    </div>
+    {% endif %}
+    
+    <button class="btn" onclick="window.location.href='/'">Back to Dashboard</button>
+</div>
+{% endblock %}
