@@ -35,16 +35,16 @@ enum PromptKind {
 }
 
 model User {
-  id                   String                 @id @default(cuid())
-  email                String                 @unique
+  id                   String                @id @default(cuid())
+  email                String                @unique
   password             String
-  name                 String?
-  avatarUrl            String                 @default("user.webp")
-  role                 Role                   @default(USER)
-  assessmentStatus     AssessmentStatus       @default(UNASSESSED)
+  name                 String
+  avatarUrl            String                @default("user.webp")
+  role                 Role                  @default(USER)
+  assessmentStatus     AssessmentStatus      @default(UNASSESSED)
   learningLevel        LearningLevel?
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
   passwordResetTokens  PasswordResetToken[]
   refreshTokens        RefreshToken[]
   baselineAssessments  BaselineAssessment[]

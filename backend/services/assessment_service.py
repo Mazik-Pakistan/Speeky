@@ -7,6 +7,9 @@ completedAt=None *is* "in progress" (no separate current-assessment state).
 
 import logging
 import random
+from pathlib import Path
+import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
@@ -35,35 +38,29 @@ class AssessmentQuestion:
 
 class AssessmentQuestionBank:
     def __init__(self):
-        self.questions: Dict[str, List[AssessmentQuestion]] = {
-            "introduction": [
-                AssessmentQuestion("intro_1", "Hello! Could you please introduce yourself and tell me what brings you here today?", "introduction"),
-                AssessmentQuestion("intro_2", "What are your main goals for improving your English communication skills?", "introduction"),
-            ],
-            "fluency": [
-                AssessmentQuestion("fluency_1", "Tell me about a typical day in your life, from morning to evening.", "fluency"),
-                AssessmentQuestion("fluency_2", "Describe your favorite hobby or activity and why you enjoy it.", "fluency"),
-            ],
-            "vocabulary": [
-                AssessmentQuestion("vocab_1", "What do you think are the most important qualities for success in your field?", "vocabulary"),
-                AssessmentQuestion("vocab_2", "Describe a challenging situation you faced and how you handled it.", "vocabulary"),
-            ],
-            "pronunciation": [
-                AssessmentQuestion("pron_1", "Please write out this sentence carefully: 'The quick brown fox jumps over the lazy dog.'", "pronunciation"),
-                AssessmentQuestion("pron_2", "Write these words: 'beautiful', 'comfortable', 'extraordinary', 'unfortunately'.", "pronunciation"),
-            ],
-        }
-        self._by_id = {q.question_id: q for qs in self.questions.values() for q in qs}
+        path = Path(__file__).parent.parent / "data" / "assessment_qs.json"
 
-    def get_assessment_questions(self, count: int = 5) -> List[AssessmentQuestion]:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+
+            self.questions = {
+                category: [AssessmentQuestion(**q) for q in questions]
+                for category, questions in raw.items()
+            }
+
+        self._by_id = {q.question_id: q for qs in self.questions.values() for q in qs}
+    
+    def get_assessment_questions(self, count: int = 25) -> List[AssessmentQuestion]:
         selected = [random.choice(qs) for qs in self.questions.values()]
         all_questions = [q for qs in self.questions.values() for q in qs]
         remaining = [q for q in all_questions if q not in selected]
 
-        while len(selected) < count and remaining:
-            q = random.choice(remaining)
-            selected.append(q)
-            remaining.remove(q)
+        selected.extend(
+            random.sample(
+                remaining,
+                min(count - len(selected), len(remaining))
+            )
+        )
 
         random.shuffle(selected)
         return selected[:count]
@@ -86,7 +83,7 @@ class AssessmentIntegrityChecker:
             if avg_length < 2:
                 return True, "Suspiciously short words (possible gibberish)"
 
-        if any(char * 5 in text for char in text):
+        if re.search(r"(.)\1{4,}", text):
             return True, "Repetitive character pattern detected"
 
         return False, None
@@ -207,6 +204,10 @@ async def _score_confidence(user_id: str, new_session: SessionScore) -> float:
 
 # ── Controllers ───────────────────────────────────────────────────────────────
 async def start_assessment(user_id: str = Depends(require_auth)):
+    existing = await db.baselineassessment.find_first(where={"userId": user_id, "completedAt": None})
+    if existing:
+        return JSONResponse(status_code=400, content={"error": "Assessment already in progress."})
+    
     questions = _question_bank.get_assessment_questions(count=5)
 
     assessment = await db.baselineassessment.create(
@@ -219,7 +220,7 @@ async def start_assessment(user_id: str = Depends(require_auth)):
         "total_questions": len(questions),
         "current_question": questions[0].text,
         "question_index": 0,
-        "estimated_duration_minutes": 5,
+        "estimated_duration_minutes": len(questions),
     }
 
 
@@ -229,9 +230,11 @@ async def submit_response(
     assessment = await db.baselineassessment.find_unique(where={"id": assessment_id})
     if not assessment or assessment.userId != user_id:
         return JSONResponse(status_code=404, content={"error": "Assessment not found"})
-    if assessment.completedAt:
+    elif assessment.completedAt:
         return JSONResponse(status_code=400, content={"error": "Assessment already completed"})
-
+    elif assessment.currentIndex >= len(assessment.questionIds):
+        return JSONResponse(status_code=400, content={"error": "No more questions to submit"})
+    
     question_id = assessment.questionIds[assessment.currentIndex]
     question = _question_bank.get_by_id(question_id)
 
@@ -478,7 +481,7 @@ def _positive_highlight(assessment: BaselineAssessment) -> str:
         highlights.append("strong natural speaking flow")
     if assessment.vocabularyScore >= 70:
         highlights.append("good vocabulary range")
-    if assessment.pronunciationScore and assessment.pronunciationScore >= 70:
+    if assessment.pronunciationScore is not None and assessment.pronunciationScore >= 70:
         highlights.append("clear pronunciation")
 
     if highlights:
@@ -538,7 +541,7 @@ async def get_progress_comparison(user_id: str = Depends(require_auth)):
     if len(assessments) < 2:
         return {"message": "Not enough data to compare", "has_comparison": False}
 
-    first, latest = assessments[0], assessments[-1]
+    prev, latest = assessments[-2], assessments[-1]
 
     def _delta(change: float) -> Dict:
         return {
@@ -549,16 +552,16 @@ async def get_progress_comparison(user_id: str = Depends(require_auth)):
 
     return {
         "has_comparison": True,
-        "days_between": (latest.completedAt - first.completedAt).days,
+        "days_between": (latest.completedAt - prev.completedAt).days,
         "assessment_count": len(assessments),
         "improvements": {
-            "confidence": _delta(latest.confidenceScore - first.confidenceScore),
-            "fluency": _delta(latest.fluencyScore - first.fluencyScore),
-            "vocabulary": _delta(latest.vocabularyScore - first.vocabularyScore),
+            "confidence": _delta(latest.confidenceScore - prev.confidenceScore),
+            "fluency": _delta(latest.fluencyScore - prev.fluencyScore),
+            "vocabulary": _delta(latest.vocabularyScore - prev.vocabularyScore),
         },
         "level_progression": {
-            "from": _level_label(first.learningLevel),
+            "from": _level_label(prev.learningLevel),
             "to": _level_label(latest.learningLevel),
-            "improved": _level_rank(latest.learningLevel) > _level_rank(first.learningLevel),
+            "improved": _level_rank(latest.learningLevel) > _level_rank(prev.learningLevel),
         },
     }

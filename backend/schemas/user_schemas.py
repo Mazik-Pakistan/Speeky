@@ -4,7 +4,7 @@ from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 class UpdateProfileSchema(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    name: Optional[str] = Field(min_length=3, max_length=100, pattern=r"^[a-zA-Z0-9 _-]+$")
     email: Optional[EmailStr] = None
 
     @model_validator(mode="after")
