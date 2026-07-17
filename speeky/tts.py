@@ -69,13 +69,15 @@ class TextToSpeech:
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 logger.warning("Piper TTS not available")
     
-    def synthesize(self, text: str, voice: Optional[str] = None) -> np.ndarray:
+    def synthesize(self, text: str, voice: Optional[str] = None, length_scale: float = 1.0) -> np.ndarray:
         """
         Synthesize speech from text.
         
         Args:
             text: Input text to synthesize
             voice: Optional voice override
+            length_scale: Speed control (1.0 = normal, >1.0 = slower, <1.0 = faster).
+                          Used for US-70 slow-playback (0.6x style pacing).
             
         Returns:
             Audio waveform as numpy array at self.sample_rate
@@ -88,7 +90,7 @@ class TextToSpeech:
         if self.use_python_bindings:
             return self._synthesize_with_bindings(text, voice_to_use)
         else:
-            return self._synthesize_with_subprocess(text, voice_to_use)
+            return self._synthesize_with_subprocess(text, voice_to_use, length_scale)
     
     def _synthesize_with_bindings(self, text: str, voice: str) -> np.ndarray:
         """
@@ -120,13 +122,14 @@ class TextToSpeech:
             logger.error(f"Error synthesizing with Python bindings: {e}")
             raise
     
-    def _synthesize_with_subprocess(self, text: str, voice: str) -> np.ndarray:
+    def _synthesize_with_subprocess(self, text: str, voice: str, length_scale: float = 1.0) -> np.ndarray:
         """
         Synthesize using Piper subprocess.
         
         Args:
             text: Input text
             voice: Voice model
+            length_scale: Speed control passed to Piper CLI (time-stretch, no pitch change)
             
         Returns:
             Audio waveform
@@ -141,15 +144,20 @@ class TextToSpeech:
                 audio_path = audio_file.name
             
             try:
-                # Run piper command
+               
+             
+                # Run piper command (text stdin se bhejna hai, file-path se nahi)
                 cmd = [
                     'piper',
                     '--model', voice,
                     '--output_file', audio_path,
-                    text_path
+                    '--length_scale', str(length_scale),
                 ]
                 
-                result = subprocess.run(cmd, capture_output=True, timeout=30)
+                result = subprocess.run(cmd, input=text.encode('utf-8'), capture_output=True, timeout=30)
+
+
+
                 
                 if result.returncode != 0:
                     logger.error(f"Piper error: {result.stderr.decode()}")
@@ -209,7 +217,8 @@ class TextToSpeech:
         self,
         text: str,
         output_path: str,
-        voice: Optional[str] = None
+        voice: Optional[str] = None,
+        length_scale: float = 1.0
     ) -> str:
         """
         Synthesize speech and save to file.
@@ -218,11 +227,14 @@ class TextToSpeech:
             text: Input text
             output_path: Path to save audio file
             voice: Optional voice override
+            length_scale: Speed control (1.0 = normal speed, default).
+                          Existing callers (US-37/38/46/47) don't pass this,
+                          so they keep working exactly as before at normal speed.
             
         Returns:
             Path to saved file
         """
-        audio = self.synthesize(text, voice)
+        audio = self.synthesize(text, voice, length_scale)
         
         # Save as WAV
         from scipy.io import wavfile

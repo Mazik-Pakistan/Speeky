@@ -99,7 +99,6 @@ class AutomaticSpeechRecognition:
                 beam_size=beam_size,
                 vad_filter=vad_filter,
                 word_timestamps=word_timestamps,
-                sample_rate=sample_rate
             )
             
             # Collect segments and words
