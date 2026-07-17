@@ -129,7 +129,7 @@ You are engaging in everyday conversation. Discuss daily life, hobbies, interest
                         "max_tokens": 150
                     }
                 },
-                timeout=30
+                timeout=120
             )
             
             if response.status_code == 200:
@@ -229,3 +229,48 @@ Original: {user_text}"""
         return f"""Scenario: {scenario}
 
 Engage in role-play according to this scenario. Stay in character and respond naturally as a British English speaker would in this situation. Keep responses concise and helpful for language practice."""
+    
+    def generate_with_system_prompt(
+        self,
+        user_text: str,
+        system_prompt: str,
+        use_history: bool = False
+    ) -> str:
+        """
+        US-52+: Custom system prompt ke saath response generate karta hai
+        (jab hr/technical/functional canned prompts kaafi na hon — jaise
+        STAR analysis, local-market persona, university admission, etc.)
+        """
+        if not self.available:
+            return self._fallback_response(user_text)
+
+        messages = [{"role": "system", "content": system_prompt}]
+        if use_history:
+            messages.extend(self.conversation_history)
+        messages.append({"role": "user", "content": user_text})
+
+        try:
+            response = requests.post(
+                f"{self.ollama_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "max_tokens": 300
+                    }
+                },
+                timeout=120
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                return result.get('message', {}).get('content', '')
+            else:
+                logger.error(f"Ollama API error: {response.status_code}")
+                return self._fallback_response(user_text)
+
+        except Exception as e:
+            logger.error(f"Error in generate_with_system_prompt: {e}")
+            return self._fallback_response(user_text) 
