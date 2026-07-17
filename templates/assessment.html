@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="assessment">
+    <h2>Baseline Assessment</h2>
+    
+    <div class="score-card">
+        <h3>Question {{ current_question_index + 1 }} of {{ total_questions }}</h3>
+        <div id="question-container">
+            <p id="question-text">Loading question...</p>
+        </div>
+        
+        <div class="response-section">
+            <h4>Your Response:</h4>
+            <textarea id="response-text" rows="4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" placeholder="Type your answer here..."></textarea>
+            
+            <div style="margin-top: 15px;">
+                <button class="btn" onclick="submitResponse()">Submit Answer</button>
+                <button class="btn btn-secondary" onclick="cancelAssessment()">Cancel Assessment</button>
+            </div>
+        </div>
+        
+        <div id="result-container" style="display: none; margin-top: 20px;">
+            <h4>Processing Result:</h4>
+            <div id="result-content"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+let assessmentId = '{{ assessment_id }}';
+let questionIndex = {{ current_question_index }};
+
+function loadQuestion() {
+    fetch('/assessment/question')
+        .then(data => data.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('question-text').textContent = data.current_question || 'Question not available';
+                questionIndex = data.current_question_index;
+            } else {
+                alert('Error loading question: ' + data.error);
+            }
+        });
+}
+
+function submitResponse() {
+    const textData = document.getElementById('response-text').value;
+    
+    if (!textData.trim()) {
+        alert('Please enter your response');
+        return;
+    }
+    
+    const data = {
+        response_type: 'text',
+        text_data: textData,
+        clipboard_detected: false
+    };
+    
+    fetch('/assessment/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.status === 'completed') {
+            // Assessment complete
+            window.location.href = '/results/' + assessmentId;
+        } else if (result.status === 'in_progress') {
+            // Next question
+            document.getElementById('response-text').value = '';
+            document.getElementById('question-text').textContent = result.next_question;
+            questionIndex = result.question_index;
+        } else {
+            alert('Error: ' + (result.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        alert('Error submitting response: ' + error);
+    });
+}
+
+function cancelAssessment() {
+    if (confirm('Are you sure you want to cancel the assessment?')) {
+        fetch('/assessment/skip', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.href = '/';
+            } else {
+                alert('Error: ' + (data.reason || data.error));
+            }
+        });
+    }
+}
+
+// Load initial question
+loadQuestion();
+</script>
+{% endblock %}
