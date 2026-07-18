@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Speeky - Dashboard</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&amp;family=Libre+Caslon+Text:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed-variant": "#92030f",
+                        "outline": "#757682",
+                        "on-background": "#1a1b21",
+                        "surface-container-highest": "#e3e1e9",
+                        "surface-bright": "#faf8ff",
+                        "surface": "#faf8ff",
+                        "inverse-primary": "#b5c4ff",
+                        "secondary-fixed-dim": "#ffb4ac",
+                        "surface-container-high": "#e9e7ef",
+                        "secondary": "#b52424",
+                        "on-error-container": "#93000a",
+                        "inverse-surface": "#2f3036",
+                        "outline-variant": "#c5c6d3",
+                        "error-container": "#ffdad6",
+                        "tertiary-container": "#3c4144",
+                        "on-secondary-fixed": "#410003",
+                        "primary-container": "#1d3b8a",
+                        "on-surface-variant": "#444651",
+                        "tertiary-fixed": "#dfe3e7",
+                        "tertiary-fixed-dim": "#c3c7cb",
+                        "primary-fixed-dim": "#b5c4ff",
+                        "primary": "#00246e",
+                        "on-tertiary-fixed-variant": "#43474b",
+                        "on-primary-container": "#90a9ff",
+                        "on-error": "#ffffff",
+                        "secondary-fixed": "#ffdad6",
+                        "primary-fixed": "#dbe1ff",
+                        "inverse-on-surface": "#f1f0f7",
+                        "error": "#ba1a1a",
+                        "on-secondary-container": "#600006",
+                        "secondary-container": "#ff5a52",
+                        "on-secondary": "#ffffff",
+                        "surface-variant": "#e3e1e9",
+                        "on-tertiary-fixed": "#171c1f",
+                        "surface-dim": "#dad9e0",
+                        "surface-container-low": "#f4f3fa",
+                        "background": "#faf8ff",
+                        "tertiary": "#262b2e",
+                        "on-tertiary-container": "#a8adb1",
+                        "on-tertiary": "#ffffff",
+                        "on-surface": "#1a1b21",
+                        "on-primary-fixed-variant": "#254190",
+                        "surface-container": "#eeedf4",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-tint": "#3f5aaa",
+                        "on-primary-fixed": "#00174d",
+                        "on-primary": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "stack-sm": "8px",
+                        "stack-lg": "32px",
+                        "stack-md": "16px",
+                        "margin-mobile": "16px",
+                        "unit": "8px",
+                        "container-max-width": "1280px",
+                        "margin-desktop": "40px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "body-md": ["Manrope"],
+                        "headline-lg": ["Libre Caslon Text"],
+                        "headline-lg-mobile": ["Libre Caslon Text"],
+                        "display-lg": ["Libre Caslon Text"],
+                        "label-md": ["Manrope"],
+                        "headline-md": ["Libre Caslon Text"],
+                        "label-sm": ["Manrope"],
+                        "body-lg": ["Manrope"]
+                    },
+                    "fontSize": {
+                        "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "headline-lg": ["32px", {"lineHeight": "40px", "fontWeight": "600"}],
+                        "headline-lg-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "600"}],
+                        "display-lg": ["48px", {"lineHeight": "56px", "fontWeight": "700"}],
+                        "label-md": ["14px", {"lineHeight": "20px", "letterSpacing": "0.02em", "fontWeight": "600"}],
+                        "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                        "label-sm": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                        "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            background-color: #F8FAFC; /* Philosophy light base */
+            color: #1a1b21;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .bento-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: auto auto;
+            gap: 24px;
+        }
+        .custom-scroll::-webkit-scrollbar {
+            height: 6px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #c5c6d3;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md overflow-x-hidden">
+<div class="flex min-h-screen">
+<!-- Sidebar Navigation (Mandatory via Logic) -->
+<aside class="hidden md:flex w-64 bg-surface-container-lowest dark:bg-inverse-surface flex-col border-r border-outline-variant p-6 sticky top-0 h-screen">
+<div class="mb-10">
+<h1 class="font-headline-lg text-headline-lg text-primary">Speeky</h1>
+<p class="font-label-sm text-label-sm text-outline uppercase tracking-widest mt-1">AI Coach</p>
+</div>
+<nav class="flex-1 space-y-2">
+<!-- Home Active State -->
+<a class="flex items-center gap-3 px-4 py-3 bg-primary-container text-on-primary-container rounded-xl font-label-md transition-transform scale-95 duration-150" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">home</span>
+                    Home
+                </a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-surface-variant hover:bg-surface-container-low rounded-xl font-label-md transition-colors" href="#">
+<span class="material-symbols-outlined">explore</span>
+                    Explore
+                </a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-surface-variant hover:bg-surface-container-low rounded-xl font-label-md transition-colors" href="#">
+<span class="material-symbols-outlined">insights</span>
+                    Progress
+                </a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-surface-variant hover:bg-surface-container-low rounded-xl font-label-md transition-colors" href="#">
+<span class="material-symbols-outlined">person</span>
+                    Profile
+                </a>
+</nav>
+<div class="mt-auto pt-6 border-t border-outline-variant">
+<div class="flex items-center gap-3 p-2">
+<div class="w-10 h-10 rounded-full bg-primary-container overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A professional studio portrait of a friendly young man named Alex, wearing a casual navy blue sweater, looking directly at the camera with a warm smile. The lighting is bright and clean against a neutral soft gray background, matching a high-end corporate modern design aesthetic with a focus on approachability and learning." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA3hsa4L2AttFS_kWy6P0zXAcfdzLkuVLpkGK5fR37xgpNpmjG_s_fXtxxM-6ICPtiC6mLe5iI5T_YrHYSEtzHr5f6-U753IcRVXe1e3Iatk1tbGuHAkUKfzV9Zhd9ipur5R3lUz_8ZGiQ0C2mjUoHLiTsCAM8WAqqYHPEQpEKMOXnQNKr9asUfIsTnErD9Igpl2ylobcb1JzR2yQnHJscd5nO-9Z5gKuqqtxWr20G3KlAt_wJy_jQ4QA"/>
+</div>
+<div>
+<p class="font-label-md text-on-surface">Alex Mercer</p>
+<p class="font-label-sm text-outline">Pro Learner</p>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 p-6 md:p-10 max-w-[1280px] mx-auto w-full">
+<!-- Top App Bar (Mobile Context) -->
+<header class="md:hidden flex justify-between items-center h-16 w-full mb-6">
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile text-primary">Speeky</h1>
+<div class="w-10 h-10 rounded-full bg-primary-container overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A small, focused avatar image of Alex, a male language learner, framed in a clean circular crop. The visual style is crisp and professional, using high-key lighting and a soft-focus background to emphasize the user's friendly expression." src="https://lh3.googleusercontent.com/aida-public/AB6AXuADiNIMB7mHionyMj__GEnO0pjcOmxZ5U9NyrkUONJup1IAxw4XN14iUDQkHQ4KFUDwnI0dYQLafClqFIVp-e8JUmAzWYJPUXWDTKrQgeyV4DsadphjoNz2WD-TBmtCdUzoWhj_84c-GhOu6vmNCaadRdXXQu6_cjRmHko91XsOpvh37vDYuhjlTdsQnbNIPDkxR6HbcCcaHWqpqUEBd7igoH7HTRWC9de3e6OR2xkjjeGP0SyfERlprw"/>
+</div>
+</header>
+<!-- Greeting Section -->
+<section class="mb-10">
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+<div>
+<h2 class="font-display-lg text-display-lg text-on-background mb-2">Hi, Alex!</h2>
+<p class="font-body-lg text-body-lg text-on-surface-variant max-w-xl">You've reached <span class="text-primary font-bold">85% fluency</span> in business scenarios. Ready for today's challenge?</p>
+</div>
+<div class="flex items-center gap-3">
+<button class="bg-primary text-on-primary px-6 py-3 rounded-full font-label-md hover:shadow-lg transition-all flex items-center gap-2 active:scale-95">
+<span class="material-symbols-outlined">add</span>
+                            Start New Session
+                        </button>
+</div>
+</div>
+</section>
+<!-- Bento Grid Dashboard -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-6 mb-12">
+<!-- Daily Streak Card (Large) -->
+<div class="md:col-span-4 bg-secondary-container text-on-secondary-container p-8 rounded-3xl relative overflow-hidden shadow-sm flex flex-col justify-between min-h-[320px]">
+<div class="z-10">
+<div class="flex items-center gap-2 mb-2">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">local_fire_department</span>
+<span class="font-label-md uppercase tracking-widest">Daily Streak</span>
+</div>
+<h3 class="text-6xl font-headline-lg">14 <span class="text-2xl opacity-80">Days</span></h3>
+</div>
+<div class="z-10">
+<p class="font-body-md mb-4">You're in the top 5% of learners this month. Keep the momentum going!</p>
+<div class="flex gap-1">
+<!-- Streak Visualizer -->
+<div class="h-1.5 flex-1 bg-on-secondary-container opacity-20 rounded-full"></div>
+<div class="h-1.5 flex-1 bg-on-secondary-container opacity-40 rounded-full"></div>
+<div class="h-1.5 flex-1 bg-on-secondary-container opacity-60 rounded-full"></div>
+<div class="h-1.5 flex-1 bg-on-secondary-container opacity-80 rounded-full"></div>
+<div class="h-1.5 flex-1 bg-on-secondary-container rounded-full"></div>
+</div>
+</div>
+<!-- Abstract Shape Background -->
+<div class="absolute -right-8 -top-8 w-40 h-40 bg-on-secondary-container opacity-10 rounded-full blur-3xl"></div>
+</div>
+<!-- Progress Charts Section -->
+<div class="md:col-span-8 bg-surface-container-lowest p-8 rounded-3xl border border-outline-variant shadow-sm">
+<div class="flex justify-between items-center mb-8">
+<h3 class="font-headline-md text-headline-md text-on-surface">Learning Mastery</h3>
+<div class="flex gap-2">
+<span class="px-3 py-1 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm">This Week</span>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+<!-- Fluency -->
+<div class="space-y-4">
+<div class="flex justify-between items-end">
+<p class="font-label-md text-outline uppercase">Fluency</p>
+<p class="font-headline-md text-primary">85%</p>
+</div>
+<div class="h-32 flex items-end gap-1">
+<div class="w-full bg-primary-container opacity-20 h-[40%] rounded-t-lg"></div>
+<div class="w-full bg-primary-container opacity-40 h-[60%] rounded-t-lg"></div>
+<div class="w-full bg-primary-container opacity-60 h-[55%] rounded-t-lg"></div>
+<div class="w-full bg-primary-container opacity-80 h-[80%] rounded-t-lg"></div>
+<div class="w-full bg-primary h-[85%] rounded-t-lg"></div>
+</div>
+</div>
+<!-- Confidence -->
+<div class="space-y-4">
+<div class="flex justify-between items-end">
+<p class="font-label-md text-outline uppercase">Confidence</p>
+<p class="font-headline-md text-secondary">72%</p>
+</div>
+<div class="h-32 flex items-end gap-1">
+<div class="w-full bg-secondary-container opacity-20 h-[30%] rounded-t-lg"></div>
+<div class="w-full bg-secondary-container opacity-40 h-[40%] rounded-t-lg"></div>
+<div class="w-full bg-secondary-container opacity-60 h-[50%] rounded-t-lg"></div>
+<div class="w-full bg-secondary-container opacity-80 h-[65%] rounded-t-lg"></div>
+<div class="w-full bg-secondary h-[72%] rounded-t-lg"></div>
+</div>
+</div>
+<!-- Speech Velocity -->
+<div class="space-y-4">
+<div class="flex justify-between items-end">
+<p class="font-label-md text-outline uppercase">Speech</p>
+<p class="font-headline-md text-tertiary">92%</p>
+</div>
+<div class="h-32 flex items-end gap-1">
+<div class="w-full bg-tertiary-container opacity-20 h-[60%] rounded-t-lg"></div>
+<div class="w-full bg-tertiary-container opacity-40 h-[70%] rounded-t-lg"></div>
+<div class="w-full bg-tertiary-container opacity-60 h-[85%] rounded-t-lg"></div>
+<div class="w-full bg-tertiary-container opacity-80 h-[80%] rounded-t-lg"></div>
+<div class="w-full bg-tertiary h-[92%] rounded-t-lg"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Recent Scenarios Section -->
+<section>
+<div class="flex justify-between items-center mb-6">
+<h3 class="font-headline-md text-headline-md text-on-surface">Recent Scenarios</h3>
+<a class="text-primary font-label-md flex items-center gap-1 hover:underline" href="#">
+                        View All <span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</a>
+</div>
+<div class="flex gap-6 overflow-x-auto pb-6 custom-scroll -mx-4 px-4">
+<!-- Scenario 1 -->
+<div class="min-w-[280px] md:min-w-[340px] group cursor-pointer">
+<div class="relative h-48 rounded-2xl overflow-hidden mb-4 shadow-sm">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="A minimalist and high-quality photo of a modern corporate boardroom with a large sleek table, floor-to-ceiling windows showing a city skyline at dusk, and a professional, calm atmosphere. The lighting is soft and cinematic with cool blue and warm amber tones, following a clean corporate design style for a business meeting language learning scenario." src="https://lh3.googleusercontent.com/aida-public/AB6AXuABSiqx3yHFSd5UuhhJ_Ff4GM9ALesGJ8NiSawJt-vs26vBGlVnvjD5_S4ESt-2lp_AkyV-Vhu7vAgS4f7T-zk0mFu0XchnPqZ44AYBAebKjKvdXwzNCRffAhRtQDgT4Klie2ROFpMvTDP8z-pxF9SKaVIY5mO4dU9PVB5_flz0DGGm9f7glVphVT2jcBqBySkU78FH45JWVxsgZk45ASLddmgPpSdGFk5EriWkbdvgKPFhOwhVfWROcw"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+<div class="absolute bottom-4 left-4">
+<span class="bg-primary-container text-on-primary-container text-[10px] uppercase font-bold px-2 py-1 rounded">Business</span>
+</div>
+</div>
+<h4 class="font-label-md text-on-surface mb-1">Q3 Budget Presentation</h4>
+<p class="font-body-md text-outline text-sm">Practice articulating financial projections and handling tough questions.</p>
+<div class="mt-3 flex items-center gap-2">
+<div class="flex -space-x-2">
+<div class="w-6 h-6 rounded-full border-2 border-white bg-tertiary-container"></div>
+<div class="w-6 h-6 rounded-full border-2 border-white bg-primary-container"></div>
+</div>
+<span class="text-[12px] text-outline font-medium">8 colleagues joined</span>
+</div>
+</div>
+<!-- Scenario 2 -->
+<div class="min-w-[280px] md:min-w-[340px] group cursor-pointer">
+<div class="relative h-48 rounded-2xl overflow-hidden mb-4 shadow-sm">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="A warm and inviting interior of a high-end minimalist coffee shop. The image features light wood textures, plants, and a clean white marble counter. Soft natural daylight streams in, creating a peaceful and judgment-free space for social language practice. The aesthetic is modern, airy, and professional." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA5d7mYBjbYPD5G-NuFWsQOi6XZWKITX9wu6DUCFcVEoHTGMGBA-CGgQXhnOyktJtlA28kkJbLDdqD7Szsx7jXbsxltdC5O4GVSnIvRY5xvvDTLi0n3VvR7zekhSghYZ3HXbp1g70jT7urkSQ147Q2yRgoqbLL9H6MXu1FcbOHS0cP2xNfK0TNCTwO5nhAACfmBIB5MQKD5pCdclwZPPg5g0YgiTs8oB63ClHwEQWkJ7sW2uDhAbFwGqA"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+<div class="absolute bottom-4 left-4">
+<span class="bg-secondary-container text-on-secondary-container text-[10px] uppercase font-bold px-2 py-1 rounded">Social</span>
+</div>
+</div>
+<h4 class="font-label-md text-on-surface mb-1">Ordering at a Café</h4>
+<p class="font-body-md text-outline text-sm">Master casual interactions, dietary requests, and small talk.</p>
+<div class="mt-3 flex items-center gap-2">
+<span class="material-symbols-outlined text-success-green text-[18px]" style="color: #4CAF50">check_circle</span>
+<span class="text-[12px] text-outline font-medium">Completed Mastery</span>
+</div>
+</div>
+<!-- Scenario 3 -->
+<div class="min-w-[280px] md:min-w-[340px] group cursor-pointer">
+<div class="relative h-48 rounded-2xl overflow-hidden mb-4 shadow-sm">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="A futuristic airport terminal with architectural glass and steel, featuring soft atmospheric lighting and digital flight boards. The style is clean, sleek, and high-contrast, representing a travel scenario for language learning. The image is sophisticated and bright, matching a professional UI context." src="https://lh3.googleusercontent.com/aida-public/AB6AXuArvV_UVGHS9wxjcbyPcDMNi63eHiwChAaumAHj2HF3W-MdMDy9xLC1XHc4Rc5XpEUSm-TSTadJkk834f-OFKaMhK6M0VkkLJd7rxvp0dZb73-pDJaktzA2WequhYjbJYL29pucNyJxNbW5P7tDVCuhDqomkfrCKJc1VO8J-sTMFm3-3p7zfudgmhq5NLDCzmxdvv-csRHKXS-2Ct6i20z2MXZj2MvoGyQxgG04HpO9qJ7N1zBYXH35Ow"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+<div class="absolute bottom-4 left-4">
+<span class="bg-tertiary-container text-on-tertiary-container text-[10px] uppercase font-bold px-2 py-1 rounded">Travel</span>
+</div>
+</div>
+<h4 class="font-label-md text-on-surface mb-1">Flight Connection Issues</h4>
+<p class="font-body-md text-outline text-sm">Learn to negotiate and solve travel problems under pressure.</p>
+<div class="mt-3 flex items-center gap-2">
+<div class="w-full bg-surface-container-high h-1 rounded-full overflow-hidden">
+<div class="bg-primary h-full w-1/3"></div>
+</div>
+<span class="text-[12px] text-outline font-medium whitespace-nowrap">30% Progress</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+</div>
+<!-- Mobile Bottom Navigation (Logic Mandate) -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full z-50 bg-surface-container-lowest shadow-[0_-4px_10px_rgba(0,0,0,0.05)] flex justify-around items-center px-4 py-3 pb-6 rounded-t-xl">
+<a class="flex flex-col items-center justify-center bg-primary-container text-on-primary-container rounded-full px-5 py-1 transition-transform active:scale-90 duration-150" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-label-sm text-label-sm">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:bg-surface-container-high px-5 py-1 transition-colors" href="#">
+<span class="material-symbols-outlined">explore</span>
+<span class="font-label-sm text-label-sm">Explore</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:bg-surface-container-high px-5 py-1 transition-colors" href="#">
+<span class="material-symbols-outlined">insights</span>
+<span class="font-label-sm text-label-sm">Progress</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:bg-surface-container-high px-5 py-1 transition-colors" href="#">
+<span class="material-symbols-outlined">person</span>
+<span class="font-label-sm text-label-sm">Profile</span>
+</a>
+</nav>
+<!-- Contextual FAB for Home -->
+<button class="fixed bottom-24 right-6 md:bottom-10 md:right-10 w-16 h-16 bg-primary text-on-primary rounded-full shadow-2xl flex items-center justify-center z-50 hover:scale-110 active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-[32px]" style="font-variation-settings: 'FILL' 1;">mic</span>
+</button>
+<script>
+        // Simple micro-interaction for active states
+        const navLinks = document.querySelectorAll('nav a');
+        navLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                // If this were a real SPA, we'd handle routing here
+                // For now, we'll just demonstrate the active class logic
+            });
+        });
+
+        // Atmospheric effect: subtle parallax on scenario cards
+        document.querySelectorAll('.group').forEach(card => {
+            card.addEventListener('mousemove', (e) => {
+                const img = card.querySelector('img');
+                const { left, top, width, height } = card.getBoundingClientRect();
+                const x = (e.clientX - left) / width;
+                const y = (e.clientY - top) / height;
+                img.style.transformOrigin = `${x * 100}% ${y * 100}%`;
+            });
+        });
+    </script>
+</body></html>

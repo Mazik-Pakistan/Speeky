@@ -1,0 +1,40 @@
+# Core dependencies
+numpy==1.24.3
+sounddevice==0.4.6
+pydub==0.25.1
+
+# ASR and VAD
+faster-whisper==0.9.0
+torch==2.0.1
+torchaudio==2.0.2
+silero-vad==5.1
+
+# NLP and Grammar
+spacy==3.7.2
+transformers==4.35.2
+gramformer==0.9.2
+
+# TTS
+piper-tts==1.2.0
+
+# Audio processing
+librosa==0.10.1
+
+# Phoneme conversion
+g2p-en==2.1.0
+
+# Optional: WhisperX for advanced alignment (uncomment if needed)
+# whisperx==3.1.1
+
+# Fluency analysis
+lexicalrichness==0.5.0
+pandas==2.1.4
+
+# HTTP requests for Ollama
+requests==2.31.0
+
+# Web UI
+flask==3.0.0
+
+# Utilities
+scipy==1.11.4

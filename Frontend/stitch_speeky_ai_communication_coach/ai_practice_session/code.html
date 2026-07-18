@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Speeky - AI Practice Session</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:wght@400;600;700&amp;family=Manrope:wght@400;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                "on-secondary-fixed-variant": "#92030f",
+                "outline": "#757682",
+                "on-background": "#1a1b21",
+                "surface-container-highest": "#e3e1e9",
+                "surface-bright": "#faf8ff",
+                "surface": "#faf8ff",
+                "inverse-primary": "#b5c4ff",
+                "secondary-fixed-dim": "#ffb4ac",
+                "surface-container-high": "#e9e7ef",
+                "secondary": "#b52424",
+                "on-error-container": "#93000a",
+                "inverse-surface": "#2f3036",
+                "outline-variant": "#c5c6d3",
+                "error-container": "#ffdad6",
+                "tertiary-container": "#3c4144",
+                "on-secondary-fixed": "#410003",
+                "primary-container": "#1d3b8a",
+                "on-surface-variant": "#444651",
+                "tertiary-fixed": "#dfe3e7",
+                "tertiary-fixed-dim": "#c3c7cb",
+                "primary-fixed-dim": "#b5c4ff",
+                "primary": "#00246e",
+                "on-tertiary-fixed-variant": "#43474b",
+                "on-primary-container": "#90a9ff",
+                "on-error": "#ffffff",
+                "secondary-fixed": "#ffdad6",
+                "primary-fixed": "#dbe1ff",
+                "inverse-on-surface": "#f1f0f7",
+                "error": "#ba1a1a",
+                "on-secondary-container": "#600006",
+                "secondary-container": "#ff5a52",
+                "on-secondary": "#ffffff",
+                "surface-variant": "#e3e1e9",
+                "on-tertiary-fixed": "#171c1f",
+                "surface-dim": "#dad9e0",
+                "surface-container-low": "#f4f3fa",
+                "background": "#faf8ff",
+                "tertiary": "#262b2e",
+                "on-tertiary-container": "#a8adb1",
+                "on-tertiary": "#ffffff",
+                "on-surface": "#1a1b21",
+                "on-primary-fixed-variant": "#254190",
+                "surface-container": "#eeedf4",
+                "surface-container-lowest": "#ffffff",
+                "surface-tint": "#3f5aaa",
+                "on-primary-fixed": "#00174d",
+                "on-primary": "#ffffff"
+            },
+            "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "full": "9999px"
+            },
+            "spacing": {
+                "stack-sm": "8px",
+                "stack-lg": "32px",
+                "stack-md": "16px",
+                "margin-mobile": "16px",
+                "unit": "8px",
+                "container-max-width": "1280px",
+                "margin-desktop": "40px",
+                "gutter": "24px"
+            },
+            "fontFamily": {
+                "body-md": ["Manrope"],
+                "headline-lg": ["Libre Caslon Text"],
+                "headline-lg-mobile": ["Libre Caslon Text"],
+                "display-lg": ["Libre Caslon Text"],
+                "label-md": ["Manrope"],
+                "headline-md": ["Libre Caslon Text"],
+                "label-sm": ["Manrope"],
+                "body-lg": ["Manrope"]
+            },
+            "fontSize": {
+                "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                "headline-lg": ["32px", {"lineHeight": "40px", "fontWeight": "600"}],
+                "headline-lg-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "600"}],
+                "display-lg": ["48px", {"lineHeight": "56px", "fontWeight": "700"}],
+                "label-md": ["14px", {"lineHeight": "20px", "letterSpacing": "0.02em", "fontWeight": "600"}],
+                "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                "label-sm": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+
+        @keyframes pulse-ring {
+            0% { transform: scale(0.33); opacity: 0; }
+            50% { opacity: 0.5; }
+            100% { transform: scale(1.2); opacity: 0; }
+        }
+
+        .pulse-animation {
+            animation: pulse-ring 2.5s cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite;
+        }
+
+        .chat-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        .chat-container::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen flex flex-col overflow-hidden">
+<!-- Top Navigation (Shell Implementation) -->
+<header class="bg-surface dark:bg-background flex justify-between items-center px-margin-desktop h-16 w-full z-50">
+<div class="flex items-center gap-4">
+<h1 class="font-headline-lg text-headline-lg text-primary">Speeky</h1>
+<div class="h-6 w-[1px] bg-outline-variant mx-2"></div>
+<span class="font-label-md text-label-md text-on-surface-variant flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">auto_awesome</span>
+                AI Coaching Session
+            </span>
+</div>
+<div class="flex items-center gap-stack-lg">
+<div class="hidden md:flex gap-stack-md">
+<button class="font-label-md text-label-md text-primary font-bold transition-transform active:scale-95 px-4 py-2 rounded-full hover:bg-surface-container-low">Session</button>
+<button class="font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-low px-4 py-2 rounded-full transition-all">Review</button>
+<button class="font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-low px-4 py-2 rounded-full transition-all">Resources</button>
+</div>
+<button class="p-2 rounded-full hover:bg-surface-container-low text-on-surface-variant transition-transform active:scale-95">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<div class="w-10 h-10 rounded-full bg-primary-container overflow-hidden border border-outline-variant">
+<img class="w-full h-full object-cover" data-alt="A professional high-resolution headshot of a friendly user for a language learning profile. The lighting is soft and warm, set against a clean, minimalist architectural background. The image has a modern, corporate yet approachable aesthetic consistent with the Speeky brand's light-mode color palette of soft whites and deep blues." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDiVXaNfAwxY14DYgs6x4QDVK2Ezj4WPe_pLsVPYDHG2P2BERs-M5MS5D-f9amhR1e62dw_DIzRr46wZPlrWxVYBNltNLyihlZPfTE8TSLgTqEO3V26FHakp93hM3ceWtZ78WuOiQ6Pkl8gmnLKDCdwRghDjpQOfgxpIMCpx-chaGk-Dr2EY9u_YJBC8VE6pE-3M_anLJpaO2Wck0eKriFpRuenedLRZVJoSCqSr4a49-we-DAIKyiUfQ"/>
+</div>
+</div>
+</header>
+<!-- Main Content Area: Split-Screen/Focused Interface -->
+<main class="flex-grow flex flex-row overflow-hidden p-margin-desktop gap-gutter relative">
+<!-- Left Side: AI Interface & Visuals -->
+<div class="hidden lg:flex flex-1 flex-col gap-gutter">
+<div class="flex-1 rounded-xl glass-card border border-white/40 shadow-sm p-stack-lg flex flex-col items-center justify-center relative overflow-hidden">
+<!-- AI Coach Avatar/Visualization -->
+<div class="relative z-10 flex flex-col items-center">
+<div class="relative w-48 h-48 mb-stack-lg">
+<!-- Pulse Rings -->
+<div class="absolute inset-0 bg-primary/20 rounded-full pulse-animation" style="animation-delay: 0s;"></div>
+<div class="absolute inset-0 bg-primary/10 rounded-full pulse-animation" style="animation-delay: 0.8s;"></div>
+<div class="absolute inset-0 bg-primary/5 rounded-full pulse-animation" style="animation-delay: 1.6s;"></div>
+<div class="absolute inset-0 flex items-center justify-center">
+<div class="w-32 h-32 rounded-full bg-white border-2 border-primary-container shadow-lg flex items-center justify-center overflow-hidden">
+<img class="w-24 h-24 object-contain" data-alt="A sophisticated AI coach representation styled as a friendly, stylized robotic bird in a clean, professional vector illustration. The bird is royal blue with white accents and subtle red details, echoing the Speeky brand logo. The background is a crisp, high-key white, evoking an atmosphere of clarity, growth, and intelligent guidance." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBvWrKk9IojUvZ_069v0oOsduBWKJgnBTVS_XQm0gqZw2TenUTdmTFhUlRsDb0Oo-ez4MUdDKql67r439cwBWGjxCtquHqh_gUlORU593VuLgypYOn4AFb6Upamm2n7OsVYZj60m5RBL_RMxTeU_oYalN1JoOto5OBJlmB5Y13FHZU-V57Yz9myOjMR_rq3nEMo8h-WQpadnMo4ZXdRcXpiJJfa5REg8Mjv6X6pMOOaLc1_TP8CMh4b2w"/>
+</div>
+</div>
+</div>
+<h2 class="font-headline-md text-headline-md text-primary mb-2">Coach Elara</h2>
+<p class="font-label-md text-label-md text-on-surface-variant text-center max-w-xs">Practicing: "Workplace Collaboration and Technical Discussion"</p>
+</div>
+<!-- Animated Background for AI side -->
+<div class="absolute inset-0 opacity-10 pointer-events-none">
+
+</div>
+<!-- Stats Cards (Bento style) -->
+<div class="grid grid-cols-2 gap-4 w-full mt-auto">
+<div class="bg-white/60 p-4 rounded-lg border border-white/80">
+<span class="text-label-sm font-label-sm text-outline block mb-1">ACCURACY</span>
+<span class="text-headline-md font-headline-md text-on-surface">92%</span>
+</div>
+<div class="bg-white/60 p-4 rounded-lg border border-white/80">
+<span class="text-label-sm font-label-sm text-outline block mb-1">FLUENCY</span>
+<span class="text-headline-md font-headline-md text-secondary">High</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Side: Chat & Real-time Transcript -->
+<div class="flex-[1.5] flex flex-col gap-stack-md h-full">
+<div class="flex-grow glass-card rounded-xl border border-white/40 shadow-sm flex flex-col overflow-hidden">
+<!-- Chat Header -->
+<div class="px-6 py-4 border-b border-outline-variant flex justify-between items-center bg-white/40">
+<div class="flex items-center gap-3">
+<span class="w-3 h-3 rounded-full bg-green-500 animate-pulse"></span>
+<span class="font-label-md text-label-md font-bold text-on-surface">Live Transcription</span>
+</div>
+<div class="flex gap-2">
+<button class="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]">translate</span>
+</button>
+<button class="p-2 rounded-lg hover:bg-surface-container-high text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]">history</span>
+</button>
+</div>
+</div>
+<!-- Chat Body -->
+<div class="flex-grow overflow-y-auto chat-container p-6 space-y-8" id="chat-stream">
+<!-- AI Message -->
+<div class="flex flex-col items-start max-w-[80%]">
+<div class="flex items-center gap-2 mb-2">
+<span class="font-label-sm text-label-sm text-primary font-bold uppercase tracking-wider">Coach</span>
+</div>
+<div class="bg-white border border-primary-container/20 rounded-2xl rounded-tl-none p-4 shadow-sm text-body-md font-body-md leading-relaxed text-on-surface">
+                            That's a great point about team synchronization. How would you describe the technical debt we encountered during the last sprint using more formal project management terminology?
+                        </div>
+</div>
+<!-- User Message -->
+<div class="flex flex-col items-end max-w-[80%] ml-auto">
+<div class="flex items-center gap-2 mb-2">
+<span class="font-label-sm text-label-sm text-outline font-bold uppercase tracking-wider">You</span>
+</div>
+<div class="bg-primary text-on-primary rounded-2xl rounded-tr-none p-4 shadow-md text-body-md font-body-md leading-relaxed">
+                            I think we should emphasize the cumulative impact of our architectural shortcuts. We need to prioritize refactoring to avoid scaling bottlenecks later on.
+                        </div>
+<!-- Feedback Chip -->
+<div class="mt-2 flex gap-2">
+<span class="px-3 py-1 bg-green-100 text-green-800 rounded-full text-label-sm font-label-sm flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                                Advanced Vocabulary
+                            </span>
+</div>
+</div>
+<!-- AI Message (Feedback) -->
+<div class="flex flex-col items-start max-w-[80%]">
+<div class="flex items-center gap-2 mb-2">
+<span class="font-label-sm text-label-sm text-primary font-bold uppercase tracking-wider">Coach</span>
+</div>
+<div class="bg-white border border-primary-container/20 rounded-2xl rounded-tl-none p-4 shadow-sm text-body-md font-body-md leading-relaxed text-on-surface">
+                            Excellent use of "scaling bottlenecks" and "architectural shortcuts." It sounds very professional. Let's try to expand on the "bottlenecks"—what specifically might be affected?
+                        </div>
+</div>
+</div>
+<!-- Active Voice Bar (Listening State) -->
+<div class="p-6 bg-surface-container-low border-t border-outline-variant">
+<div class="flex flex-col items-center gap-stack-md">
+<!-- Listening Visualization -->
+<div class="flex items-center gap-1 h-8">
+<div class="w-1 bg-primary rounded-full animate-[bounce_1s_infinite_100ms]" style="height: 60%"></div>
+<div class="w-1 bg-primary rounded-full animate-[bounce_1s_infinite_200ms]" style="height: 100%"></div>
+<div class="w-1 bg-primary rounded-full animate-[bounce_1s_infinite_300ms]" style="height: 80%"></div>
+<div class="w-1 bg-primary rounded-full animate-[bounce_1s_infinite_400ms]" style="height: 120%"></div>
+<div class="w-1 bg-primary rounded-full animate-[bounce_1s_infinite_500ms]" style="height: 40%"></div>
+<div class="w-1 bg-primary rounded-full animate-[bounce_1s_infinite_600ms]" style="height: 90%"></div>
+</div>
+<!-- Main Controls -->
+<div class="flex items-center gap-6">
+<button class="w-12 h-12 flex items-center justify-center rounded-full border border-outline text-on-surface-variant hover:bg-white transition-all active:scale-95">
+<span class="material-symbols-outlined">pause</span>
+</button>
+<button class="w-20 h-20 bg-primary text-white rounded-full flex items-center justify-center shadow-lg hover:bg-primary-container transition-all scale-110 active:scale-95 group" id="mic-toggle">
+<span class="material-symbols-outlined text-[36px]" style="font-variation-settings: 'FILL' 1;">mic</span>
+</button>
+<button class="w-12 h-12 flex items-center justify-center rounded-full border border-secondary text-secondary hover:bg-secondary-fixed transition-all active:scale-95">
+<span class="material-symbols-outlined">call_end</span>
+</button>
+</div>
+<p class="font-label-md text-label-md text-on-surface-variant animate-pulse mt-2">Listening to your response...</p>
+</div>
+</div>
+</div>
+<!-- Context Hint Card (Asymmetric Layout element) -->
+<div class="h-32 rounded-xl bg-primary-container text-on-primary-container p-5 flex items-center justify-between shadow-sm relative overflow-hidden group">
+<div class="relative z-10">
+<h3 class="font-label-md text-label-md font-bold mb-1">PRO TIP</h3>
+<p class="text-body-md font-body-md max-w-md">Try using the word <strong class="underline decoration-secondary-container">"mitigate"</strong> to sound more authoritative in this context.</p>
+</div>
+<div class="p-3 bg-white/20 rounded-lg backdrop-blur-sm z-10">
+<span class="material-symbols-outlined text-[32px]">lightbulb</span>
+</div>
+<!-- Subtle background design -->
+<div class="absolute -right-4 -bottom-4 w-24 h-24 bg-white/10 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
+</div>
+</div>
+</main>
+<!-- Bottom Notification Toast (Micro-interaction) -->
+<div class="fixed bottom-10 left-1/2 -translate-x-1/2 translate-y-20 opacity-0 transition-all duration-500 bg-tertiary text-on-tertiary px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 z-[60]" id="toast">
+<span class="material-symbols-outlined text-green-400">task_alt</span>
+<span class="font-label-md text-label-md">Excellent grammar! Streak maintained.</span>
+</div>
+<script>
+        // Micro-interactions and Session Management
+        document.addEventListener('DOMContentLoaded', () => {
+            const micBtn = document.getElementById('mic-toggle');
+            const chatStream = document.getElementById('chat-stream');
+            const toast = document.getElementById('toast');
+
+            let isRecording = true;
+
+            micBtn.addEventListener('click', () => {
+                isRecording = !isRecording;
+                if (isRecording) {
+                    micBtn.classList.remove('bg-secondary', 'hover:bg-secondary-container');
+                    micBtn.classList.add('bg-primary', 'hover:bg-primary-container');
+                    micBtn.querySelector('span').innerText = 'mic';
+                } else {
+                    micBtn.classList.remove('bg-primary', 'hover:bg-primary-container');
+                    micBtn.classList.add('bg-secondary', 'hover:bg-secondary-container');
+                    micBtn.querySelector('span').innerText = 'mic_off';
+                }
+            });
+
+            // Simulate a toast appearing after a delay
+            setTimeout(() => {
+                toast.classList.remove('translate-y-20', 'opacity-0');
+                toast.classList.add('translate-y-0', 'opacity-100');
+                
+                setTimeout(() => {
+                    toast.classList.add('translate-y-20', 'opacity-0');
+                    toast.classList.remove('translate-y-0', 'opacity-100');
+                }, 4000);
+            }, 5000);
+
+            // Keep scroll at bottom
+            const scrollToBottom = () => {
+                chatStream.scrollTop = chatStream.scrollHeight;
+            };
+            scrollToBottom();
+        });
+    </script>
+</body></html>
