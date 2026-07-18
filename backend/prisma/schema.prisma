@@ -154,6 +154,25 @@ model PromptLog {
   @@map("prompt_logs")
 }
 
+// Generic persistent key/value store backing the ported Interview Coach
+// (US-40/42/43/44/45), Session & Memory (US-28), and Resume/JD Intake (US-39)
+// features. Those features carry rich nested session state as JSON blobs; rather
+// than normalize each into its own table, they persist through lib/kv_store.py
+// against this one table (namespace groups a feature's records; value is the blob).
+model KvEntry {
+  namespace String
+  key       String
+  userId    String?
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@id([namespace, key])
+  @@index([namespace])
+  @@index([userId])
+  @@map("kv_entries")
+}
+
 model RefreshToken {
   id        String   @id @default(cuid())
   tokenHash String   @unique

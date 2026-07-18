@@ -21,6 +21,9 @@ Backend/app/routers/__pycache__/
 Backend/app/schemas/__pycache__/
 Backend/app/services/__pycache__/
 Backend/app/services/sso/__pycache__/
+Backend/services/__pycache__/
+Backend/utils/__pycache__/
+__pycache__/
 skills-lock.json
 .devin/
 speeky/__pycache__/
