@@ -26,6 +26,7 @@ from .response import ConversationEngine
 from .tts import TextToSpeech
 from .asr import AutomaticSpeechRecognition
 from .pronunciation import PronunciationScorer
+from .interview_scenarios import UniversityAdmissionSession
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,9 @@ class SessionManager:
         # Every turn (voice or text) gets logged here for the final scorecard
         self.turns: List[Dict] = []
 
+        # US-50: University Admission scenario (None until explicitly started)
+        self.university_session: Optional[UniversityAdmissionSession] = None
+
     # ------------------------------------------------------------------
     # Lazy-loaded components
     # ------------------------------------------------------------------
@@ -91,6 +95,21 @@ class SessionManager:
         if self._pronunciation_scorer is None:
             self._pronunciation_scorer = PronunciationScorer()
         return self._pronunciation_scorer
+
+    # ------------------------------------------------------------------
+    # US-50: University Admission scenario setup
+    # ------------------------------------------------------------------
+    def start_university_admission(self, degree_text: str) -> Dict:
+        """Start (or restart) a University Admission Interview scenario."""
+        self.university_session = UniversityAdmissionSession(self.conversation_engine)
+        result = self.university_session.set_degree(degree_text)
+        return result
+
+    def get_university_question(self) -> Dict:
+        """Get the next admission interview question (US-50)."""
+        if self.university_session is None:
+            return {"status": "error", "ai_message": "Start a university admission session first."}
+        return self.university_session.get_question()
 
     # ------------------------------------------------------------------
     # US-37: Mode switching
@@ -157,9 +176,14 @@ class SessionManager:
             except Exception as e:
                 logger.warning(f"Pronunciation scoring skipped: {e}")
 
-        # Get the AI's reply - conversation_history inside conversation_engine
-        # is what preserves context across the voice<->text switch.
-        ai_response = self.conversation_engine.generate_response(user_text, context_type)
+        # US-50: route to University Admission scenario if active
+        if context_type == "university_admission" and self.university_session is not None:
+            scenario_result = self.university_session.submit_answer(user_text)
+            ai_response = scenario_result["ai_message"]
+        else:
+            # Get the AI's reply - conversation_history inside conversation_engine
+            # is what preserves context across the voice<->text switch.
+            ai_response = self.conversation_engine.generate_response(user_text, context_type)
 
         turn = {
             "mode": InputMode.VOICE.value,
@@ -201,7 +225,12 @@ class SessionManager:
         self.cached_text = None
         self.connection_status = "online"
 
-        ai_response = self.conversation_engine.generate_response(final_text, context_type)
+        # US-50: route to University Admission scenario if active
+        if context_type == "university_admission" and self.university_session is not None:
+            scenario_result = self.university_session.submit_answer(final_text)
+            ai_response = scenario_result["ai_message"]
+        else:
+            ai_response = self.conversation_engine.generate_response(final_text, context_type)
 
         turn = {
             "mode": InputMode.TEXT.value,
