@@ -1,0 +1,15 @@
+node_modules/
+tests/
+*.pyc
+.venv/
+.DS_Store
+
+uploads/*
+__pycache__/
+*.env.
+*.env.*
+*.zip
+
+!.env.example
+!uploads/avatars/
+!uploads/avatars/user.webp
