@@ -229,12 +229,9 @@ async def confirm_skip_assessment(user_id: str = Depends(require_auth)):
     await db.user.update(where={"id": user_id}, data={"assessmentStatus": AssessmentStatus.UNASSESSED})
     await db.promptlog.create(data={"userId": user_id, "kind": PromptKind.SKIP_ASSESSMENT})
 
-    features = await get_accessible_features(user_id)
     return {
         "success": True,
         "status": "unassessed",
         "message": "Assessment skipped. Complete it later to unlock all features.",
-        "accessible_features": features["accessible_features"],
-        "inaccessible_features": features.get("inaccessible_features", []),
-        "locked_message": features.get("locked_message"),
+        "accessible_features": await get_accessible_features(user_id),
     }

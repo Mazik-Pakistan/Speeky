@@ -17,3 +17,16 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  voice-agent:
+    build: ./voice_agent
+    container_name: speeky-voice-agent
+    restart: unless-stopped
+    environment:
+      LIVEKIT_URL: ${LIVEKIT_URL}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      INTERNAL_AGENT_SECRET: ${INTERNAL_AGENT_SECRET}
+      BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:8000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
