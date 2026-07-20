@@ -10,7 +10,9 @@ so this suite monkeypatches db access where a session needs to exist already.
 
 import pytest
 
-from lib import grammar_checker, kv_store, llm_client, pii, prompts, tts_client
+from lib import grammar_checker, kv_store, livekit_tokens, llm_client, pii, prompts, tts_client
+from middlewares.error_handler import AuthError
+from schemas.coaching_schemas import AudioFeaturesSchema
 from services import conversation_service as cvs
 
 
@@ -274,3 +276,102 @@ async def test_transcript_reflects_turns():
 def test_tts_not_configured_when_model_missing(monkeypatch):
     monkeypatch.setattr(tts_client, "PiperVoice", None)
     assert tts_client.is_configured() is False
+
+
+# ── AIC-US-16: voice mode (LiveKit token + agent transcript intake) ────────────────
+def test_voice_token_not_configured_by_default(monkeypatch):
+    monkeypatch.delenv("LIVEKIT_URL", raising=False)
+    monkeypatch.delenv("LIVEKIT_API_KEY", raising=False)
+    monkeypatch.delenv("LIVEKIT_API_SECRET", raising=False)
+    assert livekit_tokens.is_configured() is False
+
+
+async def test_voice_token_mints_token_for_session_room(monkeypatch):
+    monkeypatch.setenv("LIVEKIT_URL", "wss://example.livekit.cloud")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "fake-key")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "fake-secret")
+    session = await cvs._start_session("user-14", cvs.StartConversationSchema(topic_key="daily_life"))
+    result = await cvs._voice_token("user-14", session["session_id"])
+    assert result["room"] == session["session_id"]
+    assert result["token"]
+
+
+async def test_agent_send_message_rejects_wrong_secret(monkeypatch):
+    monkeypatch.setenv("INTERNAL_AGENT_SECRET", "correct-secret")
+    with pytest.raises(AuthError):
+        await cvs._agent_send_message("some-session", cvs.SendMessageSchema(text="hi"), "wrong-secret")
+
+
+async def test_agent_send_message_rejects_missing_secret(monkeypatch):
+    monkeypatch.delenv("INTERNAL_AGENT_SECRET", raising=False)
+    with pytest.raises(AuthError):
+        await cvs._agent_send_message("some-session", cvs.SendMessageSchema(text="hi"), None)
+
+
+async def test_agent_send_message_feeds_audio_pipeline(monkeypatch):
+    monkeypatch.setenv("INTERNAL_AGENT_SECRET", "correct-secret")
+    session = await cvs._start_session("user-15", cvs.StartConversationSchema(topic_key="daily_life"))
+    session_id = session["session_id"]
+
+    payload = cvs.SendMessageSchema(
+        input_mode="audio",
+        audio_features=AudioFeaturesSchema(
+            transcript="I usually read books and go for long walks on weekends",
+            duration_seconds=6.0,
+        ),
+    )
+    reply = await cvs._agent_send_message(session_id, payload, "correct-secret")
+    assert reply["reply"]
+
+    feedback = await cvs._end_session("user-15", session_id)
+    assert feedback["status"] == "completed"
+    assert feedback["pronunciation_score"] is not None  # AUDIO pipeline ran, not TEXT
+
+
+async def test_send_message_stores_audio_turn_timing(monkeypatch):
+    """duration_seconds/word_timings from the agent's AudioFeaturesSchema must survive
+    onto the stored turn — _end_session's scoring aggregation reads them from there."""
+    monkeypatch.setenv("INTERNAL_AGENT_SECRET", "correct-secret")
+    session = await cvs._start_session("user-16", cvs.StartConversationSchema(topic_key="daily_life"))
+    session_id = session["session_id"]
+
+    payload = cvs.SendMessageSchema(
+        input_mode="audio",
+        audio_features=AudioFeaturesSchema(
+            transcript="hello world", duration_seconds=1.2,
+            word_timings=[
+                {"word": "hello", "start": 0.0, "end": 0.4},
+                {"word": "world", "start": 0.7, "end": 1.1},
+            ],
+        ),
+    )
+    await cvs._agent_send_message(session_id, payload, "correct-secret")
+
+    stored = await kv_store.store.get(cvs.NAMESPACE, session_id)
+    user_turn = next(t for t in stored["turns"] if t["role"] == "user")
+    assert user_turn["duration_seconds"] == 1.2
+    assert user_turn["word_timings"] == payload.audio_features.word_timings
+
+
+def test_aggregate_audio_turns_derives_per_turn_timing():
+    """aggregate_audio_turns must derive speech_rate/pause_count per turn, not by
+    concatenating word_timings across turns (a turn boundary includes the AI's reply,
+    so gluing raw timings would count that gap as user pause time)."""
+    from lib.session_scorer import AudioFeatures, aggregate_audio_turns
+
+    turn1 = AudioFeatures(
+        transcript="hello world", duration_seconds=1.2,
+        word_timings=[{"word": "hello", "start": 0.0, "end": 0.4}, {"word": "world", "start": 0.7, "end": 1.1}],
+    )
+    turn2 = AudioFeatures(
+        transcript="foo bar", duration_seconds=0.8,
+        word_timings=[{"word": "foo", "start": 0.0, "end": 0.3}, {"word": "bar", "start": 0.35, "end": 0.6}],
+    )
+
+    result = aggregate_audio_turns([turn1, turn2])
+
+    assert result.transcript == "hello world foo bar"
+    assert result.duration_seconds == pytest.approx(2.0)
+    assert result.pause_count == 1  # only turn1's 0.3s gap clears the 0.2s threshold
+    assert result.mean_pause_duration == pytest.approx(0.3)
+    assert result.speech_rate == pytest.approx(2.0)  # 4 words / 2.0s combined duration
