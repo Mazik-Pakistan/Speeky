@@ -25,18 +25,30 @@ What is deliberately NOT handled here (client/device concerns, not backend):
     session_type="conversation" and this session's id into those existing endpoints.
 """
 
+import os
 import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
-from fastapi import Depends
+from fastapi import Depends, Header
 from fastapi.responses import JSONResponse, Response
 
-from lib import ai_client, grammar_checker, kv_store, llm_client, pii, prompts, session_scorer, tts_client
+from lib import (
+    ai_client,
+    grammar_checker,
+    kv_store,
+    livekit_tokens,
+    llm_client,
+    pii,
+    prompts,
+    session_scorer,
+    tts_client,
+)
 from lib.session_scorer import AudioFeatures
 from middlewares.auth_middleware import require_auth
+from middlewares.error_handler import AuthError
 from prisma.enums import LearningLevel
 from schemas.conversation_schemas import (
     MemoryOptOutSchema,
@@ -304,6 +316,7 @@ async def _start_session(user_id: str, req: StartConversationSchema) -> Dict:
         "show_corrections": req.show_corrections,
         "turns": [], "status": "active",
         "message_timestamps": [], "gibberish_strikes": 0, "pii_reminder_shown": False,
+        "room_name": session_id,  # LiveKit room for voice mode — session_id is already "conv_..."
         "started_at": now, "completed_at": None,
     }
 
@@ -366,6 +379,8 @@ async def _send_message(user_id: str, session_id: str, req: SendMessageSchema) -
     session["turns"].append({
         "role": "user", "content": redacted_text, "input_mode": req.input_mode,
         "correction_chip": chip_result["chip"], "created_at": now,
+        "duration_seconds": req.audio_features.duration_seconds if req.audio_features else 0.0,
+        "word_timings": req.audio_features.word_timings if req.audio_features else [],
     })
 
     if session_ended:
@@ -391,6 +406,27 @@ async def _send_message(user_id: str, session_id: str, req: SendMessageSchema) -
     }
 
 
+# ── AIC-US-16 (voice mode): LiveKit room token + agent-fed transcript intake ────
+async def _voice_token(user_id: str, session_id: str) -> Dict:
+    session = await _get_session(session_id, user_id)  # raises SessionNotFoundError if not owned
+    return livekit_tokens.mint_room_token(session["room_name"], identity=user_id)
+
+
+async def _agent_send_message(session_id: str, req: SendMessageSchema, secret: Optional[str]) -> Dict:
+    """Internal-only intake for the voice_agent/ worker — not a browser caller, so it
+    can't hold the user's auth cookie. Trusted via a shared secret instead, and the
+    user_id is read from the session itself, never taken from the caller."""
+    expected = os.environ.get("INTERNAL_AGENT_SECRET")
+    if not expected or secret != expected:
+        raise AuthError("Invalid internal secret")
+
+    session = await kv_store.store.get(NAMESPACE, session_id)
+    if session is None:
+        raise SessionNotFoundError(f"Conversation session {session_id} not found")
+
+    return await _send_message(session["user_id"], session_id, req)
+
+
 # ── end session: score + memory extraction ─────────────────────────────────────
 async def _end_session(user_id: str, session_id: str) -> Dict:
     session = await _get_session(session_id, user_id)
@@ -402,10 +438,12 @@ async def _end_session(user_id: str, session_id: str) -> Dict:
     has_audio_turn = any(t["input_mode"] == "audio" for t in user_turns)
 
     if has_audio_turn:
-        # Hybrid-mode duration/pronunciation aren't tracked per-turn here (no raw audio
-        # signal stored between turns) — scored as an audio session using the combined
-        # transcript, matching the AUDIO pipeline's text-derived fallback path.
-        scored = session_scorer.score_audio_session(AudioFeatures(transcript=full_text))
+        per_turn = [
+            AudioFeatures(transcript=t["content"], duration_seconds=t.get("duration_seconds", 0.0),
+                          word_timings=t.get("word_timings", []))
+            for t in user_turns
+        ]
+        scored = session_scorer.score_audio_session(session_scorer.aggregate_audio_turns(per_turn))
     else:
         scored = session_scorer.score_text_session(full_text)
 
@@ -515,6 +553,25 @@ async def start_session(payload: StartConversationSchema, user_id: str = Depends
 
 async def send_message(session_id: str, payload: SendMessageSchema, user_id: str = Depends(require_auth)):
     return await _send_message(user_id, session_id, payload)
+
+
+async def voice_token(session_id: str, user_id: str = Depends(require_auth)):
+    gate = await _require_access(user_id)
+    if gate:
+        return gate
+    if not livekit_tokens.is_configured():
+        return JSONResponse(status_code=503, content={
+            "error": "Voice mode unavailable. Use text mode instead.",
+        })
+    return await _voice_token(user_id, session_id)
+
+
+async def agent_send_message(
+    session_id: str,
+    payload: SendMessageSchema,
+    x_internal_secret: Optional[str] = Header(None),
+):
+    return await _agent_send_message(session_id, payload, x_internal_secret)
 
 
 async def end_session(session_id: str, user_id: str = Depends(require_auth)):

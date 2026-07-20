@@ -211,6 +211,22 @@ uv run pytest
 Fully offline — `tests/conftest.py` forces the LLM offline and swaps the KV store for an
 in-process one, so no network or DB connection is needed.
 
+### 6. (Optional) Start the voice agent for AI Conversation Practice's voice mode
+
+`voice_agent/` is a separate LiveKit worker (own deps — faster-whisper/silero/torch don't
+belong in the main API's `pyproject.toml`) that transcribes mic audio and posts turns back
+to this API. `docker compose up` starts it alongside Postgres:
+
+```bash
+docker compose up
+```
+
+It reads `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` / `INTERNAL_AGENT_SECRET`
+from the same `.env` this API uses, and reaches the API (running on the host via step 4,
+not in Docker) at `BACKEND_URL` (defaults to `http://host.docker.internal:8000`). See
+`voice_agent/agent.py`'s module docstring for the room-naming contract, and
+`voice_agent/join_test_room.py` for publishing test mic audio without a frontend.
+
 ---
 
 ## API Reference
