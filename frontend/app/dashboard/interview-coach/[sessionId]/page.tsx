@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
+import { useAutoScroll } from "@/lib/useAutoScroll";
 import {
   endInterviewSession,
   pauseInterviewSession,
@@ -41,6 +42,7 @@ export default function InterviewCoachSessionPage() {
 
   const [mode, setMode] = React.useState<InterviewMode>("standard");
   const [turns, setTurns] = React.useState<Turn[]>([]);
+  const scrollRef = useAutoScroll(turns.length);
   const [allFlags, setAllFlags] = React.useState<string[]>([]);
   const [answer, setAnswer] = React.useState("");
   const [status, setStatus] = React.useState<"active" | "paused">("active");
@@ -238,7 +240,7 @@ export default function InterviewCoachSessionPage() {
       ) : null}
 
       <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm">
-        <div className="flex max-h-[55vh] flex-col gap-4 overflow-y-auto">
+        <div ref={scrollRef} className="flex max-h-[55vh] flex-col gap-4 overflow-y-auto">
           {turns.map((turn, i) => (
             <div key={i} className="flex flex-col gap-2">
               <div className="max-w-[85%]">

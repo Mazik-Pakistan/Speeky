@@ -5,19 +5,48 @@ import { ArrowRight, Briefcase, FileText, Lock, MessagesSquare, Search, UserSqua
 import { cn } from "@/lib/utils";
 import {
   EXPLORE_CATEGORIES,
-  EXPLORE_SCENARIOS,
+  EXPLORE_CATEGORY_ICONS,
+  EXPLORE_STATIC_SCENARIOS,
   type ExploreCategory,
+  type ExploreScenario,
 } from "@/lib/dashboard-data";
+import { getScenarios, type ScenarioListItem } from "@/lib/scenario";
 import { useAssessmentAccess } from "@/contexts/AssessmentContext";
+
+function toExploreScenario(scenario: ScenarioListItem): ExploreScenario {
+  const category = (EXPLORE_CATEGORIES as string[]).includes(scenario.category)
+    ? (scenario.category as ExploreCategory)
+    : "Daily Life";
+  return {
+    id: scenario.key,
+    category,
+    icon: EXPLORE_CATEGORY_ICONS[category],
+    title: scenario.label,
+    description: scenario.intent,
+    difficulty: scenario.goal_type === "negotiation" ? "Negotiation" : "Roleplay",
+    href: `/dashboard/scenarios/${scenario.key}`,
+  };
+}
 
 export default function ExplorePage() {
   const { access } = useAssessmentAccess();
   const [query, setQuery] = React.useState("");
   const [category, setCategory] = React.useState<ExploreCategory | "All">("All");
+  const [liveScenarios, setLiveScenarios] = React.useState<ExploreScenario[]>([]);
 
   const isUnlocked = access?.access_level === "full_access";
 
-  const scenarios = EXPLORE_SCENARIOS.filter((scenario) => {
+  React.useEffect(() => {
+    if (!isUnlocked) return;
+    getScenarios()
+      .then((data) => setLiveScenarios(data.scenarios.map(toExploreScenario)))
+      .catch(() => {
+        // Non-fatal — the static cards above (Interview Coach, etc.) still render.
+      });
+  }, [isUnlocked]);
+
+  const allScenarios = [...EXPLORE_STATIC_SCENARIOS, ...liveScenarios];
+  const scenarios = allScenarios.filter((scenario) => {
     const matchesCategory = category === "All" || scenario.category === category;
     const matchesQuery = scenario.title
       .toLowerCase()

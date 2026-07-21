@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { ShieldCheck } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { DASHBOARD_NAV_LINKS } from "@/lib/dashboard-data";
 import { useAuth } from "@/contexts/AuthContext";
@@ -54,6 +55,22 @@ export function Sidebar() {
             </Link>
           );
         })}
+        {user?.role === "ADMIN" ? (
+          <Link
+            href="/dashboard/admin/scenarios"
+            aria-label="Admin: Custom Scenarios"
+            title="Admin: Custom Scenarios"
+            className={cn(
+              "flex items-center justify-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors lg:justify-start",
+              pathname === "/dashboard/admin/scenarios"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-surface hover:text-foreground",
+            )}
+          >
+            <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="hidden lg:inline">Admin</span>
+          </Link>
+        ) : null}
       </nav>
 
       {user ? (
