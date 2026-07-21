@@ -1,0 +1,37 @@
+from typing import List, Optional
+
+from pydantic import BaseModel, Field, field_validator
+
+
+class StartScenarioSchema(BaseModel):
+    scenario_key: str  # built-in SBL_SCENARIOS key, or "custom:<id>"
+
+
+class ScenarioTurnSchema(BaseModel):
+    message: str = Field(default="", max_length=4000)
+
+
+class CustomScenarioSchema(BaseModel):
+    title: str = Field(min_length=3, max_length=120)
+    category: str  # Work | Social | Travel | Daily Life
+    persona: str = Field(min_length=1, max_length=120)
+    system_prompt: str = Field(min_length=10)
+    opening_line: Optional[str] = None
+    target_vocab: List[str]
+    goal_type: str = "roleplay"  # roleplay | negotiation
+    corporate_tone: bool = True
+
+    @field_validator("target_vocab")
+    @classmethod
+    def min_three_words(cls, v: List[str]) -> List[str]:
+        cleaned = [w.strip() for w in v if w.strip()]
+        if len(cleaned) < 3:
+            raise ValueError("At least 3 target vocabulary words are required.")
+        return cleaned
+
+    @field_validator("goal_type")
+    @classmethod
+    def valid_goal_type(cls, v: str) -> str:
+        if v not in ("roleplay", "negotiation"):
+            raise ValueError('goal_type must be "roleplay" or "negotiation"')
+        return v

@@ -34,14 +34,14 @@ enum PromptKind {
   REASSESSMENT
 }
 
-// Workplace English Coach scenarios (WEC-US-08 .. WEC-US-12). Keys mirror
-// lib/prompts.WORKPLACE_SCENARIOS.
+// Workplace English Coach scenarios
+// Just like in lib/prompts.WORKPLACE_SCENARIOS.
 enum CoachingScenario {
-  EMAIL_WRITING          // WEC-US-09 (text)
-  CLIENT_COMMUNICATION   // WEC-US-10 (audio roleplay)
-  MEETING_COMMUNICATION  // WEC-US-11 (audio roleplay)
-  PRESENTATION_PREP      // WEC-US-12 (audio)
-  GENERAL_WORKPLACE      // WEC-US-08 (text or audio)
+  EMAIL_WRITING          // (text)
+  CLIENT_COMMUNICATION   // (audio roleplay)
+  MEETING_COMMUNICATION  // (audio roleplay)
+  PRESENTATION_PREP      // (audio)
+  GENERAL_WORKPLACE      // (text or audio)
 }
 
 enum CoachingInputMode {
@@ -72,8 +72,57 @@ model User {
   reassessmentRequests ReassessmentRequest[]
   promptLogs           PromptLog[]
   coachingSessions     CoachingSession[]
+  scenarioSessions     ScenarioSession[]
 
   @@map("users")
+}
+
+// Scenario-Based Learning session --> String (not an enum, unlike CoachingScenario) because admins can add custom
+// scenarios at runtime without a migration — built-ins live in
+// lib/prompts.SBL_SCENARIOS, custom ones in the CustomScenario table, keyed
+// "custom:<id>". targetVocab is snapshotted at session start so a later admin
+// edit to a custom scenario doesn't retroactively change grading.
+model ScenarioSession {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scenarioKey      String
+  status           String    @default("in_progress") // in_progress | completed | ended_early
+  turns            Json      @default("[]")          // [{role, content}]
+  targetVocab      String[]
+  vocabUsed        String[]  @default([])
+
+  politenessScore  Float?
+  vocabularyScore  Float?
+  confidenceScore  Float?
+  metGoal          Boolean?  // only meaningful for goal_type "negotiation" scenarios
+
+  flags            Json      @default("[]")
+  summary          String?
+  createdAt        DateTime  @default(now())
+  completedAt      DateTime?
+
+  @@index([userId])
+  @@map("scenario_sessions")
+}
+
+// Admin-authored Scenario-Based Learning scenarios. Merged with the
+// built-in lib/prompts.SBL_SCENARIOS at read time. Publishing is just a DB write —
+// no app update needed, per the story's acceptance criteria.
+model CustomScenario {
+  id             String   @id @default(cuid())
+  title          String   @unique
+  category       String
+  persona        String
+  systemPrompt   String
+  openingLine    String?
+  targetVocab    String[]
+  goalType       String   @default("roleplay") // roleplay | negotiation
+  corporateTone  Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("custom_scenarios")
 }
 
 // Workplace English Coach session (WEC-US-08 .. WEC-US-12).
