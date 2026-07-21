@@ -17,6 +17,7 @@ from .confidence import ConfidenceGrammarAnalyzer, ConfidenceScoreEngine, Scorin
 from .pronunciation import PronunciationScorer
 
 from .pronunciation_pipeline import (
+    AccentPronunciationConfigRegistry,
     ColorTier,
     PronunciationPipeline,
     PronunciationPipelineConfig,
@@ -48,6 +49,7 @@ __all__ = [
     "ScoringWeights",
     "SessionScore",
     "PronunciationScorer",
+    "AccentPronunciationConfigRegistry",
     "ColorTier",
     "PronunciationPipeline",
     "PronunciationPipelineConfig",
