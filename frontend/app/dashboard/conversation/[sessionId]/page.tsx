@@ -2,17 +2,18 @@
 
 import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
-import { CheckCircle2, PhoneOff, Volume2 } from "lucide-react";
+import { CheckCircle2, Headphones, PhoneOff, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
   endConversationSession,
   getConversationTranscript,
   sendConversationMessage,
-  synthesizeSpeech,
   type ConversationTurn,
   type EndConversationResult,
 } from "@/lib/conversation";
+import { playText } from "@/lib/tts";
+import { useAutoScroll } from "@/lib/useAutoScroll";
 
 export default function ConversationSessionPage() {
   const params = useParams<{ sessionId: string }>();
@@ -24,7 +25,10 @@ export default function ConversationSessionPage() {
   const [isEnding, setIsEnding] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [playingIndex, setPlayingIndex] = React.useState<number | null>(null);
+  const [audioMode, setAudioMode] = React.useState(false);
   const [summary, setSummary] = React.useState<EndConversationResult | null>(null);
+  const scrollRef = useAutoScroll(turns?.length ?? 0);
+  const lastAutoPlayed = React.useRef(-1);
 
   React.useEffect(() => {
     getConversationTranscript(params.sessionId)
@@ -34,6 +38,18 @@ export default function ConversationSessionPage() {
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Couldn't load this session."));
   }, [params.sessionId]);
+
+  // Audio mode: auto-speak each new assistant turn as it arrives.
+  React.useEffect(() => {
+    if (!audioMode || !turns?.length) return;
+    const lastIndex = turns.length - 1;
+    const last = turns[lastIndex];
+    if (last.role === "assistant" && lastAutoPlayed.current !== lastIndex) {
+      lastAutoPlayed.current = lastIndex;
+      handlePlay(lastIndex, last.content);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioMode, turns]);
 
   async function handleSend() {
     if (!message.trim() || isSending) return;
@@ -57,27 +73,8 @@ export default function ConversationSessionPage() {
 
   async function handlePlay(index: number, text: string) {
     setPlayingIndex(index);
-    try {
-      const blob = await synthesizeSpeech(text);
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.onended = () => setPlayingIndex(null);
-      audio.onerror = () => setPlayingIndex(null);
-      await audio.play();
-    } catch {
-      // Server TTS unavailable (e.g. Piper voice model not installed) — the
-      // backend's own contract for this case is "the client falls back to
-      // its own native TTS" (see Backend lib/tts_client.py), so use the
-      // browser's built-in speech synthesis instead of failing silently.
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.onend = () => setPlayingIndex(null);
-        utterance.onerror = () => setPlayingIndex(null);
-        window.speechSynthesis.speak(utterance);
-      } else {
-        setPlayingIndex(null);
-      }
-    }
+    await playText(text); // falls back to browser TTS if server Piper voice is unavailable
+    setPlayingIndex(null);
   }
 
   async function handleEnd() {
@@ -148,14 +145,31 @@ export default function ConversationSessionPage() {
         <h1 className="font-serif text-2xl font-semibold text-foreground">
           {topicLabel || "Conversation"}
         </h1>
-        <Button size="sm" variant="outline" loading={isEnding} onClick={handleEnd}>
-          <PhoneOff className="h-4 w-4" aria-hidden="true" />
-          End Session
-        </Button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAudioMode((v) => !v)}
+            aria-pressed={audioMode}
+            aria-label={audioMode ? "Turn off audio mode" : "Turn on audio mode"}
+            title={audioMode ? "Audio mode on — replies are spoken automatically" : "Turn on audio mode"}
+            className={
+              "flex h-9 w-9 items-center justify-center rounded-xl border transition-colors " +
+              (audioMode
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-surface text-muted-foreground hover:text-foreground")
+            }
+          >
+            <Headphones className="h-4 w-4" aria-hidden="true" />
+          </button>
+          <Button size="sm" variant="outline" loading={isEnding} onClick={handleEnd}>
+            <PhoneOff className="h-4 w-4" aria-hidden="true" />
+            End Session
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm">
-        <div className="flex max-h-[55vh] flex-col gap-4 overflow-y-auto">
+        <div ref={scrollRef} className="flex max-h-[55vh] flex-col gap-4 overflow-y-auto">
           {(turns ?? []).map((turn, i) => (
             <div key={i} className={turn.role === "user" ? "ml-auto max-w-[80%]" : "max-w-[80%]"}>
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
