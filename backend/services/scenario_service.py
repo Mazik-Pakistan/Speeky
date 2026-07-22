@@ -343,6 +343,11 @@ async def end_session(session_id: str, user_id: str = Depends(require_auth)):
             "completedAt": datetime.now(timezone.utc),
         },
     )
+
+    from services.vocabulary_progress_service import record_usage
+
+    await record_usage(user_id, coverage["used"], coverage["missing"])
+
     return {
         "session_id": session_id,
         "status": final_status,

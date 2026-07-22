@@ -10,7 +10,7 @@ import {
   type AccentTrend,
 } from "@/lib/accentProgress";
 import { cn } from "@/lib/utils";
-import { AccentCheckInModal } from "./AccentCheckInModal";
+import { AccentCheckInModal } from "@/components/dashboard/AccentCheckInModal";
 
 const TREND_STYLES: Record<AccentTrend, { rowClass: string; icon: typeof TrendingUp; iconClass: string }> = {
   improved: { rowClass: "bg-success/10", icon: TrendingUp, iconClass: "text-success" },

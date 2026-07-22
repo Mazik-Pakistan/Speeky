@@ -2,6 +2,7 @@
 
 import { Lock } from "lucide-react";
 import { AccentProgressTracker } from "@/components/dashboard/progress/AccentProgressTracker";
+import { PracticeTimeMilestones } from "@/components/dashboard/progress/PracticeTimeMilestones";
 import { VocabularyGrowthTracker } from "@/components/dashboard/progress/VocabularyGrowthTracker";
 import { useAssessmentAccess } from "@/contexts/AssessmentContext";
 
@@ -29,6 +30,7 @@ export default function ProgressPage() {
       ) : (
         <div className="flex flex-col gap-6">
           <VocabularyGrowthTracker />
+          <PracticeTimeMilestones />
           <AccentProgressTracker />
         </div>
       )}
