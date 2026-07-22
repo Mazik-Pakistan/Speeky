@@ -1,0 +1,222 @@
+generator client {
+  provider             = "prisma-client-py"
+  recursive_type_depth = "5"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum AssessmentStatus {
+  UNASSESSED
+  IN_PROGRESS
+  COMPLETED
+  PLATEAUED
+}
+
+enum LearningLevel {
+  BEGINNER
+  ELEMENTARY
+  INTERMEDIATE
+  UPPER_INTERMEDIATE
+  ADVANCED
+  PROFICIENT
+}
+
+enum PromptKind {
+  SKIP_ASSESSMENT
+  REASSESSMENT
+}
+
+// Workplace English Coach scenarios (WEC-US-08 .. WEC-US-12). Keys mirror
+// lib/prompts.WORKPLACE_SCENARIOS.
+enum CoachingScenario {
+  EMAIL_WRITING          // WEC-US-09 (text)
+  CLIENT_COMMUNICATION   // WEC-US-10 (audio roleplay)
+  MEETING_COMMUNICATION  // WEC-US-11 (audio roleplay)
+  PRESENTATION_PREP      // WEC-US-12 (audio)
+  GENERAL_WORKPLACE      // WEC-US-08 (text or audio)
+}
+
+enum CoachingInputMode {
+  TEXT
+  AUDIO
+}
+
+enum CoachingStatus {
+  IN_PROGRESS
+  COMPLETED
+  ENDED_EARLY   // e.g. WEC-US-10 E-01 de-escalation cut-off
+}
+
+model User {
+  id                   String                @id @default(cuid())
+  email                String                @unique
+  password             String
+  name                 String
+  avatarUrl            String                @default("user.webp")
+  role                 Role                  @default(USER)
+  assessmentStatus     AssessmentStatus      @default(UNASSESSED)
+  learningLevel        LearningLevel?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  passwordResetTokens  PasswordResetToken[]
+  refreshTokens        RefreshToken[]
+  baselineAssessments  BaselineAssessment[]
+  reassessmentRequests ReassessmentRequest[]
+  promptLogs           PromptLog[]
+  coachingSessions     CoachingSession[]
+
+  @@map("users")
+}
+
+// Workplace English Coach session (WEC-US-08 .. WEC-US-12).
+// A row with completedAt=None is in progress (roleplay scenarios may span
+// several turns held in `turns`). Scores are confidence-first: professionalTone is the
+// headline metric, independent of grammar.
+model CoachingSession {
+  id                 String            @id @default(cuid())
+  userId             String
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scenario           CoachingScenario
+  inputMode          CoachingInputMode
+  status             CoachingStatus    @default(IN_PROGRESS)
+  promptText         String                                     // scenario brief shown to user
+  submission         String?                                    // final text / transcript graded
+  turns              Json              @default("[]")            // roleplay dialogue [{role,content}]
+  audioFeatures      Json?                                      // AUDIO pipeline signal snapshot
+
+  // Scores (0-100). pronunciationScore stays null for the TEXT pipeline.
+  professionalTone   Float?
+  clarityScore       Float?
+  effectivenessScore Float?
+  fluencyScore       Float?
+  vocabularyScore    Float?
+  pronunciationScore Float?
+  confidenceScore    Float?
+
+  feedback           Json?                                      // grader summary + polished version
+  flags              Json              @default("[]")           // exception-handling flags raised
+  metObjective       Boolean?
+  createdAt          DateTime          @default(now())
+  completedAt        DateTime?
+
+  @@index([userId])
+  @@map("coaching_sessions")
+}
+
+model BaselineAssessment {
+  id                 String         @id @default(cuid())
+  userId             String
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionIds        String[]
+  currentIndex       Int            @default(0)
+  responses          Json           @default("[]")
+  fluencyScore       Float?
+  vocabularyScore    Float?
+  pronunciationScore Float?
+  confidenceScore    Float?
+  learningLevel      LearningLevel?
+  isFlagged          Boolean        @default(false)
+  flagReason         String?
+  startedAt          DateTime       @default(now())
+  completedAt        DateTime?
+
+  // Every gating/reassessment/trend query filters userId then sorts or filters on completedAt
+  @@index([userId, completedAt])
+  @@map("baseline_assessments")
+}
+
+model ReassessmentRequest {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestedAt   DateTime  @default(now())
+  scheduledDate DateTime?
+  completed     Boolean   @default(false)
+  isEarlyRetake Boolean   @default(false)
+  cycleCount    Int       @default(0)
+
+  // Matches the early-retake-per-cycle count query: userId + cycleCount (+ isEarlyRetake)
+  @@index([userId, cycleCount])
+  @@map("reassessment_requests")
+}
+
+model PromptLog {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      PromptKind
+  createdAt DateTime   @default(now())
+
+  // Covers both promptlog.count(userId, kind) and find_first(userId, kind, order createdAt desc)
+  @@index([userId, kind, createdAt])
+  @@map("prompt_logs")
+}
+
+// Generic persistent key/value store backing the ported Interview Coach features.
+// Those features carry rich nested session state as JSON blobs; rather
+// than normalize each into its own table, they persist through lib/kv_store.py
+// against this one table (namespace groups a feature's records; value is the blob).
+model KvEntry {
+  namespace String
+  key       String
+  userId    String?
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@id([namespace, key])
+  @@index([namespace])
+  @@index([userId])
+  @@map("kv_entries")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  revoked   Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Postgres doesn't auto-index relation scalars — refresh()/reset_password() revoke
+  // all of a user's tokens by userId, which was a full table scan without this.
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Matches forgot_password's invalidate-existing-tokens query: where userId + usedAt: None
+  @@index([userId, usedAt])
+  @@map("password_reset_tokens")
+}
+
+// Holds a signup until its emailed OTP is verified — password is already bcrypt-hashed
+// here, never plaintext. Row is deleted on successful verify; a stale/abandoned row is
+// just overwritten (upsert) if the same email signs up again.
+model SignupOtp {
+  email     String   @id
+  name      String
+  password  String
+  codeHash  String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("signup_otps")
+}

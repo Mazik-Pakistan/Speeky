@@ -1,0 +1,143 @@
+{
+  "introduction": [
+    {
+      "question_id": "intro_1",
+      "category": "introduction",
+      "text": "Hello! Could you please introduce yourself and tell me what brings you here today?"
+    },
+    {
+      "question_id": "intro_2",
+      "category": "introduction",
+      "text": "What are your main goals for improving your English communication skills?"
+    },
+    {
+      "question_id": "intro_3",
+      "category": "introduction",
+      "text": "Tell me about your hometown."
+    },
+    {
+      "question_id": "intro_4",
+      "category": "introduction",
+      "text": "Describe your family."
+    },
+    {
+      "question_id": "intro_5",
+      "category": "introduction",
+      "text": "What do you enjoy doing in your free time?"
+    },
+    {
+      "question_id": "intro_6",
+      "category": "introduction",
+      "text": "Tell me something interesting about yourself."
+    }
+  ],
+
+  "fluency": [
+    {
+      "question_id": "fluency_1",
+      "category": "fluency",
+      "text": "Tell me about a typical day in your life, from morning to evening."
+    },
+    {
+      "question_id": "fluency_2",
+      "category": "fluency",
+      "text": "Describe your favorite hobby or activity and why you enjoy it."
+    },
+    {
+      "question_id": "fluency_3",
+      "category": "fluency",
+      "text": "Describe your dream vacation."
+    },
+    {
+      "question_id": "fluency_4",
+      "category": "fluency",
+      "text": "Talk about a memorable experience you have had."
+    },
+    {
+      "question_id": "fluency_5",
+      "category": "fluency",
+      "text": "Describe a challenge you overcame."
+    },
+    {
+      "question_id": "fluency_6",
+      "category": "fluency",
+      "text": "If you could learn any new skill, what would it be?"
+    },
+    {
+      "question_id": "fluency_7",
+      "category": "fluency",
+      "text": "Describe your ideal weekend."
+    }
+  ],
+
+  "vocabulary": [
+    {
+      "question_id": "vocab_1",
+      "category": "vocabulary",
+      "text": "What do you think are the most important qualities for success in your field?"
+    },
+    {
+      "question_id": "vocab_2",
+      "category": "vocabulary",
+      "text": "Describe a challenging situation you faced and how you handled it."
+    },
+    {
+      "question_id": "vocab_3",
+      "category": "vocabulary",
+      "text": "Describe a person you admire and explain why."
+    },
+    {
+      "question_id": "vocab_4",
+      "category": "vocabulary",
+      "text": "Explain the importance of teamwork."
+    },
+    {
+      "question_id": "vocab_5",
+      "category": "vocabulary",
+      "text": "Describe a recent achievement you are proud of."
+    },
+    {
+      "question_id": "vocab_6",
+      "category": "vocabulary",
+      "text": "What qualities make a good leader?"
+    },
+    {
+      "question_id": "vocab_7",
+      "category": "vocabulary",
+      "text": "How has technology changed daily life?"
+    }
+  ],
+
+  "pronunciation": [
+    {
+      "question_id": "pron_1",
+      "category": "pronunciation",
+      "text": "Please write out this sentence carefully: 'The quick brown fox jumps over the lazy dog.'"
+    },
+    {
+      "question_id": "pron_2",
+      "category": "pronunciation",
+      "text": "Write these words: 'beautiful', 'comfortable', 'extraordinary', 'unfortunately'."
+    },
+    {
+      "question_id": "pron_3",
+      "category": "pronunciation",
+      "text": "Try writing this: 'She sells seashells by the seashore.'"
+    },
+    {
+      "question_id": "pron_4",
+      "category": "pronunciation",
+      "text": "Read aloud: 'How much wood would a woodchuck chuck if a woodchuck could chuck wood?'"
+    },
+    {
+      "question_id": "pron_5",
+      "category": "pronunciation",
+      "text": "For practice, try writing this: 'Peter Piper picked a peck of pickled peppers.'"
+    },
+    {
+      "question_id": "pron_6",
+      "category": "pronunciation",
+      "text": "Write with focus: 'Practice makes perfect, but nobody is perfect.'"
+    }
+  ]
+}

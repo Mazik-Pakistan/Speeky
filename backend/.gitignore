@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.DS_Store
+speeky_pgdata/
+prisma/generated/
+uploads/*
+!uploads/avatars/
+uploads/avatars/*
+!uploads/avatars/user.webp
+data/tts/*.onnx
+data/tts/*.onnx.json
