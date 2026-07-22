@@ -29,6 +29,7 @@ export default function ConversationSessionPage() {
   const [summary, setSummary] = React.useState<EndConversationResult | null>(null);
   const scrollRef = useAutoScroll(turns?.length ?? 0);
   const lastAutoPlayed = React.useRef(-1);
+  const audioModeWasOn = React.useRef(false);
 
   React.useEffect(() => {
     getConversationTranscript(params.sessionId)
@@ -39,12 +40,20 @@ export default function ConversationSessionPage() {
       .catch((err) => setError(err instanceof ApiError ? err.message : "Couldn't load this session."));
   }, [params.sessionId]);
 
-  // Audio mode: auto-speak each new assistant turn as it arrives.
+  // Audio mode: auto-speak each new assistant turn as it arrives. Also
+  // re-speak the current last turn right when audioMode flips back on —
+  // otherwise the "already played" guard silently blocks it and toggling
+  // off/on again looks broken.
   React.useEffect(() => {
-    if (!audioMode || !turns?.length) return;
+    if (!audioMode || !turns?.length) {
+      audioModeWasOn.current = audioMode;
+      return;
+    }
+    const turnedOn = !audioModeWasOn.current;
+    audioModeWasOn.current = true;
     const lastIndex = turns.length - 1;
     const last = turns[lastIndex];
-    if (last.role === "assistant" && lastAutoPlayed.current !== lastIndex) {
+    if (last.role === "assistant" && (turnedOn || lastAutoPlayed.current !== lastIndex)) {
       lastAutoPlayed.current = lastIndex;
       handlePlay(lastIndex, last.content);
     }

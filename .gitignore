@@ -9,7 +9,15 @@ __pycache__/
 *.env.
 *.env.*
 *.zip
+Dockerfile*
+.dockerignore
+*.docx
 
 !.env.example
 !uploads/avatars/
 !uploads/avatars/user.webp
+
+output
+venv
+.claude
+.devin

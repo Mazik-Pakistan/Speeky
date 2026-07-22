@@ -79,10 +79,12 @@ export interface CustomScenario {
   title: string;
   category: string;
   persona: string;
+  intent: string;
   system_prompt: string;
   opening_line: string | null;
   target_vocab: string[];
   goal_type: "roleplay" | "negotiation";
+  safety_mode: boolean;
   corporate_tone: boolean;
   created_at: string;
   updated_at: string;
@@ -92,10 +94,12 @@ export interface CustomScenarioInput {
   title: string;
   category: string;
   persona: string;
+  intent: string;
   system_prompt: string;
   opening_line?: string;
   target_vocab: string[];
   goal_type: "roleplay" | "negotiation";
+  safety_mode: boolean;
   corporate_tone: boolean;
 }
 

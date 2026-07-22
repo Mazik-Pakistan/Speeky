@@ -1,6 +1,4 @@
-import type { Config } from "tailwindcss";
-
-const config: Config = {
+const config = {
   darkMode: ["class"],
   content: [
     "./app/**/*.{ts,tsx}",
@@ -52,8 +50,10 @@ const config: Config = {
         "2xl": "1rem",
       },
       fontFamily: {
+        // Plus Jakarta Sans acts as the default font for the whole app
         sans: ["var(--font-body)", "system-ui", "sans-serif"],
-        serif: ["var(--font-heading)", "Georgia", "serif"],
+        // Outfit is reserved specifically for your titles and buttons
+        heading: ["var(--font-heading)", "system-ui", "sans-serif"],
       },
       boxShadow: {
         sm: "0 1px 2px 0 rgb(15 23 42 / 0.04)",
@@ -68,10 +68,15 @@ const config: Config = {
           "0%": { opacity: "0" },
           "100%": { opacity: "1" },
         },
+        "gradient-shift": {
+          "0%, 100%": { backgroundPosition: "0% 50%" },
+          "50%": { backgroundPosition: "100% 50%" },
+        },
       },
       animation: {
         "fade-up": "fade-up 300ms ease-out both",
         "fade-in": "fade-in 200ms ease-out both",
+        "gradient-shift": "gradient-shift 8s ease infinite",
       },
     },
   },

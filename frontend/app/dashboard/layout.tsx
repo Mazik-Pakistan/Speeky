@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { AssessmentReminderBanner } from "@/components/dashboard/AssessmentReminderBanner";
 import { useAuth } from "@/contexts/AuthContext";
 import { AssessmentProvider } from "@/contexts/AssessmentContext";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 export default function DashboardLayout({
   children,
@@ -44,13 +45,15 @@ export default function DashboardLayout({
       <div className="flex min-h-screen bg-background">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 items-center justify-end border-b border-border px-6 lg:px-10">
+          <header className="flex h-14 items-center justify-end gap-3 border-b border-border px-6 lg:px-10">
+            <ThemeToggle />
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               <LogOut className="h-4 w-4" aria-hidden="true" />
               Logout
             </Button>
           </header>
-          <main className="flex-1 px-6 py-8 lg:px-10">
+
+          <main className="relative flex-1 px-6 py-8 lg:px-10">
             <AssessmentReminderBanner />
             {children}
           </main>

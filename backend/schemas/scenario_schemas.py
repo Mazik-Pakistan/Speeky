@@ -15,10 +15,12 @@ class CustomScenarioSchema(BaseModel):
     title: str = Field(min_length=3, max_length=120)
     category: str  # Work | Social | Travel | Daily Life
     persona: str = Field(min_length=1, max_length=120)
+    intent: str = Field(min_length=10, max_length=300)  # shown on the learner's pre-scenario screen
     system_prompt: str = Field(min_length=10)
     opening_line: Optional[str] = None
     target_vocab: List[str]
     goal_type: str = "roleplay"  # roleplay | negotiation
+    safety_mode: bool = False  # breaks character on a medical-emergency phrase
     corporate_tone: bool = True
 
     @field_validator("target_vocab")

@@ -1,6 +1,7 @@
 import { SectionTitle } from "@/components/common/SectionTitle";
 import { FeatureCard } from "@/components/landing/FeatureCard";
 import { CORE_FEATURES } from "@/lib/mock-data";
+import { ScrollReveal } from "@/components/ui/scroll-reveal"; // 1. Import the new component
 
 export function CoreFeatures() {
   return (
@@ -13,8 +14,10 @@ export function CoreFeatures() {
         />
 
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {CORE_FEATURES.map((feature) => (
-            <FeatureCard key={feature.id} feature={feature} />
+          {CORE_FEATURES.map((feature, index) => (
+            <ScrollReveal key={feature.id} delay={index * 100}>
+              <FeatureCard feature={feature} />
+            </ScrollReveal>
           ))}
         </div>
       </div>

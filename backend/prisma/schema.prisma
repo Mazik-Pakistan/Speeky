@@ -37,11 +37,11 @@ enum PromptKind {
 // Workplace English Coach scenarios
 // Just like in lib/prompts.WORKPLACE_SCENARIOS.
 enum CoachingScenario {
-  EMAIL_WRITING          // (text)
-  CLIENT_COMMUNICATION   // (audio roleplay)
-  MEETING_COMMUNICATION  // (audio roleplay)
-  PRESENTATION_PREP      // (audio)
-  GENERAL_WORKPLACE      // (text or audio)
+  EMAIL_WRITING // (text)
+  CLIENT_COMMUNICATION // (audio roleplay)
+  MEETING_COMMUNICATION // (audio roleplay)
+  PRESENTATION_PREP // (audio)
+  GENERAL_WORKPLACE // (text or audio)
 }
 
 enum CoachingInputMode {
@@ -52,28 +52,41 @@ enum CoachingInputMode {
 enum CoachingStatus {
   IN_PROGRESS
   COMPLETED
-  ENDED_EARLY   // e.g. WEC-US-10 E-01 de-escalation cut-off
+  ENDED_EARLY // e.g. WEC-US-10 E-01 de-escalation cut-off
+}
+
+// Accent Assessment (US-93). REJECTED_* means the reading wasn't scored at all — see
+// lib/recording_engine.RejectionReason for the reason-code vocabulary these mirror.
+enum AccentAssessmentStatus {
+  COMPLETED
+  REJECTED_NO_SPEECH
+  REJECTED_TOO_QUIET
+  REJECTED_TOO_NOISY
+  REJECTED_INCOMPLETE
+  REJECTED_MULTIPLE_VOICES
 }
 
 model User {
-  id                   String                @id @default(cuid())
-  email                String                @unique
-  password             String
-  name                 String
-  avatarUrl            String                @default("user.webp")
-  role                 Role                  @default(USER)
-  assessmentStatus     AssessmentStatus      @default(UNASSESSED)
-  learningLevel        LearningLevel?
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  passwordResetTokens  PasswordResetToken[]
-  refreshTokens        RefreshToken[]
-  baselineAssessments  BaselineAssessment[]
-  reassessmentRequests ReassessmentRequest[]
-  promptLogs           PromptLog[]
-  coachingSessions     CoachingSession[]
-  scenarioSessions     ScenarioSession[]
-  accentAssessments    AccentAssessment[]
+  id                    String                 @id @default(cuid())
+  email                 String                 @unique
+  password              String
+  name                  String
+  avatarUrl             String                 @default("user.webp")
+  role                  Role                   @default(USER)
+  assessmentStatus      AssessmentStatus       @default(UNASSESSED)
+  learningLevel         LearningLevel?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  passwordResetTokens   PasswordResetToken[]
+  refreshTokens         RefreshToken[]
+  baselineAssessments   BaselineAssessment[]
+  reassessmentRequests  ReassessmentRequest[]
+  promptLogs            PromptLog[]
+  coachingSessions      CoachingSession[]
+  scenarioSessions      ScenarioSession[]
+  accentAssessments     AccentAssessment[]
+  pronunciationAttempts PronunciationAttempt[]
+  accentProfiles        AccentProfile[]
 
   @@map("users")
 }
@@ -84,24 +97,24 @@ model User {
 // "custom:<id>". targetVocab is snapshotted at session start so a later admin
 // edit to a custom scenario doesn't retroactively change grading.
 model ScenarioSession {
-  id               String    @id @default(cuid())
-  userId           String
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scenarioKey      String
-  status           String    @default("in_progress") // in_progress | completed | ended_early
-  turns            Json      @default("[]")          // [{role, content}]
-  targetVocab      String[]
-  vocabUsed        String[]  @default([])
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scenarioKey String
+  status      String   @default("in_progress") // in_progress | completed | ended_early
+  turns       Json     @default("[]") // [{role, content}]
+  targetVocab String[]
+  vocabUsed   String[] @default([])
 
-  politenessScore  Float?
-  vocabularyScore  Float?
-  confidenceScore  Float?
-  metGoal          Boolean?  // only meaningful for goal_type "negotiation" scenarios
+  politenessScore Float?
+  vocabularyScore Float?
+  confidenceScore Float?
+  metGoal         Boolean? // only meaningful for goal_type "negotiation" scenarios
 
-  flags            Json      @default("[]")
-  summary          String?
-  createdAt        DateTime  @default(now())
-  completedAt      DateTime?
+  flags       Json      @default("[]")
+  summary     String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
 
   @@index([userId])
   @@map("scenario_sessions")
@@ -111,17 +124,19 @@ model ScenarioSession {
 // built-in lib/prompts.SBL_SCENARIOS at read time. Publishing is just a DB write —
 // no app update needed, per the story's acceptance criteria.
 model CustomScenario {
-  id             String   @id @default(cuid())
-  title          String   @unique
-  category       String
-  persona        String
-  systemPrompt   String
-  openingLine    String?
-  targetVocab    String[]
-  goalType       String   @default("roleplay") // roleplay | negotiation
-  corporateTone  Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String   @id @default(cuid())
+  title         String   @unique
+  category      String
+  persona       String
+  intent        String   @default("") // short blurb shown on the learner's pre-scenario screen
+  systemPrompt  String
+  openingLine   String?
+  targetVocab   String[]
+  goalType      String   @default("roleplay") // roleplay | negotiation
+  safetyMode    Boolean  @default(false) // breaks character on a medical-emergency phrase
+  corporateTone Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@map("custom_scenarios")
 }
@@ -131,16 +146,16 @@ model CustomScenario {
 // several turns held in `turns`). Scores are confidence-first: professionalTone is the
 // headline metric, independent of grammar.
 model CoachingSession {
-  id                 String            @id @default(cuid())
-  userId             String
-  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scenario           CoachingScenario
-  inputMode          CoachingInputMode
-  status             CoachingStatus    @default(IN_PROGRESS)
-  promptText         String                                     // scenario brief shown to user
-  submission         String?                                    // final text / transcript graded
-  turns              Json              @default("[]")            // roleplay dialogue [{role,content}]
-  audioFeatures      Json?                                      // AUDIO pipeline signal snapshot
+  id            String            @id @default(cuid())
+  userId        String
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scenario      CoachingScenario
+  inputMode     CoachingInputMode
+  status        CoachingStatus    @default(IN_PROGRESS)
+  promptText    String // scenario brief shown to user
+  submission    String? // final text / transcript graded
+  turns         Json              @default("[]") // roleplay dialogue [{role,content}]
+  audioFeatures Json? // AUDIO pipeline signal snapshot
 
   // Scores (0-100). pronunciationScore stays null for the TEXT pipeline.
   professionalTone   Float?
@@ -151,11 +166,11 @@ model CoachingSession {
   pronunciationScore Float?
   confidenceScore    Float?
 
-  feedback           Json?                                      // grader summary + polished version
-  flags              Json              @default("[]")           // exception-handling flags raised
-  metObjective       Boolean?
-  createdAt          DateTime          @default(now())
-  completedAt        DateTime?
+  feedback     Json? // grader summary + polished version
+  flags        Json      @default("[]") // exception-handling flags raised
+  metObjective Boolean?
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
 
   @@index([userId])
   @@map("coaching_sessions")
@@ -181,6 +196,78 @@ model BaselineAssessment {
   // Every gating/reassessment/trend query filters userId then sorts or filters on completedAt
   @@index([userId, completedAt])
   @@map("baseline_assessments")
+}
+
+// Pronunciation Coach (US-95). One row per (userId, sentenceId) — a retry UPDATES this
+// row (score replaced, never appended), per the story's "unlimited retries, score
+// updates each time" requirement. sentenceId keys into data/pronunciation_sentences.json,
+// not a DB foreign key (the sentence bank is static content, not user data).
+model PronunciationAttempt {
+  id                      String   @id @default(cuid())
+  userId                  String
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sentenceId              String
+  targetText              String
+  transcript              String
+  wordResults             Json // [{word, target_index, status, confidence}]
+  overallScore            Float
+  accentProfileTag        String? // US-90 Local Accent Calibration hook (stub — not applied yet)
+  attemptCount            Int      @default(1)
+  backgroundVoiceDetected Boolean  @default(false)
+  disfluencyDetected      Boolean  @default(false)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([userId, sentenceId])
+  @@index([userId])
+  @@map("pronunciation_attempts")
+}
+
+// Accent Assessment (US-93). One row per passage-reading attempt, history kept (like
+// BaselineAssessment) rather than overwritten, so a future re-calibration story has
+// something to compare against. REJECTED_* rows carry no scores — never a false baseline.
+model AccentAssessment {
+  id                 String                 @id @default(cuid())
+  userId             String
+  user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  passageId          String
+  monthIndex         Int
+  status             AccentAssessmentStatus
+  wordStressScore    Float
+  rejectionReason    String?
+  transcript         String?
+  pronunciationScore Float?
+  stressScore        Float?
+  rhythmScore        Float?
+  intonationScore    Float?
+  clarityScore       Float?
+  weakPoints         Json                   @default("[]")
+  createdAt          DateTime               @default(now())
+  completedAt        DateTime?
+
+  accentProfiles AccentProfile[]
+
+  @@index([userId, completedAt])
+  @@map("accent_assessments")
+}
+
+model AccentProfile {
+  id                 String           @id @default(cuid())
+  userId             String
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceAssessmentId String
+  sourceAssessment   AccentAssessment @relation(fields: [sourceAssessmentId], references: [id], onDelete: Cascade)
+  pronunciationScore Float
+  stressScore        Float
+  rhythmScore        Float
+  intonationScore    Float
+  clarityScore       Float
+  weakPoints         Json // [{issue, detail}]
+  exercises          Json             @default("[]")
+  createdAt          DateTime         @default(now())
+
+  @@index([userId, createdAt])
+  @@map("accent_profiles")
 }
 
 model ReassessmentRequest {
@@ -226,27 +313,6 @@ model KvEntry {
   @@index([namespace])
   @@index([userId])
   @@map("kv_entries")
-}
-
-// Accent Improvement Coach's periodic Accent Assessment (ACC-US-15's data source).
-// monthIndex is 1-based and computed relative to the user's first completed
-// accent assessment (1 = baseline), mirroring reassessment_service's cycle-count
-// pattern for BaselineAssessment — one assessment allowed per 30-day month.
-model AccentAssessment {
-  id                 String   @id @default(cuid())
-  userId             String
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  monthIndex         Int
-  pronunciationScore Float
-  wordStressScore    Float
-  intonationScore    Float
-  clarityScore       Float
-  completedAt        DateTime @default(now())
-  createdAt          DateTime @default(now())
-
-  // The tracker matrix always looks up userId + monthIndex (baseline = 1, current = 3).
-  @@index([userId, monthIndex])
-  @@map("accent_assessments")
 }
 
 model RefreshToken {

@@ -14,8 +14,8 @@ import {
   type ScenarioEndResult,
   type StartScenarioResult,
 } from "@/lib/scenario";
-import { playText } from "@/lib/tts";
 import { useAutoScroll } from "@/lib/useAutoScroll";
+import { useAutoSpeak } from "@/lib/useAutoSpeak";
 
 interface ChatTurn {
   role: "assistant" | "user";
@@ -45,18 +45,7 @@ export default function ScenarioSessionPage() {
   const [audioMode, setAudioMode] = React.useState(false);
   const chatTurns = step.name === "chat" ? step.turns : null;
   const scrollRef = useAutoScroll(chatTurns?.length ?? 0);
-  const lastAutoPlayed = React.useRef(-1);
-
-  // Audio mode: auto-speak each new assistant turn as it arrives.
-  React.useEffect(() => {
-    if (!audioMode || !chatTurns?.length) return;
-    const lastIndex = chatTurns.length - 1;
-    const last = chatTurns[lastIndex];
-    if (last.role === "assistant" && lastAutoPlayed.current !== lastIndex) {
-      lastAutoPlayed.current = lastIndex;
-      playText(last.content);
-    }
-  }, [audioMode, chatTurns]);
+  useAutoSpeak(audioMode, chatTurns);
 
   React.useEffect(() => {
     let cancelled = false;

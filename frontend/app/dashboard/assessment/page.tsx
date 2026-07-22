@@ -39,6 +39,7 @@ type Step =
 export default function AssessmentPage() {
   const router = useRouter();
   const { access, isLoading: accessLoading, refresh } = useAssessmentAccess();
+  console.log(access);
   const [step, setStep] = React.useState<Step>({ name: "loading" });
   const [answer, setAnswer] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -52,7 +53,10 @@ export default function AssessmentPage() {
   React.useEffect(() => {
     if (accessLoading || hasInitialized.current) return;
     hasInitialized.current = true;
-    if (access?.assessment_status === "COMPLETED" || access?.assessment_status === "PLATEAUED") {
+    if (
+      access?.assessment_status === "COMPLETED" ||
+      access?.assessment_status === "PLATEAUED"
+    ) {
       setStep({ name: "already-assessed" });
     } else {
       setStep({ name: "intro" });
@@ -173,9 +177,9 @@ export default function AssessmentPage() {
             Baseline Communication Assessment
           </h1>
           <p className="text-sm text-muted-foreground">
-            A short, five-question check-in sets your starting confidence
-            score and personalizes AI Conversation Practice, Interview Coach,
-            and Scenario-Based Learning for you. It takes about 5 minutes.
+            A short, five-question check-in sets your starting confidence score
+            and personalizes AI Conversation Practice, Interview Coach, and
+            Scenario-Based Learning for you. It takes about 5 minutes.
           </p>
         </div>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
@@ -230,7 +234,7 @@ export default function AssessmentPage() {
 
   if (step.name === "question") {
     const progress = Math.round(
-      (step.questionIndex / step.totalQuestions) * 100
+      (step.questionIndex / step.totalQuestions) * 100,
     );
     return (
       <div className="mx-auto flex max-w-xl flex-col gap-6">
@@ -282,7 +286,10 @@ export default function AssessmentPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
       <div className="animate-fade-up rounded-2xl border border-border bg-gradient-to-br from-primary to-primary-hover p-8 text-center text-primary-foreground shadow-sm">
-        <Sparkles className="mx-auto h-6 w-6 animate-fade-in" aria-hidden="true" />
+        <Sparkles
+          className="mx-auto h-6 w-6 animate-fade-in"
+          aria-hidden="true"
+        />
         <h1 className="mt-3 font-serif text-2xl font-semibold">
           {summary.positive_framing.title}
         </h1>

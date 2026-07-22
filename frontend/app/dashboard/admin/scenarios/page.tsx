@@ -23,10 +23,12 @@ const EMPTY_FORM: CustomScenarioInput = {
   title: "",
   category: "Work",
   persona: "",
+  intent: "",
   system_prompt: "",
   opening_line: "",
   target_vocab: [],
   goal_type: "roleplay",
+  safety_mode: false,
   corporate_tone: true,
 };
 
@@ -67,10 +69,12 @@ export default function AdminScenariosPage() {
       title: scenario.title,
       category: scenario.category,
       persona: scenario.persona,
+      intent: scenario.intent,
       system_prompt: scenario.system_prompt,
       opening_line: scenario.opening_line ?? "",
       target_vocab: scenario.target_vocab,
       goal_type: scenario.goal_type,
+      safety_mode: scenario.safety_mode,
       corporate_tone: scenario.corporate_tone,
     });
     setVocabText(scenario.target_vocab.join(", "));
@@ -86,6 +90,10 @@ export default function AdminScenariosPage() {
       .filter(Boolean);
     if (targetVocab.length < 3) {
       setFormError("Add at least 3 target vocabulary words, separated by commas.");
+      return;
+    }
+    if (form.intent.trim().length < 10) {
+      setFormError("Add a short learner-facing description (at least 10 characters).");
       return;
     }
     const payload: CustomScenarioInput = { ...form, target_vocab: targetVocab };
@@ -230,11 +238,18 @@ export default function AdminScenariosPage() {
             onChange={(e) => setForm({ ...form, persona: e.target.value })}
           />
           <Textarea
-            label="Persona instructions / scenario goal"
-            rows={4}
+            label="Intent (shown to the learner)"
+            rows={2}
+            value={form.intent}
+            onChange={(e) => setForm({ ...form, intent: e.target.value })}
+            hint="Short blurb on the pre-scenario screen, e.g. 'Practice asking for a raise professionally.'"
+          />
+          <Textarea
+            label="Persona instructions / scenario goal (prompt)"
+            rows={5}
             value={form.system_prompt}
             onChange={(e) => setForm({ ...form, system_prompt: e.target.value })}
-            hint="Describe who the AI plays and what the learner needs to accomplish."
+            hint="The actual instructions given to the AI: who it plays, how it should react, what the learner must accomplish."
           />
           <Input
             label="Opening line (optional)"
@@ -267,6 +282,17 @@ export default function AdminScenariosPage() {
               checked={form.corporate_tone}
               onCheckedChange={(checked) => setForm({ ...form, corporate_tone: checked })}
               label="Professional tone expected"
+              hideLabel
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-foreground">
+              Medical-emergency safety break
+            </span>
+            <Switch
+              checked={form.safety_mode}
+              onCheckedChange={(checked) => setForm({ ...form, safety_mode: checked })}
+              label="Medical-emergency safety break"
               hideLabel
             />
           </div>

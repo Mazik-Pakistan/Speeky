@@ -20,12 +20,20 @@ export function Sidebar() {
 
   return (
     <aside className="flex w-[4.5rem] shrink-0 flex-col items-center border-r border-border bg-surface-elevated px-2 py-6 lg:w-64 lg:items-stretch lg:px-4">
-      <div className="px-2 text-center lg:text-left">
-        <span className="font-serif text-2xl font-semibold tracking-tight text-primary">
-          S
-          <span className="hidden lg:inline">peeky</span>
-        </span>
-        <p className="hidden text-xs font-medium tracking-wide text-muted-foreground lg:block">
+      <div className="flex flex-col items-center px-2 lg:items-start">
+        <Link href="/dashboard" className="flex items-center gap-2">
+          <Image
+            src="/logo-icon.png"
+            alt="Speeky"
+            width={28}
+            height={28}
+            className="h-7 w-7 transition-all dark:brightness-0 dark:invert"
+          />
+          <span className="hidden font-serif text-2xl font-semibold tracking-tight text-primary dark:text-white lg:block">
+            Speeky
+          </span>
+        </Link>
+        <p className="hidden pl-9 text-xs font-medium tracking-wide text-muted-foreground lg:block">
           AI COACH
         </p>
       </div>
