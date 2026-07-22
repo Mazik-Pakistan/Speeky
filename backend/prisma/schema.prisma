@@ -55,6 +55,17 @@ enum CoachingStatus {
   ENDED_EARLY   // e.g. WEC-US-10 E-01 de-escalation cut-off
 }
 
+// Accent Assessment (US-93). REJECTED_* means the reading wasn't scored at all — see
+// lib/recording_engine.RejectionReason for the reason-code vocabulary these mirror.
+enum AccentAssessmentStatus {
+  COMPLETED
+  REJECTED_NO_SPEECH
+  REJECTED_TOO_QUIET
+  REJECTED_TOO_NOISY
+  REJECTED_INCOMPLETE
+  REJECTED_MULTIPLE_VOICES
+}
+
 model User {
   id                   String                @id @default(cuid())
   email                String                @unique
@@ -74,6 +85,9 @@ model User {
   coachingSessions     CoachingSession[]
   scenarioSessions     ScenarioSession[]
   accentAssessments    AccentAssessment[]
+  pronunciationAttempts PronunciationAttempt[]
+  accentAssessments    AccentAssessment[]
+  accentProfiles       AccentProfile[]
 
   @@map("users")
 }
@@ -181,6 +195,79 @@ model BaselineAssessment {
   // Every gating/reassessment/trend query filters userId then sorts or filters on completedAt
   @@index([userId, completedAt])
   @@map("baseline_assessments")
+}
+
+// Pronunciation Coach (US-95). One row per (userId, sentenceId) — a retry UPDATES this
+// row (score replaced, never appended), per the story's "unlimited retries, score
+// updates each time" requirement. sentenceId keys into data/pronunciation_sentences.json,
+// not a DB foreign key (the sentence bank is static content, not user data).
+model PronunciationAttempt {
+  id                      String   @id @default(cuid())
+  userId                  String
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sentenceId              String
+  targetText              String
+  transcript              String
+  wordResults             Json                // [{word, target_index, status, confidence}]
+  overallScore            Float
+  accentProfileTag        String?             // US-90 Local Accent Calibration hook (stub — not applied yet)
+  attemptCount            Int      @default(1)
+  backgroundVoiceDetected Boolean  @default(false)
+  disfluencyDetected      Boolean  @default(false)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([userId, sentenceId])
+  @@index([userId])
+  @@map("pronunciation_attempts")
+}
+
+// Accent Assessment (US-93). One row per passage-reading attempt, history kept (like
+// BaselineAssessment) rather than overwritten, so a future re-calibration story has
+// something to compare against. REJECTED_* rows carry no scores — never a false baseline.
+model AccentAssessment {
+  id                 String                 @id @default(cuid())
+  userId             String
+  user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  passageId          String
+  status             AccentAssessmentStatus
+  rejectionReason    String?
+  transcript         String?
+  pronunciationScore Float?
+  stressScore        Float?
+  rhythmScore        Float?
+  intonationScore    Float?
+  clarityScore       Float?
+  weakPoints         Json                   @default("[]")
+  createdAt          DateTime               @default(now())
+  completedAt        DateTime?
+
+  accentProfiles     AccentProfile[]
+
+  @@index([userId, completedAt])
+  @@map("accent_assessments")
+}
+
+// Accent Assessment & Improvement (US-89). Generated only from a COMPLETED
+// AccentAssessment — services/accent_profile_service.py 404s rather than defaulting
+// if none exists yet. History kept (multiple profiles over time), "latest" is canonical.
+model AccentProfile {
+  id                 String           @id @default(cuid())
+  userId             String
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceAssessmentId String
+  sourceAssessment   AccentAssessment @relation(fields: [sourceAssessmentId], references: [id], onDelete: Cascade)
+  pronunciationScore Float
+  stressScore        Float
+  rhythmScore        Float
+  intonationScore    Float
+  clarityScore       Float
+  weakPoints         Json             // [{issue, detail}]
+  exercises          Json             @default("[]")
+  createdAt          DateTime         @default(now())
+
+  @@index([userId, createdAt])
+  @@map("accent_profiles")
 }
 
 model ReassessmentRequest {

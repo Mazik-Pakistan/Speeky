@@ -13,3 +13,6 @@ __pycache__/
 !.env.example
 !uploads/avatars/
 !uploads/avatars/user.webp
+
+output
+venv
