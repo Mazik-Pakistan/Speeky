@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Speeky Design System — Single Source of Truth
+  All colors are defined once, here, as CSS variables and consumed through
+  Tailwind semantic tokens (see tailwind.config.ts). Never hardcode a hex
+  value or a raw Tailwind color (bg-blue-500, text-gray-700, etc.) inside
+  a component — use bg-primary, text-foreground, border-border, etc.
+*/
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;            /* #FFFFFF */
+    --surface: 210 40% 98%;             /* #F8FAFC */
+    --surface-elevated: 0 0% 100%;      /* #FFFFFF */
+
+    --foreground: 222 47% 11%;          /* #0F172A */
+    --muted: 210 40% 96%;               /* #F1F5F9 */
+    --muted-foreground: 215 16% 47%;    /* #64748B */
+
+    --border: 214 32% 91%;              /* #E2E8F0 */
+    --input: 214 32% 91%;               /* #E2E8F0 */
+    --ring: 224 100% 22%;               /* Brand Primary */
+
+    --primary: 224 100% 22%;            /* #00246E — Royal Blue (matches product UI) */
+    --primary-hover: 226 66% 33%;       /* #1D3B8A */
+    --primary-foreground: 0 0% 100%;    /* #FFFFFF */
+
+    --secondary: 227 100% 92%;          /* #DBE1FF — soft blue tint */
+    --secondary-foreground: 224 100% 22%;/* #00246E */
+
+    --accent: 0 66% 43%;                /* #B52424 — Crimson (matches product UI) */
+    --accent-foreground: 0 0% 100%;     /* #FFFFFF */
+
+    --success: 142 72% 29%;             /* #15803D — darkened from #16A34A for 4.5:1 text contrast on white */
+    --warning: 32 92% 37%;              /* #B45309 — darkened from #D97706 for 4.5:1 text contrast on white */
+    --danger: 0 74% 51%;                /* #DC2626 */
+    --info: 199 89% 41%;                /* #0284C7 */
+
+    --radius: 0.75rem;                  /* rounded-xl base */
+  }
+
+  .dark {
+    --background: 222 47% 8%;
+    --surface: 222 44% 11%;
+    --surface-elevated: 222 40% 14%;
+
+    --foreground: 210 40% 98%;
+    --muted: 222 30% 18%;
+    --muted-foreground: 215 20% 65%;
+
+    --border: 222 25% 22%;
+    --input: 222 25% 22%;
+    --ring: 227 100% 84%;
+
+    --primary: 227 100% 84%;            /* #B5C4FF — lighter blue for dark mode */
+    --primary-hover: 227 100% 90%;
+    --primary-foreground: 224 60% 14%;
+
+    --secondary: 222 30% 18%;
+    --secondary-foreground: 227 100% 84%;
+
+    --accent: 3 100% 68%;               /* #FF5A52 — lighter crimson for dark mode */
+    --accent-foreground: 0 60% 15%;
+
+    --success: 142 60% 45%;
+    --warning: 32 85% 55%;
+    --danger: 0 70% 60%;
+    --info: 199 80% 55%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+}
