@@ -1,19 +1,37 @@
-import { TrendingUp } from "lucide-react";
+"use client";
+
+import { Lock } from "lucide-react";
+import { AccentProgressTracker } from "@/components/dashboard/progress/AccentProgressTracker";
+import { VocabularyGrowthTracker } from "@/components/dashboard/progress/VocabularyGrowthTracker";
+import { useAssessmentAccess } from "@/contexts/AssessmentContext";
 
 export default function ProgressPage() {
+  const { access } = useAssessmentAccess();
+  const isUnlocked = access?.access_level === "full_access";
+
   return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-border p-12 text-center">
-      <span className="flex h-14 w-14 items-center justify-center rounded-full bg-secondary text-primary">
-        <TrendingUp className="h-6 w-6" aria-hidden="true" />
-      </span>
-      <div className="flex flex-col gap-1">
-        <h1 className="font-serif text-2xl font-semibold text-foreground">
+    <div className="flex flex-col gap-8">
+      <div>
+        <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
           Progress
         </h1>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          Detailed progress analytics are coming soon.
+        <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+          Track your vocabulary growth and accent improvement over time.
         </p>
       </div>
+
+      {!isUnlocked ? (
+        <div className="flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+          {access?.locked_message ??
+            "Complete your baseline assessment to unlock your Progress Dashboard."}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-6">
+          <VocabularyGrowthTracker />
+          <AccentProgressTracker />
+        </div>
+      )}
     </div>
   );
 }

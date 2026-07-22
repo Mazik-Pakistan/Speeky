@@ -73,6 +73,7 @@ model User {
   promptLogs           PromptLog[]
   coachingSessions     CoachingSession[]
   scenarioSessions     ScenarioSession[]
+  accentAssessments    AccentAssessment[]
 
   @@map("users")
 }
@@ -225,6 +226,27 @@ model KvEntry {
   @@index([namespace])
   @@index([userId])
   @@map("kv_entries")
+}
+
+// Accent Improvement Coach's periodic Accent Assessment (ACC-US-15's data source).
+// monthIndex is 1-based and computed relative to the user's first completed
+// accent assessment (1 = baseline), mirroring reassessment_service's cycle-count
+// pattern for BaselineAssessment — one assessment allowed per 30-day month.
+model AccentAssessment {
+  id                 String   @id @default(cuid())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  monthIndex         Int
+  pronunciationScore Float
+  wordStressScore    Float
+  intonationScore    Float
+  clarityScore       Float
+  completedAt        DateTime @default(now())
+  createdAt          DateTime @default(now())
+
+  // The tracker matrix always looks up userId + monthIndex (baseline = 1, current = 3).
+  @@index([userId, monthIndex])
+  @@map("accent_assessments")
 }
 
 model RefreshToken {

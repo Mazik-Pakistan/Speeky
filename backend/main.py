@@ -23,12 +23,14 @@ from middlewares.error_handler import (
     unhandled_exception_handler,
     validation_error_handler,
 )
+from routers.accent_progress_routes import router as accent_progress_router
 from routers.auth_routes import router as auth_router
 from routers.user_routes import router as user_router
 from routers.assessment_routes import router as assessment_router
 from routers.coaching_routes import router as coaching_router
 from routers.conversation_routes import router as conversation_router
 from routers.interview_coach_routes import router as interview_coach_router
+from routers.progress_dashboard_routes import router as progress_dashboard_router
 from routers.resume_jd_routes import router as resume_jd_router
 from routers.scenario_routes import router as scenario_router
 from routers.session_memory_routes import router as session_memory_router
@@ -83,6 +85,8 @@ app.include_router(interview_coach_router, prefix="/api/interview-coach")
 app.include_router(session_memory_router, prefix="/api/session-memory")
 app.include_router(resume_jd_router, prefix="/api/resume-jd-intake")
 app.include_router(scenario_router, prefix="/api/scenarios")
+app.include_router(progress_dashboard_router, prefix="/api/progress-dashboard")
+app.include_router(accent_progress_router, prefix="/api/accent-progress")
 
 # Local-folder avatar storage, exposed to frontend as static files
 _uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
