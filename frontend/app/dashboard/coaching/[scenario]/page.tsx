@@ -17,6 +17,7 @@ import {
   type StartCoachingResult,
 } from "@/lib/coaching";
 import { useAutoScroll } from "@/lib/useAutoScroll";
+import { useSpeechRecognition } from "@/lib/useSpeechRecognition";
 
 interface ChatTurn {
   role: "assistant" | "user";
@@ -46,7 +47,11 @@ export default function CoachingSessionPage() {
   const [chatInput, setChatInput] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [voiceStatus, setVoiceStatus] = React.useState("");
   const scrollRef = useAutoScroll(step.name === "roleplay" ? step.turns.length : 0);
+  const voiceStartedAt = React.useRef<number | null>(null);
+  const { isSupported: isSpeechSupported, isListening, error: speechError, start, stop } =
+    useSpeechRecognition();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -98,19 +103,45 @@ export default function CoachingSessionPage() {
     try {
       const audioFeatures =
         step.session.input_mode === "audio"
-          ? { transcript: draftText, duration_seconds: 0 }
+          ? {
+              transcript: draftText,
+              duration_seconds: voiceStartedAt.current
+                ? Math.max(0, (performance.now() - voiceStartedAt.current) / 1000)
+                : 0,
+            }
           : undefined;
       const result = await submitCoachingSession(step.session.session_id, {
         submission: draftText,
         subject: step.scenarioMeta.key === "email_writing" ? subject : undefined,
         audio_features: audioFeatures,
       });
+      voiceStartedAt.current = null;
+      setVoiceStatus("");
       setStep({ name: "results", result });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function handleStartDraftVoice() {
+    if (step.name !== "draft" || step.session.input_mode !== "audio" || isListening) return;
+    voiceStartedAt.current = performance.now();
+    setVoiceStatus("Listening...");
+    const started = start((text) => {
+      setDraftText(text);
+      setVoiceStatus("Transcript captured. Review and submit.");
+    });
+    if (!started) {
+      voiceStartedAt.current = null;
+      setVoiceStatus("Voice input unavailable.");
+    }
+  }
+
+  function handleStopDraftVoice() {
+    stop();
+    setVoiceStatus("Voice stopped.");
   }
 
   async function handleSendChat() {
@@ -210,6 +241,26 @@ export default function CoachingSessionPage() {
               placeholder="Write your response here..."
             />
           </div>
+
+          {step.session.input_mode === "audio" ? (
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!isSpeechSupported}
+                onClick={isListening ? handleStopDraftVoice : handleStartDraftVoice}
+              >
+                {isListening ? "Stop Voice" : "Speak Response"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                {isSpeechSupported
+                  ? "Audio response sends transcript plus timing."
+                  : "Speech recognition not supported in this browser."}
+              </p>
+            </div>
+          ) : null}
+          {speechError ? <p className="mt-2 text-sm text-danger">{speechError}</p> : null}
+          {voiceStatus ? <p className="mt-2 text-sm text-muted-foreground">{voiceStatus}</p> : null}
 
           {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
 

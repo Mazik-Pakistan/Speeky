@@ -1,0 +1,15 @@
+audio-plot-lib==0.1.2
+audioop-lts==0.2.2
+audioread==3.1.0
+faster-whisper==1.2.1
+ko-speech-tools==0.1.0
+langcodes==3.5.0
+language_data==1.3.0
+livekit==1.1.13
+livekit-agents==1.6.5
+livekit-api==1.2.0
+livekit-blingfire==1.1.0
+livekit-local-inference==0.2.6
+livekit-plugins-silero==1.6.5
+livekit-protocol==1.1.19
+motor==3.7.1

@@ -34,14 +34,14 @@ enum PromptKind {
   REASSESSMENT
 }
 
-// Workplace English Coach scenarios
-// Just like in lib/prompts.WORKPLACE_SCENARIOS.
+// Workplace English Coach scenarios (WEC-US-08 .. WEC-US-12). Keys mirror
+// lib/prompts.WORKPLACE_SCENARIOS.
 enum CoachingScenario {
-  EMAIL_WRITING // (text)
-  CLIENT_COMMUNICATION // (audio roleplay)
-  MEETING_COMMUNICATION // (audio roleplay)
-  PRESENTATION_PREP // (audio)
-  GENERAL_WORKPLACE // (text or audio)
+  EMAIL_WRITING          // WEC-US-09 (text)
+  CLIENT_COMMUNICATION   // WEC-US-10 (audio roleplay)
+  MEETING_COMMUNICATION  // WEC-US-11 (audio roleplay)
+  PRESENTATION_PREP      // WEC-US-12 (audio)
+  GENERAL_WORKPLACE      // WEC-US-08 (text or audio)
 }
 
 enum CoachingInputMode {

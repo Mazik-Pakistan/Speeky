@@ -50,19 +50,43 @@ class AssessmentQuestionBank:
 
         self._by_id = {q.question_id: q for qs in self.questions.values() for q in qs}
     
-    def get_assessment_questions(self, count: int = 25) -> List[AssessmentQuestion]:
-        selected = [random.choice(qs) for qs in self.questions.values()]
-        all_questions = [q for qs in self.questions.values() for q in qs]
-        remaining = [q for q in all_questions if q not in selected]
+    def get_assessment_questions(
+        self,
+        text_count: int = 3,
+        audio_count: int = 7,
+    ) -> List[AssessmentQuestion]:
+        text_categories = {"introduction", "vocabulary"}
+        audio_categories = {"fluency", "pronunciation"}
 
-        needed = max(0, count - len(selected))
-        if needed:
-            selected.extend(
-                random.sample(remaining, min(needed, len(remaining)))
-            )
-            
+        text_questions = [
+            q for category, questions in self.questions.items()
+            if category in text_categories
+            for q in questions
+        ]
+        audio_questions = [
+            q for category, questions in self.questions.items()
+            if category in audio_categories
+            for q in questions
+        ]
+
+        selected: List[AssessmentQuestion] = []
+        selected.extend(random.sample(text_questions, min(text_count, len(text_questions))))
+        selected.extend(random.sample(audio_questions, min(audio_count, len(audio_questions))))
+
+        target_count = text_count + audio_count
+        if len(selected) < target_count:
+            all_questions = [q for qs in self.questions.values() for q in qs]
+            remaining = [q for q in all_questions if q not in selected]
+            needed = min(target_count - len(selected), len(remaining))
+            if needed:
+                selected.extend(random.sample(remaining, needed))
+
         random.shuffle(selected)
-        return selected[:count]
+        return selected[:target_count]
+
+    @staticmethod
+    def get_question_mode(question: AssessmentQuestion) -> str:
+        return "audio" if question.category in {"fluency", "pronunciation"} else "text"
 
     def get_by_id(self, question_id: str) -> Optional[AssessmentQuestion]:
         return self._by_id.get(question_id)
@@ -222,7 +246,7 @@ async def _begin_assessment(user_id: str):
     if existing:
         return JSONResponse(status_code=400, content={"error": "Assessment already in progress."})
 
-    questions = _question_bank.get_assessment_questions(count=5)
+    questions = _question_bank.get_assessment_questions(text_count=3, audio_count=7)
 
     assessment = await db.baselineassessment.create(
         data={"userId": user_id, "questionIds": [q.question_id for q in questions]}
@@ -234,6 +258,7 @@ async def _begin_assessment(user_id: str):
         "total_questions": len(questions),
         "current_question": questions[0].text,
         "question_index": 0,
+        "question_mode": _question_bank.get_question_mode(questions[0]),
         "estimated_duration_minutes": len(questions),
     }
 
@@ -325,6 +350,7 @@ async def submit_response(
         "status": "in_progress",
         "next_question": next_question.text if next_question else None,
         "question_index": new_index,
+        "next_question_mode": _question_bank.get_question_mode(next_question) if next_question else None,
         "previous_result": processing_result,
     }
 

@@ -2,18 +2,26 @@
 
 import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
-import { CheckCircle2, Headphones, PhoneOff, Volume2 } from "lucide-react";
+import { CheckCircle2, Headphones, Mic, MicOff, PhoneOff, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
   endConversationSession,
   getConversationTranscript,
+  getConversationVoiceToken,
   sendConversationMessage,
   type ConversationTurn,
   type EndConversationResult,
 } from "@/lib/conversation";
 import { playText } from "@/lib/tts";
 import { useAutoScroll } from "@/lib/useAutoScroll";
+import {
+  Room,
+  RoomEvent,
+  Track,
+  createLocalAudioTrack,
+  type LocalAudioTrack,
+} from "livekit-client";
 
 export default function ConversationSessionPage() {
   const params = useParams<{ sessionId: string }>();
@@ -27,9 +35,15 @@ export default function ConversationSessionPage() {
   const [playingIndex, setPlayingIndex] = React.useState<number | null>(null);
   const [audioMode, setAudioMode] = React.useState(false);
   const [summary, setSummary] = React.useState<EndConversationResult | null>(null);
+  const [isVoiceActive, setIsVoiceActive] = React.useState(false);
+  const [isConnectingVoice, setIsConnectingVoice] = React.useState(false);
+  const [voiceStatus, setVoiceStatus] = React.useState("");
+
   const scrollRef = useAutoScroll(turns?.length ?? 0);
   const lastAutoPlayed = React.useRef(-1);
   const audioModeWasOn = React.useRef(false);
+  const roomRef = React.useRef<Room | null>(null);
+  const microphoneTrackRef = React.useRef<LocalAudioTrack | null>(null);
 
   React.useEffect(() => {
     getConversationTranscript(params.sessionId)
@@ -37,36 +51,156 @@ export default function ConversationSessionPage() {
         setTurns(data.turns);
         setTopicLabel(data.topic_label);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Couldn't load this session."));
+      .catch((err) =>
+        setError(err instanceof ApiError ? err.message : "Couldn't load this session.")
+      );
   }, [params.sessionId]);
 
-  // Audio mode: auto-speak each new assistant turn as it arrives. Also
-  // re-speak the current last turn right when audioMode flips back on —
-  // otherwise the "already played" guard silently blocks it and toggling
-  // off/on again looks broken.
+  const refreshTranscript = React.useCallback(async () => {
+    try {
+      const data = await getConversationTranscript(params.sessionId);
+      setTurns(data.turns);
+      setTopicLabel(data.topic_label);
+    } catch (err) {
+      console.error("Failed to refresh conversation transcript:", err);
+    }
+  }, [params.sessionId]);
+
+  const handlePlay = React.useCallback(async (index: number, text: string) => {
+    setPlayingIndex(index);
+    try {
+      await playText(text);
+    } finally {
+      setPlayingIndex(null);
+    }
+  }, []);
+
   React.useEffect(() => {
     if (!audioMode || !turns?.length) {
       audioModeWasOn.current = audioMode;
       return;
     }
+
     const turnedOn = !audioModeWasOn.current;
     audioModeWasOn.current = true;
+
     const lastIndex = turns.length - 1;
     const last = turns[lastIndex];
     if (last.role === "assistant" && (turnedOn || lastAutoPlayed.current !== lastIndex)) {
       lastAutoPlayed.current = lastIndex;
-      handlePlay(lastIndex, last.content);
+      void handlePlay(lastIndex, last.content);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioMode, turns]);
+  }, [audioMode, turns, handlePlay]);
+
+  React.useEffect(() => {
+    if (!isVoiceActive) return;
+
+    const interval = window.setInterval(() => {
+      void refreshTranscript();
+    }, 1500);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [isVoiceActive, refreshTranscript]);
+
+  async function handleStartVoice() {
+    if (isVoiceActive || isConnectingVoice) return;
+
+    setError(null);
+    setIsConnectingVoice(true);
+    setVoiceStatus("Connecting voice...");
+
+    try {
+      const voiceData = await getConversationVoiceToken(params.sessionId);
+      const room = new Room();
+
+      room.on(RoomEvent.Disconnected, () => {
+        setIsVoiceActive(false);
+        setVoiceStatus("Voice disconnected.");
+      });
+
+      await room.connect(voiceData.url, voiceData.token);
+
+      const microphoneTrack = await createLocalAudioTrack();
+      await room.localParticipant.publishTrack(microphoneTrack, {
+        source: Track.Source.Microphone,
+      });
+
+      roomRef.current = room;
+      microphoneTrackRef.current = microphoneTrack;
+
+      setIsVoiceActive(true);
+      setVoiceStatus("Voice connected. Microphone is active.");
+    } catch (err) {
+      console.error("Failed to start voice:", err);
+
+      microphoneTrackRef.current?.stop();
+      microphoneTrackRef.current = null;
+
+      if (roomRef.current) {
+        await roomRef.current.disconnect();
+        roomRef.current = null;
+      }
+
+      setIsVoiceActive(false);
+      setVoiceStatus("Could not start voice.");
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Couldn't connect to voice mode. Check microphone permission and try again."
+      );
+    } finally {
+      setIsConnectingVoice(false);
+    }
+  }
+
+  async function handleStopVoice() {
+    setVoiceStatus("Stopping voice...");
+
+    try {
+      if (microphoneTrackRef.current) {
+        microphoneTrackRef.current.stop();
+        microphoneTrackRef.current = null;
+      }
+
+      if (roomRef.current) {
+        await roomRef.current.disconnect();
+        roomRef.current = null;
+      }
+    } finally {
+      setIsVoiceActive(false);
+      setVoiceStatus("Voice stopped.");
+      await refreshTranscript();
+    }
+  }
+
+  React.useEffect(() => {
+    return () => {
+      microphoneTrackRef.current?.stop();
+      microphoneTrackRef.current = null;
+
+      const room = roomRef.current;
+      roomRef.current = null;
+
+      if (room) {
+        void room.disconnect();
+      }
+    };
+  }, []);
 
   async function handleSend() {
     if (!message.trim() || isSending) return;
+
     setError(null);
     setIsSending(true);
     const text = message.trim();
     setMessage("");
-    setTurns((prev) => [...(prev ?? []), { role: "user", content: text, input_mode: "text", correction_chip: null, created_at: "" }]);
+    setTurns((prev) => [
+      ...(prev ?? []),
+      { role: "user", content: text, input_mode: "text", correction_chip: null, created_at: "" },
+    ]);
+
     try {
       const result = await sendConversationMessage(params.sessionId, { text });
       setTurns((prev) => [
@@ -80,13 +214,11 @@ export default function ConversationSessionPage() {
     }
   }
 
-  async function handlePlay(index: number, text: string) {
-    setPlayingIndex(index);
-    await playText(text); // falls back to browser TTS if server Piper voice is unavailable
-    setPlayingIndex(null);
-  }
-
   async function handleEnd() {
+    if (isVoiceActive) {
+      await handleStopVoice();
+    }
+
     setIsEnding(true);
     setError(null);
     try {
@@ -125,7 +257,9 @@ export default function ConversationSessionPage() {
           <div className="rounded-xl border border-border bg-surface-elevated p-4 text-center shadow-sm">
             <p className="text-xs text-muted-foreground">Pronunciation</p>
             <p className="mt-1 text-xl font-semibold text-foreground">
-              {summary.pronunciation_score !== null ? Math.round(summary.pronunciation_score) : "—"}
+              {summary.pronunciation_score !== null
+                ? Math.round(summary.pronunciation_score)
+                : "—"}
             </p>
           </div>
         </div>
@@ -141,7 +275,12 @@ export default function ConversationSessionPage() {
             </ul>
           </div>
         ) : null}
-        <Button size="lg" variant="outline" className="self-center" onClick={() => router.push("/dashboard/conversation")}>
+        <Button
+          size="lg"
+          variant="outline"
+          className="self-center"
+          onClick={() => router.push("/dashboard/conversation")}
+        >
           Start Another Conversation
         </Button>
       </div>
@@ -160,7 +299,7 @@ export default function ConversationSessionPage() {
             onClick={() => setAudioMode((v) => !v)}
             aria-pressed={audioMode}
             aria-label={audioMode ? "Turn off audio mode" : "Turn on audio mode"}
-            title={audioMode ? "Audio mode on — replies are spoken automatically" : "Turn on audio mode"}
+            title={audioMode ? "Audio mode on - replies are spoken automatically" : "Turn on audio mode"}
             className={
               "flex h-9 w-9 items-center justify-center rounded-xl border transition-colors " +
               (audioMode
@@ -195,7 +334,7 @@ export default function ConversationSessionPage() {
                 {turn.role === "assistant" ? (
                   <button
                     type="button"
-                    onClick={() => handlePlay(i, turn.content)}
+                    onClick={() => void handlePlay(i, turn.content)}
                     disabled={playingIndex === i}
                     aria-label="Play audio"
                     className="shrink-0 text-primary hover:opacity-70 disabled:animate-pulse"
@@ -208,7 +347,9 @@ export default function ConversationSessionPage() {
                 <div className="mt-1.5 rounded-lg bg-warning/10 px-3 py-2 text-xs text-foreground">
                   <span className="line-through opacity-70">{turn.correction_chip.original}</span>{" "}
                   <span className="font-medium text-success">{turn.correction_chip.corrected}</span>
-                  <p className="mt-0.5 text-muted-foreground">{turn.correction_chip.explanation}</p>
+                  <p className="mt-0.5 text-muted-foreground">
+                    {turn.correction_chip.explanation}
+                  </p>
                 </div>
               ) : null}
             </div>
@@ -225,16 +366,39 @@ export default function ConversationSessionPage() {
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                handleSend();
+                void handleSend();
               }
             }}
             placeholder="Type a message..."
             className="h-11 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
           />
-          <Button size="md" loading={isSending} disabled={!message.trim()} onClick={handleSend}>
+          <Button size="md" loading={isSending} disabled={!message.trim()} onClick={() => void handleSend()}>
             Send
           </Button>
+
+          {isVoiceActive ? (
+            <Button size="md" variant="outline" onClick={() => void handleStopVoice()}>
+              <MicOff className="h-4 w-4" aria-hidden="true" />
+              Stop Voice
+            </Button>
+          ) : (
+            <Button
+              size="md"
+              variant="outline"
+              loading={isConnectingVoice}
+              onClick={() => void handleStartVoice()}
+            >
+              <Mic className="h-4 w-4" aria-hidden="true" />
+              Start Voice
+            </Button>
+          )}
         </div>
+
+        {voiceStatus ? (
+          <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+            {voiceStatus}
+          </p>
+        ) : null}
       </div>
     </div>
   );

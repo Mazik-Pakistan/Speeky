@@ -8,6 +8,7 @@ export interface StartAssessmentResult {
   total_questions: number;
   current_question: string;
   question_index: number;
+  question_mode: "text" | "audio";
   estimated_duration_minutes: number;
   is_re_assessment?: boolean;
 }
@@ -16,6 +17,7 @@ export interface SubmitResponseInProgress {
   status: "in_progress";
   next_question: string | null;
   question_index: number;
+  next_question_mode: "text" | "audio" | null;
   previous_result: {
     question_id: string;
     category: string | null;
@@ -132,7 +134,14 @@ export function startAssessment() {
 
 export function submitAssessmentResponse(
   assessmentId: string,
-  data: { text_data: string; clipboard_detected?: boolean }
+  data: {
+    text_data: string;
+    clipboard_detected?: boolean;
+    audio_features?: {
+      duration_seconds: number;
+      word_timings?: { word: string; start: number; end: number }[];
+    };
+  }
 ) {
   return api<SubmitResponseResult>(`/assessment/${assessmentId}/respond`, {
     method: "POST",
