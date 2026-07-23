@@ -25,9 +25,12 @@ What is deliberately NOT handled here (client/device concerns, not backend):
     session_type="conversation" and this session's id into those existing endpoints.
 """
 
+import logging
 import re
 import time
 import uuid
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
@@ -36,6 +39,8 @@ from fastapi.responses import JSONResponse, Response
 
 from lib import ai_client, grammar_checker, kv_store, llm_client, pii, prompts, session_scorer, tts_client
 from lib.session_scorer import AudioFeatures
+from lib.code_switch.code_switch_text import TextCodeSwitchDetector
+from services.code_switch_service import log_detected_word
 from middlewares.auth_middleware import require_auth
 from prisma.enums import LearningLevel
 from schemas.conversation_schemas import (
@@ -384,6 +389,23 @@ async def _send_message(user_id: str, session_id: str, req: SendMessageSchema) -
     session["turns"].append({"role": "assistant", "content": reply, "input_mode": None,
                              "correction_chip": None, "created_at": _now()})
     await kv_store.store.update(NAMESPACE, session_id, session)
+
+    # US-152: Silently detect code-switched words and log to the personal word list.
+    # Runs after the reply is already saved — never blocks the user-facing response.
+    if not session_ended and llm_client.is_configured():
+        try:
+            detector = TextCodeSwitchDetector()
+            detection = await detector.detect(text)
+            for flagged in detection.get("flagged", []):
+                await log_detected_word(
+                    user_id=user_id,
+                    word=flagged["token"],
+                    english_equivalent=flagged["suggestion"],
+                    context_sentence=text,
+                )
+        except Exception as exc:
+            # Never let detection errors surface to the user.
+            logger.warning("US-152 code-switch detection failed silently: %s", exc)
 
     return {
         "session_id": session_id, "reply": reply, "level": session["level"],

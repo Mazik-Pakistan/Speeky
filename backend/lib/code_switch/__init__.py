@@ -29,6 +29,7 @@ from .code_switch_tolerance import CodeSwitchToleranceWrapper
 from .cultural_terms import CulturalTermClassifier, TermCategory
 from .retry_drill import RetryDrillService
 from .word_mastery import WordMasteryTracker, WordProgress
+from .word_list_store import CodeSwitchedWord, CodeSwitchWordListStore
 
 __all__ = [
     "FormalityTier",
@@ -42,4 +43,6 @@ __all__ = [
     "RetryDrillService",
     "WordProgress",
     "WordMasteryTracker",
+    "CodeSwitchedWord",
+    "CodeSwitchWordListStore",
 ]

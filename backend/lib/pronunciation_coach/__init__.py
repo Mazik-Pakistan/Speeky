@@ -42,6 +42,7 @@ from .pronunciation_reliability import (
     SubmissionOutcome,
 )
 from .trouble_words import TroubleWordEntry, TroubleWordsBank, TroubleWordsConfig
+from .asr_adapter import word_timings_to_attempts
 
 __all__ = [
     "ConfidenceGrammarAnalyzer",
@@ -71,4 +72,5 @@ __all__ = [
     "TroubleWordEntry",
     "TroubleWordsBank",
     "TroubleWordsConfig",
+    "word_timings_to_attempts",
 ]
