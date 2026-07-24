@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Pencil, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { FlaskConical, Pencil, Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,8 +13,10 @@ import {
   adminDeleteCustomScenario,
   adminListCustomScenarios,
   adminUpdateCustomScenario,
+  previewCustomScenario,
   type CustomScenario,
   type CustomScenarioInput,
+  type ScenarioPreviewTurn,
 } from "@/lib/scenario";
 import { EXPLORE_CATEGORIES } from "@/lib/dashboard-data";
 import { useAuth } from "@/contexts/AuthContext";
@@ -34,7 +36,9 @@ const EMPTY_FORM: CustomScenarioInput = {
 
 export default function AdminScenariosPage() {
   const { user, isLoading: authLoading } = useAuth();
-  const [scenarios, setScenarios] = React.useState<CustomScenario[] | null>(null);
+  const [scenarios, setScenarios] = React.useState<CustomScenario[] | null>(
+    null,
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [modalOpen, setModalOpen] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
@@ -42,24 +46,43 @@ export default function AdminScenariosPage() {
   const [vocabText, setVocabText] = React.useState("");
   const [formError, setFormError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const [previewOpen, setPreviewOpen] = React.useState(false);
+  const [previewTurns, setPreviewTurns] = React.useState<ScenarioPreviewTurn[]>(
+    [],
+  );
+  const [previewInput, setPreviewInput] = React.useState("");
+  const [previewLoading, setPreviewLoading] = React.useState(false);
+  const [previewError, setPreviewError] = React.useState<string | null>(null);
 
   const isAdmin = user?.role === "ADMIN";
 
   const refresh = React.useCallback(() => {
     adminListCustomScenarios()
       .then((data) => setScenarios(data.scenarios))
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Couldn't load scenarios."));
+      .catch((err) =>
+        setError(
+          err instanceof ApiError ? err.message : "Couldn't load scenarios.",
+        ),
+      );
   }, []);
 
   React.useEffect(() => {
     if (isAdmin) refresh();
   }, [isAdmin, refresh]);
 
+  function resetPreview() {
+    setPreviewOpen(false);
+    setPreviewTurns([]);
+    setPreviewInput("");
+    setPreviewError(null);
+  }
+
   function openCreate() {
     setEditingId(null);
     setForm(EMPTY_FORM);
     setVocabText("");
     setFormError(null);
+    resetPreview();
     setModalOpen(true);
   }
 
@@ -79,7 +102,78 @@ export default function AdminScenariosPage() {
     });
     setVocabText(scenario.target_vocab.join(", "));
     setFormError(null);
+    resetPreview();
     setModalOpen(true);
+  }
+
+  async function handleTogglePreview() {
+    if (previewOpen) {
+      resetPreview();
+      return;
+    }
+    setPreviewOpen(true);
+    setPreviewError(null);
+    setPreviewLoading(true);
+    try {
+      const targetVocab = vocabText
+        .split(",")
+        .map((w) => w.trim())
+        .filter(Boolean);
+      const { reply } = await previewCustomScenario({
+        persona: form.persona || "Persona",
+        system_prompt: form.system_prompt || "Stay in character.",
+        opening_line: form.opening_line,
+        target_vocab: targetVocab,
+        goal_type: form.goal_type,
+        safety_mode: form.safety_mode,
+        corporate_tone: form.corporate_tone,
+        turns: [],
+      });
+      setPreviewTurns([{ role: "assistant", content: reply }]);
+    } catch (err) {
+      setPreviewError(
+        err instanceof ApiError ? err.message : "Couldn't start the preview.",
+      );
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function handleSendPreview() {
+    if (!previewInput.trim() || previewLoading) return;
+    setPreviewError(null);
+    const message = previewInput.trim();
+    setPreviewInput("");
+    const turnsSoFar = previewTurns;
+    setPreviewTurns([...turnsSoFar, { role: "user", content: message }]);
+    setPreviewLoading(true);
+    try {
+      const targetVocab = vocabText
+        .split(",")
+        .map((w) => w.trim())
+        .filter(Boolean);
+      const { reply } = await previewCustomScenario({
+        persona: form.persona || "Persona",
+        system_prompt: form.system_prompt || "Stay in character.",
+        opening_line: form.opening_line,
+        target_vocab: targetVocab,
+        goal_type: form.goal_type,
+        safety_mode: form.safety_mode,
+        corporate_tone: form.corporate_tone,
+        turns: turnsSoFar,
+        message,
+      });
+      setPreviewTurns((prev) => [
+        ...prev,
+        { role: "assistant", content: reply },
+      ]);
+    } catch (err) {
+      setPreviewError(
+        err instanceof ApiError ? err.message : "Something went wrong.",
+      );
+    } finally {
+      setPreviewLoading(false);
+    }
   }
 
   async function handleSave() {
@@ -89,11 +183,15 @@ export default function AdminScenariosPage() {
       .map((w) => w.trim())
       .filter(Boolean);
     if (targetVocab.length < 3) {
-      setFormError("Add at least 3 target vocabulary words, separated by commas.");
+      setFormError(
+        "Add at least 3 target vocabulary words, separated by commas.",
+      );
       return;
     }
     if (form.intent.trim().length < 10) {
-      setFormError("Add a short learner-facing description (at least 10 characters).");
+      setFormError(
+        "Add a short learner-facing description (at least 10 characters).",
+      );
       return;
     }
     const payload: CustomScenarioInput = { ...form, target_vocab: targetVocab };
@@ -107,19 +205,26 @@ export default function AdminScenariosPage() {
       setModalOpen(false);
       refresh();
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Couldn't save this scenario.");
+      setFormError(
+        err instanceof ApiError ? err.message : "Couldn't save this scenario.",
+      );
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete(scenario: CustomScenario) {
-    if (!window.confirm(`Delete "${scenario.title}"? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete "${scenario.title}"? This cannot be undone.`))
+      return;
     try {
       await adminDeleteCustomScenario(scenario.id);
       refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't delete this scenario.");
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Couldn't delete this scenario.",
+      );
     }
   }
 
@@ -142,8 +247,8 @@ export default function AdminScenariosPage() {
             Custom Scenarios
           </h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-            Add or edit Scenario-Based Learning practice scenarios. Changes go live for
-            learners immediately — no app update needed.
+            Add or edit Scenario-Based Learning practice scenarios. Changes go
+            live for learners immediately — no app update needed.
           </p>
         </div>
         <Button size="md" onClick={openCreate}>
@@ -167,11 +272,22 @@ export default function AdminScenariosPage() {
           </thead>
           <tbody>
             {(scenarios ?? []).map((scenario) => (
-              <tr key={scenario.id} className="border-b border-border last:border-0">
-                <td className="px-4 py-3 font-medium text-foreground">{scenario.title}</td>
-                <td className="px-4 py-3 text-muted-foreground">{scenario.category}</td>
-                <td className="px-4 py-3 text-muted-foreground">{scenario.persona}</td>
-                <td className="px-4 py-3 text-muted-foreground">{scenario.goal_type}</td>
+              <tr
+                key={scenario.id}
+                className="border-b border-border last:border-0"
+              >
+                <td className="px-4 py-3 font-medium text-foreground">
+                  {scenario.title}
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {scenario.category}
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {scenario.persona}
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {scenario.goal_type}
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
                     <button
@@ -196,7 +312,10 @@ export default function AdminScenariosPage() {
             ))}
             {scenarios && scenarios.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                <td
+                  colSpan={5}
+                  className="px-4 py-8 text-center text-muted-foreground"
+                >
                   No custom scenarios yet.
                 </td>
               </tr>
@@ -207,7 +326,10 @@ export default function AdminScenariosPage() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => {
+          setModalOpen(false);
+          resetPreview();
+        }}
         title={editingId ? "Edit Scenario" : "New Scenario"}
         className="max-w-lg"
       >
@@ -218,7 +340,9 @@ export default function AdminScenariosPage() {
             onChange={(e) => setForm({ ...form, title: e.target.value })}
           />
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-foreground">Category</label>
+            <label className="text-sm font-medium text-foreground">
+              Category
+            </label>
             <select
               value={form.category}
               onChange={(e) => setForm({ ...form, category: e.target.value })}
@@ -233,7 +357,7 @@ export default function AdminScenariosPage() {
           </div>
           <Input
             label="Persona"
-            placeholder="e.g. Strict Manager"
+            placeholder="e.g. Product Manager"
             value={form.persona}
             onChange={(e) => setForm({ ...form, persona: e.target.value })}
           />
@@ -248,7 +372,9 @@ export default function AdminScenariosPage() {
             label="Persona instructions / scenario goal (prompt)"
             rows={5}
             value={form.system_prompt}
-            onChange={(e) => setForm({ ...form, system_prompt: e.target.value })}
+            onChange={(e) =>
+              setForm({ ...form, system_prompt: e.target.value })
+            }
             hint="The actual instructions given to the AI: who it plays, how it should react, what the learner must accomplish."
           />
           <Input
@@ -264,11 +390,16 @@ export default function AdminScenariosPage() {
             hint="Comma-separated, at least 3 words."
           />
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-foreground">Goal type</label>
+            <label className="text-sm font-medium text-foreground">
+              Goal type
+            </label>
             <select
               value={form.goal_type}
               onChange={(e) =>
-                setForm({ ...form, goal_type: e.target.value as CustomScenarioInput["goal_type"] })
+                setForm({
+                  ...form,
+                  goal_type: e.target.value as CustomScenarioInput["goal_type"],
+                })
               }
               className="h-11 w-full rounded-xl border border-input bg-surface px-4 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
             >
@@ -277,10 +408,14 @@ export default function AdminScenariosPage() {
             </select>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-foreground">Professional tone expected</span>
+            <span className="text-sm font-medium text-foreground">
+              Professional tone expected
+            </span>
             <Switch
               checked={form.corporate_tone}
-              onCheckedChange={(checked) => setForm({ ...form, corporate_tone: checked })}
+              onCheckedChange={(checked) =>
+                setForm({ ...form, corporate_tone: checked })
+              }
               label="Professional tone expected"
               hideLabel
             />
@@ -291,13 +426,84 @@ export default function AdminScenariosPage() {
             </span>
             <Switch
               checked={form.safety_mode}
-              onCheckedChange={(checked) => setForm({ ...form, safety_mode: checked })}
+              onCheckedChange={(checked) =>
+                setForm({ ...form, safety_mode: checked })
+              }
               label="Medical-emergency safety break"
               hideLabel
             />
           </div>
 
-          {formError ? <p className="text-sm text-danger">{formError}</p> : null}
+          <Button
+            variant="outline"
+            size="sm"
+            loading={previewOpen && previewLoading && previewTurns.length === 0}
+            onClick={handleTogglePreview}
+          >
+            <FlaskConical className="h-4 w-4" aria-hidden="true" />
+            {previewOpen ? "Hide sandbox tester" : "Test this scenario"}
+          </Button>
+
+          {previewOpen ? (
+            <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3">
+              <p className="text-xs text-muted-foreground">
+                Try the prompt above against the AI — nothing here is saved or
+                shown to learners.
+              </p>
+              <div className="flex max-h-48 flex-col gap-2 overflow-y-auto">
+                {previewTurns.map((turn, i) => (
+                  <div
+                    key={i}
+                    className={
+                      turn.role === "user"
+                        ? "ml-auto max-w-[85%]"
+                        : "max-w-[85%]"
+                    }
+                  >
+                    <div
+                      className={
+                        turn.role === "user"
+                          ? "rounded-lg bg-primary px-3 py-2 text-xs text-primary-foreground"
+                          : "rounded-lg bg-secondary px-3 py-2 text-xs text-secondary-foreground"
+                      }
+                    >
+                      {turn.content}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {previewError ? (
+                <p className="text-xs text-danger">{previewError}</p>
+              ) : null}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={previewInput}
+                  onChange={(e) => setPreviewInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendPreview();
+                    }
+                  }}
+                  placeholder="Try a test message..."
+                  className="h-9 flex-1 rounded-lg border border-input bg-surface-elevated px-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
+                />
+                <Button
+                  size="sm"
+                  loading={previewLoading && previewTurns.length > 0}
+                  disabled={!previewInput.trim()}
+                  onClick={handleSendPreview}
+                >
+                  Send
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {formError ? (
+            <p className="text-sm text-danger">{formError}</p>
+          ) : null}
 
           <Button size="lg" loading={saving} onClick={handleSave}>
             {editingId ? "Save Changes" : "Publish Scenario"}

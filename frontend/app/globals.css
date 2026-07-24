@@ -12,60 +12,98 @@
 
 @layer base {
   :root {
-    --background: 211 40% 97%;         /* #FFFFFF */
-    --surface: 210 40% 98%;              /* #F8FAFC */
-    --surface-elevated: 0 0% 100%;       /* #FFFFFF */
+    --background: 211 40% 97%;
+    /* #FFFFFF */
+    --surface: 210 40% 98%;
+    /* #F8FAFC */
+    --surface-elevated: 0 0% 100%;
+    /* #FFFFFF */
 
-    --foreground: 222 47% 11%;           /* #0F172A */
-    --muted: 192 35% 95%;                /* #EBF5F7 — whisper cyan tint */
-    --muted-foreground: 215 16% 47%;     /* #64748B */
+    --foreground: 222 47% 11%;
+    /* #0F172A */
+    --muted: 192 35% 95%;
+    /* #EBF5F7 — whisper cyan tint */
+    --muted-foreground: 215 16% 47%;
+    /* #64748B */
 
-    --border: 196 28% 88%;               /* #D6E8ED — muted cyan-blue border */
-    --input: 196 28% 88%;                /* #D6E8ED */
-    --ring: 224 100% 22%;                /* #00246E */
+    --border: 196 28% 88%;
+    /* #D6E8ED — muted cyan-blue border */
+    --input: 196 28% 88%;
+    /* #D6E8ED */
+    --ring: 224 100% 22%;
+    /* #00246E */
 
-    --primary: 200 100% 22%;             /* #00246E — Royal Blue */
-    --primary-hover: 200 66% 33%;        /* #1D3B8A */
-    --primary-foreground: 0 0% 100%;     /* #FFFFFF */
+    --primary: 200 100% 22%;
+    /* #00246E — Royal Blue */
+    --primary-hover: 200 66% 33%;
+    /* #1D3B8A */
+    --primary-foreground: 0 0% 100%;
+    /* #FFFFFF */
 
-    --secondary: 192 55% 91%;            /* #D5EDF2 — soft steel-cyan wash */
-    --secondary-foreground: 196 82% 18%; /* #065368 */
+    --secondary: 192 55% 91%;
+    /* #D5EDF2 — soft steel-cyan wash */
+    --secondary-foreground: 196 82% 18%;
+    /* #065368 */
 
-    --accent: 190 82% 31%;               /* #0E7490 — Steel Cyan */
-    --accent-hover: 190 78% 37%;         /* #1189A8 */
-    --accent-foreground: 0 0% 100%;      /* #FFFFFF */
+    --accent: 190 82% 31%;
+    /* #0E7490 — Steel Cyan */
+    --accent-hover: 190 78% 37%;
+    /* #1189A8 */
+    --accent-foreground: 0 0% 100%;
+    /* #FFFFFF */
 
-    --success: 142 72% 29%;              /* #15803D */
-    --warning: 32 92% 37%;               /* #B45309 */
-    --danger: 0 74% 51%;                 /* #DC2626 */
-    --info: 224 100% 22%;                /* #00246E — primary as info */
+    --success: 142 72% 29%;
+    /* #15803D */
+    --warning: 32 92% 37%;
+    /* #B45309 */
+    --danger: 0 74% 51%;
+    /* #DC2626 */
+    --info: 224 100% 22%;
+    /* #00246E — primary as info */
 
     --radius: 0.75rem;
   }
 
   .dark {
-    --background: 222 47% 8%;            /* #0B1120 — deep navy */
-    --surface: 222 44% 11%;              /* #111B2E */
-    --surface-elevated: 222 40% 16%;     /* #1A2640 */
+    --background: 222 47% 8%;
+    /* #0B1120 — deep navy */
+    --surface: 222 44% 11%;
+    /* #111B2E */
+    --surface-elevated: 222 40% 16%;
+    /* #1A2640 */
 
-    --foreground: 193 40% 94%;           /* #E6F3F6 — steel-cyan white */
-    --muted: 220 32% 18%;                /* #1C2840 */
-    --muted-foreground: 205 20% 60%;     /* #839BB0 */
+    --foreground: 193 40% 94%;
+    /* #E6F3F6 — steel-cyan white */
+    --muted: 220 32% 18%;
+    /* #1C2840 */
+    --muted-foreground: 205 20% 60%;
+    /* #839BB0 */
 
-    --border: 208 26% 22%;               /* #222F42 */
-    --input: 208 26% 22%;                /* #222F42 */
-    --ring: 190 42% 58%;                 /* #52B8CC */
+    --border: 208 26% 22%;
+    /* #222F42 */
+    --input: 208 26% 22%;
+    /* #222F42 */
+    --ring: 190 42% 58%;
+    /* #52B8CC */
 
-    --primary: 224 55% 72%;              /* #849EC8 — muted dusty blue, pastel */
-    --primary-hover: 224 58% 78%;        /* #97AED4 */
-    --primary-foreground: 224 60% 12%;   /* #0A1538 */
+    --primary: 224 55% 72%;
+    /* #849EC8 — muted dusty blue, pastel */
+    --primary-hover: 224 58% 78%;
+    /* #97AED4 */
+    --primary-foreground: 224 60% 12%;
+    /* #0A1538 */
 
-    --secondary: 220 32% 18%;            /* #1C2840 */
-    --secondary-foreground: 224 55% 72%; /* #849EC8 */
+    --secondary: 220 32% 18%;
+    /* #1C2840 */
+    --secondary-foreground: 224 55% 72%;
+    /* #849EC8 */
 
-    --accent: 190 42% 58%;               /* #52B8CC — muted steel cyan for dark */
-    --accent-hover: 190 42% 65%;         /* #6BC6D8 */
-    --accent-foreground: 190 82% 9%;     /* #041E28 */
+    --accent: 190 42% 58%;
+    /* #52B8CC — muted steel cyan for dark */
+    --accent-hover: 190 42% 65%;
+    /* #6BC6D8 */
+    --accent-foreground: 190 82% 9%;
+    /* #041E28 */
 
     --success: 142 45% 42%;
     --warning: 32 75% 50%;
@@ -77,6 +115,8 @@
 
   * {
     @apply border-border;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
   }
 
   body {

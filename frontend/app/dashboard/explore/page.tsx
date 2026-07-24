@@ -1,7 +1,16 @@
 "use client";
 
 import * as React from "react";
-import { ArrowRight, Briefcase, FileText, Lock, MessagesSquare, Search, UserSquare2 } from "lucide-react";
+import Link from "next/link";
+import {
+  ArrowRight,
+  Briefcase,
+  FileText,
+  Lock,
+  MessagesSquare,
+  Search,
+  UserSquare2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   EXPLORE_CATEGORIES,
@@ -23,7 +32,8 @@ function toExploreScenario(scenario: ScenarioListItem): ExploreScenario {
     icon: EXPLORE_CATEGORY_ICONS[category],
     title: scenario.label,
     description: scenario.intent,
-    difficulty: scenario.goal_type === "negotiation" ? "Negotiation" : "Roleplay",
+    difficulty:
+      scenario.goal_type === "negotiation" ? "Negotiation" : "Roleplay",
     href: `/dashboard/scenarios/${scenario.key}`,
   };
 }
@@ -31,8 +41,12 @@ function toExploreScenario(scenario: ScenarioListItem): ExploreScenario {
 export default function ExplorePage() {
   const { access } = useAssessmentAccess();
   const [query, setQuery] = React.useState("");
-  const [category, setCategory] = React.useState<ExploreCategory | "All">("All");
-  const [liveScenarios, setLiveScenarios] = React.useState<ExploreScenario[]>([]);
+  const [category, setCategory] = React.useState<ExploreCategory | "All">(
+    "All",
+  );
+  const [liveScenarios, setLiveScenarios] = React.useState<ExploreScenario[]>(
+    [],
+  );
 
   const isUnlocked = access?.access_level === "full_access";
 
@@ -45,9 +59,19 @@ export default function ExplorePage() {
       });
   }, [isUnlocked]);
 
-  const allScenarios = [...EXPLORE_STATIC_SCENARIOS, ...liveScenarios];
+  // Keep 1st appearance of each scenario.
+  const seen = new Set();
+  const allScenarios = [...EXPLORE_STATIC_SCENARIOS, ...liveScenarios].filter(
+    (scenario) => {
+      if (seen.has(scenario.id)) return false;
+      seen.add(scenario.id);
+      return true;
+    },
+  );
+
   const scenarios = allScenarios.filter((scenario) => {
-    const matchesCategory = category === "All" || scenario.category === category;
+    const matchesCategory =
+      category === "All" || scenario.category === category;
     const matchesQuery = scenario.title
       .toLowerCase()
       .includes(query.trim().toLowerCase());
@@ -67,42 +91,51 @@ export default function ExplorePage() {
 
       {!isUnlocked ? (
         <div className="flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
-          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+          <Lock
+            className="mt-0.5 h-4 w-4 shrink-0 text-warning"
+            aria-hidden="true"
+          />
           {access?.locked_message ??
             "Complete your baseline assessment to unlock scenario practice."}
         </div>
       ) : null}
 
       <div>
-        <h2 className="font-serif text-xl font-semibold text-foreground">AI Coach</h2>
+        <h2 className="font-serif text-xl font-semibold text-foreground">
+          AI Coach
+        </h2>
         <div className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2">
           {[
             {
               href: "/dashboard/conversation",
               icon: MessagesSquare,
               title: "AI Conversation Practice",
-              description: "Open-ended conversation practice on any topic, with your AI coach.",
+              description:
+                "Open-ended conversation practice on any topic, with your AI coach.",
               gated: true,
             },
             {
               href: "/dashboard/coaching",
               icon: Briefcase,
               title: "Workplace English Coach",
-              description: "Emails, client calls, meetings, and presentations — graded for tone and clarity.",
+              description:
+                "Emails, client calls, meetings, and presentations — graded for tone and clarity.",
               gated: true,
             },
             {
               href: "/dashboard/interview-coach",
               icon: UserSquare2,
               title: "Interview Coach",
-              description: "Standard, panel, case-study, and multi-round mock interviews.",
+              description:
+                "Standard, panel, case-study, and multi-round mock interviews.",
               gated: false,
             },
             {
               href: "/dashboard/resume-jd",
               icon: FileText,
               title: "Resume & Job Description",
-              description: "Upload your resume and a JD to tailor your interview practice.",
+              description:
+                "Upload your resume and a JD to tailor your interview practice.",
               gated: false,
             },
           ].map((item) => {
@@ -112,7 +145,8 @@ export default function ExplorePage() {
               <div
                 className={cn(
                   "group flex h-full flex-col justify-between rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm transition-all duration-200",
-                  itemUnlocked && "cursor-pointer hover:-translate-y-1 hover:shadow-md",
+                  itemUnlocked &&
+                    "cursor-pointer hover:-translate-y-1 hover:shadow-md",
                   !itemUnlocked && "opacity-60",
                 )}
               >
@@ -123,24 +157,31 @@ export default function ExplorePage() {
                   <h3 className="mt-4 font-serif text-lg font-semibold text-foreground">
                     {item.title}
                   </h3>
-                  <p className="mt-2 text-sm text-muted-foreground">{item.description}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {item.description}
+                  </p>
                 </div>
                 <div className="mt-6 flex items-center gap-2 text-sm font-medium text-primary">
                   {itemUnlocked ? (
                     <>
                       Start
-                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" aria-hidden="true" />
+                      <ArrowRight
+                        className="h-4 w-4 transition-transform group-hover:translate-x-1"
+                        aria-hidden="true"
+                      />
                     </>
                   ) : (
-                    <span className="text-muted-foreground">Complete assessment to unlock</span>
+                    <span className="text-muted-foreground">
+                      Complete assessment to unlock
+                    </span>
                   )}
                 </div>
               </div>
             );
             return itemUnlocked ? (
-              <a key={item.href} href={item.href}>
+              <Link key={item.href} href={item.href}>
                 {card}
-              </a>
+              </Link>
             ) : (
               <div key={item.href}>{card}</div>
             );
@@ -149,7 +190,9 @@ export default function ExplorePage() {
       </div>
 
       <div>
-        <h2 className="font-serif text-xl font-semibold text-foreground">Choose Your Mission</h2>
+        <h2 className="font-serif text-xl font-semibold text-foreground">
+          Choose Your Mission
+        </h2>
       </div>
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -195,7 +238,8 @@ export default function ExplorePage() {
             <div
               className={cn(
                 "group flex h-full flex-col justify-between rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm transition-all duration-200",
-                clickable && "cursor-pointer hover:-translate-y-1 hover:shadow-md",
+                clickable &&
+                  "cursor-pointer hover:-translate-y-1 hover:shadow-md",
                 locked && "opacity-60",
               )}
             >
@@ -205,7 +249,9 @@ export default function ExplorePage() {
                     <Icon className="h-5 w-5" aria-hidden="true" />
                   </span>
                   <span className="flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {locked ? <Lock className="h-3 w-3" aria-hidden="true" /> : null}
+                    {locked ? (
+                      <Lock className="h-3 w-3" aria-hidden="true" />
+                    ) : null}
                     {locked ? "Locked" : scenario.difficulty}
                   </span>
                 </div>
@@ -238,21 +284,27 @@ export default function ExplorePage() {
 
           if (clickable && scenario.href) {
             return (
-              <a
+              <Link
                 key={scenario.id}
                 href={scenario.href}
-                className={cn("animate-fade-up", scenario.featured && "lg:col-span-2")}
+                className={cn(
+                  "animate-fade-up",
+                  scenario.featured && "lg:col-span-2",
+                )}
                 style={wrapperStyle}
               >
                 {card}
-              </a>
+              </Link>
             );
           }
 
           return (
             <div
               key={scenario.id}
-              className={cn("animate-fade-up", scenario.featured && "lg:col-span-2")}
+              className={cn(
+                "animate-fade-up",
+                scenario.featured && "lg:col-span-2",
+              )}
               style={wrapperStyle}
             >
               {card}

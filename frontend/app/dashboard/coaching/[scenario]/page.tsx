@@ -2,13 +2,14 @@
 
 import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
-import { CheckCircle2, Sparkles, TriangleAlert } from "lucide-react";
+import { CheckCircle2, Mic, MicOff, Sparkles, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
 import {
   getCoachingScenarios,
+  getCoachingVoiceToken,
   sendRoleplayTurn,
   startCoachingSession,
   submitCoachingSession,
@@ -17,6 +18,8 @@ import {
   type StartCoachingResult,
 } from "@/lib/coaching";
 import { useAutoScroll } from "@/lib/useAutoScroll";
+import { useLiveKitVoice } from "@/lib/useLiveKitVoice";
+import { useSpeechRecognition } from "@/lib/useSpeechRecognition";
 
 interface ChatTurn {
   role: "assistant" | "user";
@@ -46,7 +49,38 @@ export default function CoachingSessionPage() {
   const [chatInput, setChatInput] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [voiceStatus, setVoiceStatus] = React.useState("");
   const scrollRef = useAutoScroll(step.name === "roleplay" ? step.turns.length : 0);
+  const voiceStartedAt = React.useRef<number | null>(null);
+  const { isSupported: isSpeechSupported, isListening, error: speechError, start, stop } =
+    useSpeechRecognition();
+
+  // Voice mode for the roleplay chat turns only (draft submission keeps the browser
+  // dictation above — it's a one-shot monologue, not a back-and-forth). Same LiveKit
+  // mic-in pattern as Conversation/Scenarios: transcript fills chatInput, never auto-sent.
+  const roleplaySessionIdRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (step.name === "roleplay") roleplaySessionIdRef.current = step.session.session_id;
+  }, [step]);
+  const fetchVoiceToken = React.useCallback(() => {
+    if (!roleplaySessionIdRef.current) return Promise.reject(new Error("No active session"));
+    return getCoachingVoiceToken(roleplaySessionIdRef.current);
+  }, []);
+  const onTranscript = React.useCallback((text: string) => {
+    setChatInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+  }, []);
+  const {
+    isVoiceActive,
+    isConnectingVoice,
+    isStoppingVoice,
+    voiceStatus: liveVoiceStatus,
+    error: voiceError,
+    startVoice,
+    stopVoice,
+  } = useLiveKitVoice(fetchVoiceToken, onTranscript);
+  React.useEffect(() => {
+    if (voiceError) setError(voiceError);
+  }, [voiceError]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -98,19 +132,45 @@ export default function CoachingSessionPage() {
     try {
       const audioFeatures =
         step.session.input_mode === "audio"
-          ? { transcript: draftText, duration_seconds: 0 }
+          ? {
+              transcript: draftText,
+              duration_seconds: voiceStartedAt.current
+                ? Math.max(0, (performance.now() - voiceStartedAt.current) / 1000)
+                : 0,
+            }
           : undefined;
       const result = await submitCoachingSession(step.session.session_id, {
         submission: draftText,
         subject: step.scenarioMeta.key === "email_writing" ? subject : undefined,
         audio_features: audioFeatures,
       });
+      voiceStartedAt.current = null;
+      setVoiceStatus("");
       setStep({ name: "results", result });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function handleStartDraftVoice() {
+    if (step.name !== "draft" || step.session.input_mode !== "audio" || isListening) return;
+    voiceStartedAt.current = performance.now();
+    setVoiceStatus("Listening...");
+    const started = start((text) => {
+      setDraftText(text);
+      setVoiceStatus("Transcript captured. Review and submit.");
+    });
+    if (!started) {
+      voiceStartedAt.current = null;
+      setVoiceStatus("Voice input unavailable.");
+    }
+  }
+
+  function handleStopDraftVoice() {
+    stop();
+    setVoiceStatus("Voice stopped.");
   }
 
   async function handleSendChat() {
@@ -140,6 +200,7 @@ export default function CoachingSessionPage() {
 
   async function handleEndRoleplay() {
     if (step.name !== "roleplay") return;
+    if (isVoiceActive) await stopVoice();
     setError(null);
     setIsSubmitting(true);
     try {
@@ -210,6 +271,26 @@ export default function CoachingSessionPage() {
               placeholder="Write your response here..."
             />
           </div>
+
+          {step.session.input_mode === "audio" ? (
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!isSpeechSupported}
+                onClick={isListening ? handleStopDraftVoice : handleStartDraftVoice}
+              >
+                {isListening ? "Stop Voice" : "Speak Response"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                {isSpeechSupported
+                  ? "Audio response sends transcript plus timing."
+                  : "Speech recognition not supported in this browser."}
+              </p>
+            </div>
+          ) : null}
+          {speechError ? <p className="mt-2 text-sm text-danger">{speechError}</p> : null}
+          {voiceStatus ? <p className="mt-2 text-sm text-muted-foreground">{voiceStatus}</p> : null}
 
           {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
 
@@ -294,8 +375,34 @@ export default function CoachingSessionPage() {
               >
                 Send
               </Button>
+              {isVoiceActive ? (
+                <Button
+                  size="md"
+                  variant="outline"
+                  loading={isStoppingVoice}
+                  onClick={() => void stopVoice()}
+                >
+                  <MicOff className="h-4 w-4" aria-hidden="true" />
+                  Stop Voice
+                </Button>
+              ) : (
+                <Button
+                  size="md"
+                  variant="outline"
+                  loading={isConnectingVoice}
+                  onClick={() => void startVoice()}
+                >
+                  <Mic className="h-4 w-4" aria-hidden="true" />
+                  Start Voice
+                </Button>
+              )}
             </div>
           )}
+          {liveVoiceStatus ? (
+            <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+              {liveVoiceStatus}
+            </p>
+          ) : null}
           {error ? <p className="text-sm text-danger">{error}</p> : null}
         </div>
       </div>

@@ -2,27 +2,44 @@
 
 import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
-import { CheckCircle2, Headphones, Lock, Sparkles, TriangleAlert } from "lucide-react";
+import {
+  CheckCircle2,
+  Headphones,
+  Lock,
+  Mic,
+  MicOff,
+  Sparkles,
+  TriangleAlert,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { ApiError } from "@/lib/api";
 import {
   endScenarioSession,
   getScenarioDetail,
+  getScenarioSession,
+  getScenarioVoiceToken,
   sendScenarioTurn,
   startScenarioSession,
   type ScenarioDetail,
   type ScenarioEndResult,
   type StartScenarioResult,
 } from "@/lib/scenario";
+import { getPersonalizedOpening } from "@/lib/sessionMemory";
 import { useAutoScroll } from "@/lib/useAutoScroll";
 import { useAutoSpeak } from "@/lib/useAutoSpeak";
 import { usePracticeTimePing } from "@/lib/usePracticeTimePing";
+import { useLiveKitVoice } from "@/lib/useLiveKitVoice";
 
 interface ChatTurn {
   role: "assistant" | "user";
   content: string;
 }
+
+// Mirrors the backend's IDLE_TIMEOUT_SECONDS (services/scenario_service.py) — if the user
+// just sits in the session without typing or sending anything, fire an empty "check-in"
+// turn, which the backend treats exactly like a silent reply (nudge, nudge, auto-close).
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 type Step =
   | { name: "loading" }
@@ -33,7 +50,6 @@ type Step =
       name: "chat";
       session: StartScenarioResult;
       turns: ChatTurn[];
-      endedEarly: boolean;
     }
   | { name: "results"; result: ScenarioEndResult };
 
@@ -45,6 +61,7 @@ export default function ScenarioSessionPage() {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [audioMode, setAudioMode] = React.useState(false);
+  const [greeting, setGreeting] = React.useState<string | null>(null);
   const chatTurns = step.name === "chat" ? step.turns : null;
   const scrollRef = useAutoScroll(chatTurns?.length ?? 0);
 
@@ -54,11 +71,48 @@ export default function ScenarioSessionPage() {
   // PDG-US-15: heartbeat pings while this scenario is the active practice
   // session, crediting lifetime practice time and surfacing any milestone
   // that unlocks mid-session.
-  const isActivePractice = step.name === "chat" && !step.endedEarly;
+  const isActivePractice = step.name === "chat";
   const { newlyUnlocked, dismissMilestone } = usePracticeTimePing(
     step.name === "chat" ? step.session.session_id : null,
     isActivePractice,
   );
+
+  // Voice mode: same LiveKit mic-in pattern as Conversation — transcript fills the
+  // chat input for the user to review/edit, never auto-sent. sessionIdRef tracks the
+  // active session id since the hook must be called unconditionally at top level.
+  const sessionIdRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (step.name === "chat") sessionIdRef.current = step.session.session_id;
+  }, [step]);
+  const fetchVoiceToken = React.useCallback(() => {
+    if (!sessionIdRef.current) return Promise.reject(new Error("No active scenario session"));
+    return getScenarioVoiceToken(sessionIdRef.current);
+  }, []);
+  const onTranscript = React.useCallback((text: string) => {
+    setChatInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+  }, []);
+  const {
+    isVoiceActive,
+    isConnectingVoice,
+    isStoppingVoice,
+    voiceStatus,
+    error: voiceError,
+    startVoice,
+    stopVoice,
+  } = useLiveKitVoice(fetchVoiceToken, onTranscript);
+  React.useEffect(() => {
+    if (voiceError) setError(voiceError);
+  }, [voiceError]);
+
+  React.useEffect(() => {
+    // Same shared cross-session memory profile Interview Coach's setup page reads from
+    // (app/dashboard/interview-coach/page.tsx) — best-effort, silently skipped if it fails.
+    getPersonalizedOpening()
+      .then((data) => {
+        if (data.has_history) setGreeting(data.opening_message);
+      })
+      .catch(() => {});
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -73,7 +127,10 @@ export default function ScenarioSessionPage() {
         } else {
           setStep({
             name: "error",
-            message: err instanceof ApiError ? err.message : "Couldn't load this scenario.",
+            message:
+              err instanceof ApiError
+                ? err.message
+                : "Couldn't load this scenario.",
           });
         }
       });
@@ -92,41 +149,73 @@ export default function ScenarioSessionPage() {
         name: "chat",
         session,
         turns: [{ role: "assistant", content: session.opening_message }],
-        endedEarly: false,
       });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't start this scenario.");
+      setError(
+        err instanceof ApiError ? err.message : "Couldn't start this scenario.",
+      );
     } finally {
       setIsSubmitting(false);
     }
   }
+
+  // `message` is "" for an idle-timeout check-in — the backend classifies that exactly like
+  // a silent reply, so no separate "no user bubble" branching is needed for that case here.
+  const sendTurn = React.useCallback(
+    async (sessionId: string, message: string) => {
+      setError(null);
+      setIsSubmitting(true);
+      try {
+        const result = await sendScenarioTurn(sessionId, message);
+        // Ends on its own (silence auto-close, aggression, medical-emergency break) —
+        // go straight to the scorecard instead of waiting for a manual "End Scenario" click.
+        if (result.status !== "in_progress") {
+          const finalResult = await getScenarioSession(sessionId);
+          setStep({ name: "results", result: finalResult });
+          return;
+        }
+        setStep((prev) => {
+          if (prev.name !== "chat") return prev;
+          const newTurns: ChatTurn[] = message
+            ? [
+                ...prev.turns,
+                { role: "user", content: message },
+                { role: "assistant", content: result.reply },
+              ]
+            : [...prev.turns, { role: "assistant", content: result.reply }];
+          return { ...prev, turns: newTurns };
+        });
+      } catch (err) {
+        setError(
+          err instanceof ApiError ? err.message : "Something went wrong.",
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [],
+  );
 
   async function handleSendChat() {
     if (step.name !== "chat" || !chatInput.trim() || isSubmitting) return;
-    setError(null);
-    setIsSubmitting(true);
     const message = chatInput.trim();
     setChatInput("");
-    try {
-      const result = await sendScenarioTurn(step.session.session_id, message);
-      setStep({
-        ...step,
-        turns: [
-          ...step.turns,
-          { role: "user", content: message },
-          { role: "assistant", content: result.reply },
-        ],
-        endedEarly: result.status === "ended_early",
-      });
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    await sendTurn(step.session.session_id, message);
   }
+
+  // Idle timeout: resets on every keystroke and every turn (sent or received). If nothing
+  // happens for IDLE_TIMEOUT_MS, fire an empty turn — same nudge/nudge/auto-close behavior
+  // as the user actually sending a blank message, just triggered by inactivity instead.
+  React.useEffect(() => {
+    if (step.name !== "chat" || isSubmitting) return;
+    const sessionId = step.session.session_id;
+    const timer = setTimeout(() => sendTurn(sessionId, ""), IDLE_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [step, chatInput, isSubmitting, sendTurn]);
 
   async function handleEnd() {
     if (step.name !== "chat") return;
+    if (isVoiceActive) await stopVoice();
     setError(null);
     setIsSubmitting(true);
     try {
@@ -179,13 +268,25 @@ export default function ScenarioSessionPage() {
     return (
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
         <div>
-          <h1 className="font-serif text-2xl font-semibold text-foreground">{detail.label}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Roleplay persona: {detail.persona}</p>
+          <h1 className="font-serif text-2xl font-semibold text-foreground">
+            {detail.label}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Roleplay persona: {detail.persona}
+          </p>
         </div>
+        {greeting ? (
+          <div className="flex items-start gap-2.5 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            {greeting}
+          </div>
+        ) : null}
         <div className="rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm">
           <p className="text-sm text-foreground">{detail.intent}</p>
           <div className="mt-5">
-            <p className="text-sm font-medium text-foreground">Target vocabulary</p>
+            <p className="text-sm font-medium text-foreground">
+              Target vocabulary
+            </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {detail.target_vocab.map((word) => (
                 <span
@@ -198,7 +299,12 @@ export default function ScenarioSessionPage() {
             </div>
           </div>
           {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
-          <Button size="lg" className="mt-6" loading={isSubmitting} onClick={handleStart}>
+          <Button
+            size="lg"
+            className="mt-6"
+            loading={isSubmitting}
+            onClick={handleStart}
+          >
             Start Scenario
           </Button>
         </div>
@@ -222,8 +328,14 @@ export default function ScenarioSessionPage() {
               type="button"
               onClick={() => setAudioMode((v) => !v)}
               aria-pressed={audioMode}
-              aria-label={audioMode ? "Turn off audio mode" : "Turn on audio mode"}
-              title={audioMode ? "Audio mode on — replies are spoken automatically" : "Turn on audio mode"}
+              aria-label={
+                audioMode ? "Turn off audio mode" : "Turn on audio mode"
+              }
+              title={
+                audioMode
+                  ? "Audio mode on — replies are spoken automatically"
+                  : "Turn on audio mode"
+              }
               className={
                 "flex h-9 w-9 items-center justify-center rounded-xl border transition-colors " +
                 (audioMode
@@ -233,18 +345,28 @@ export default function ScenarioSessionPage() {
             >
               <Headphones className="h-4 w-4" aria-hidden="true" />
             </button>
-            <Button size="sm" variant="outline" loading={isSubmitting} onClick={handleEnd}>
+            <Button
+              size="sm"
+              variant="outline"
+              loading={isSubmitting}
+              onClick={handleEnd}
+            >
               End Scenario
             </Button>
           </div>
         </div>
 
         <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm">
-          <div ref={scrollRef} className="flex max-h-[50vh] flex-col gap-4 overflow-y-auto">
+          <div
+            ref={scrollRef}
+            className="flex max-h-[50vh] flex-col gap-4 overflow-y-auto"
+          >
             {step.turns.map((turn, i) => (
               <div
                 key={i}
-                className={turn.role === "user" ? "ml-auto max-w-[80%]" : "max-w-[80%]"}
+                className={
+                  turn.role === "user" ? "ml-auto max-w-[80%]" : "max-w-[80%]"
+                }
               >
                 <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {turn.role === "user" ? "You" : step.session.persona}
@@ -262,35 +384,55 @@ export default function ScenarioSessionPage() {
             ))}
           </div>
 
-          {step.endedEarly ? (
-            <p className="text-sm text-warning">
-              This scenario ended early. Click &quot;End Scenario&quot; to see your results.
-            </p>
-          ) : (
-            <div className="flex items-center gap-2 border-t border-border pt-4">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(event) => setChatInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    handleSendChat();
-                  }
-                }}
-                placeholder="Type your response..."
-                className="h-11 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
-              />
+          <div className="flex items-center gap-2 border-t border-border pt-4">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  handleSendChat();
+                }
+              }}
+              placeholder="Type your response..."
+              className="h-11 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
+            />
+            <Button
+              size="md"
+              loading={isSubmitting}
+              disabled={!chatInput.trim()}
+              onClick={handleSendChat}
+            >
+              Send
+            </Button>
+            {isVoiceActive ? (
               <Button
                 size="md"
-                loading={isSubmitting}
-                disabled={!chatInput.trim()}
-                onClick={handleSendChat}
+                variant="outline"
+                loading={isStoppingVoice}
+                onClick={() => void stopVoice()}
               >
-                Send
+                <MicOff className="h-4 w-4" aria-hidden="true" />
+                Stop Voice
               </Button>
-            </div>
-          )}
+            ) : (
+              <Button
+                size="md"
+                variant="outline"
+                loading={isConnectingVoice}
+                onClick={() => void startVoice()}
+              >
+                <Mic className="h-4 w-4" aria-hidden="true" />
+                Start Voice
+              </Button>
+            )}
+          </div>
+          {voiceStatus ? (
+            <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+              {voiceStatus}
+            </p>
+          ) : null}
           {error ? <p className="text-sm text-danger">{error}</p> : null}
         </div>
       </div>
@@ -306,23 +448,32 @@ export default function ScenarioSessionPage() {
         <h1 className="mt-3 font-serif text-2xl font-semibold">
           {Math.round(result.scores.politeness ?? 0)}/100 Politeness
         </h1>
-        <p className="mt-2 text-sm text-primary-foreground/85">{result.summary}</p>
+        <p className="mt-2 text-sm text-primary-foreground/85">
+          {result.summary}
+        </p>
       </div>
 
       <div
         className="animate-fade-up rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm"
         style={{ animationDelay: "100ms" }}
       >
-        <h2 className="font-serif text-lg font-semibold text-foreground">Scores</h2>
+        <h2 className="font-serif text-lg font-semibold text-foreground">
+          Scores
+        </h2>
         <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
           {Object.entries(result.scores)
             .filter(([, value]) => value !== null)
             .map(([key, value]) => (
-              <div key={key} className="rounded-xl border border-border bg-surface p-4">
+              <div
+                key={key}
+                className="rounded-xl border border-border bg-surface p-4"
+              >
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {key.replace(/_/g, " ")}
                 </p>
-                <p className="mt-1 text-xl font-semibold text-foreground">{Math.round(value ?? 0)}</p>
+                <p className="mt-1 text-xl font-semibold text-foreground">
+                  {Math.round(value ?? 0)}
+                </p>
               </div>
             ))}
         </div>
@@ -330,7 +481,9 @@ export default function ScenarioSessionPage() {
           <div
             className={
               "mt-4 flex items-center gap-2 rounded-xl px-4 py-3 text-sm " +
-              (result.met_goal ? "bg-success/10 text-success" : "bg-warning/10 text-warning")
+              (result.met_goal
+                ? "bg-success/10 text-success"
+                : "bg-warning/10 text-warning")
             }
           >
             {result.met_goal ? (
@@ -338,7 +491,9 @@ export default function ScenarioSessionPage() {
             ) : (
               <TriangleAlert className="h-4 w-4" aria-hidden="true" />
             )}
-            {result.met_goal ? "You achieved the scenario goal." : "You didn't fully achieve the scenario goal this time."}
+            {result.met_goal
+              ? "You achieved the scenario goal."
+              : "You didn't fully achieve the scenario goal this time."}
           </div>
         ) : null}
       </div>
@@ -347,7 +502,9 @@ export default function ScenarioSessionPage() {
         className="animate-fade-up rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm"
         style={{ animationDelay: "180ms" }}
       >
-        <h2 className="font-serif text-lg font-semibold text-foreground">Target Vocabulary</h2>
+        <h2 className="font-serif text-lg font-semibold text-foreground">
+          Target Vocabulary
+        </h2>
         <div className="mt-3 flex flex-wrap gap-2">
           {result.vocab_used.map((word) => (
             <span
@@ -366,10 +523,45 @@ export default function ScenarioSessionPage() {
             </span>
           ))}
         </div>
-        {result.suggestion ? (
-          <p className="mt-4 text-sm text-muted-foreground">{result.suggestion}</p>
-        ) : null}
       </div>
+
+      {result.tips.length > 0 || result.suggestion ? (
+        <div
+          className="animate-fade-up rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm"
+          style={{ animationDelay: "260ms" }}
+        >
+          <h2 className="font-serif text-lg font-semibold text-foreground">
+            Tips for Next Time
+          </h2>
+          <ul className="mt-3 flex flex-col gap-2">
+            {(result.tips.length > 0 ? result.tips : [result.suggestion]).map((tip, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
+                {tip}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {result.polished_line ? (
+        <div
+          className="animate-fade-up rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm"
+          style={{ animationDelay: "320ms" }}
+        >
+          <h2 className="font-serif text-lg font-semibold text-foreground">
+            A Stronger Way to Say It
+          </h2>
+          {result.original_line ? (
+            <p className="mt-3 text-sm text-muted-foreground line-through decoration-danger/40">
+              {result.original_line}
+            </p>
+          ) : null}
+          <p className="mt-2 rounded-xl bg-success/10 px-4 py-3 text-sm text-foreground">
+            {result.polished_line}
+          </p>
+        </div>
+      ) : null}
 
       <Button
         size="lg"

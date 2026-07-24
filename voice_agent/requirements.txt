@@ -1,6 +1,8 @@
+faster-whisper==1.2.1
 livekit==1.1.13
 livekit-agents==1.6.5
+livekit-api==1.2.0
 livekit-plugins-silero==1.6.5
-faster-whisper==1.2.1
-httpx>=0.27
+livekit-protocol==1.1.19
 python-dotenv>=1.0
+sounddevice>=0.5

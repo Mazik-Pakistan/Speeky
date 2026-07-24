@@ -12,6 +12,7 @@ from services.interview_coach_service import (
     start_session,
     submit_answer,
     take_break,
+    voice_token,
 )
 
 router = APIRouter()
@@ -19,6 +20,7 @@ router = APIRouter()
 # Interview Coach (Ubase, panel, multi-round)
 router.add_api_route("/sessions", start_session, methods=["POST"], status_code=201)
 router.add_api_route("/sessions/{session_id}/answer", submit_answer, methods=["POST"])
+router.add_api_route("/sessions/{session_id}/voice-token", voice_token, methods=["POST"])
 router.add_api_route("/sessions/{session_id}/pause", pause_session, methods=["POST"])
 router.add_api_route("/sessions/{session_id}/resume", resume_session, methods=["POST"])
 router.add_api_route("/sessions/{session_id}/break", take_break, methods=["POST"])

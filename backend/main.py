@@ -14,6 +14,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
+from routers.voice_consent_routes import router as voice_consent_router
 
 from lib.prisma_client import db
 from middlewares.error_handler import (
@@ -39,6 +40,7 @@ from routers.resume_jd_routes import router as resume_jd_router
 from routers.scenario_routes import router as scenario_router
 from routers.session_memory_routes import router as session_memory_router
 from routers.vocabulary_progress_routes import router as vocabulary_progress_router
+from routers.public_speaking_routes import router as public_speaking_router
 from utils.app_error import AppError
 
 
@@ -80,7 +82,7 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 async def health():
     return HTMLResponse("<h1>Speeky API is running!</h1>")
 
-
+app.include_router(voice_consent_router, prefix="/api/voice-consent")
 app.include_router(auth_router, prefix="/api/auth")
 app.include_router(user_router, prefix="/api/users")
 app.include_router(assessment_router, prefix="/api/assessment")
@@ -96,6 +98,7 @@ app.include_router(pronunciation_router, prefix="/api/pronunciation-coach")
 app.include_router(accent_router, prefix="/api/accent-assessment")
 app.include_router(vocabulary_progress_router, prefix="/api/vocabulary-progress")
 app.include_router(practice_time_router, prefix="/api/practice-time")
+app.include_router(public_speaking_router, prefix="/api/public-speaking")
 
 # Local-folder avatar storage, exposed to frontend as static files
 _uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")

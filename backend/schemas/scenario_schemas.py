@@ -37,3 +37,23 @@ class CustomScenarioSchema(BaseModel):
         if v not in ("roleplay", "negotiation"):
             raise ValueError('goal_type must be "roleplay" or "negotiation"')
         return v
+
+
+class ScenarioPreviewTurnSchema(BaseModel):
+    role: str
+    content: str
+
+
+class ScenarioPreviewSchema(BaseModel):
+    """SBL-US-06 E-01 sandbox tester: try a scenario's prompt against a persona
+    before publishing it, with no DB row and no learner-facing side effects."""
+
+    persona: str = Field(min_length=1, max_length=120)
+    system_prompt: str = Field(min_length=10)
+    opening_line: Optional[str] = None
+    target_vocab: List[str] = Field(default_factory=list)
+    goal_type: str = "roleplay"
+    safety_mode: bool = False
+    corporate_tone: bool = True
+    turns: List[ScenarioPreviewTurnSchema] = Field(default_factory=list)
+    message: Optional[str] = None  # omit to just fetch the opening line

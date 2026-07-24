@@ -33,8 +33,19 @@ export default function RootLayout({
       className={`${fraunces.variable} ${mulish.variable}`}
       suppressHydrationWarning
     >
-      {/* font-sans here will automatically pull Mulish based on your Tailwind config */}
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+          try {
+            const theme = localStorage.getItem('speeky-theme');
+            if (theme === 'dark') {
+              document.documentElement.classList.add('dark');
+            }
+          } catch {}
+        `,
+          }}
+        />
         <Providers>{children}</Providers>
       </body>
     </html>
