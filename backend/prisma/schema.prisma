@@ -79,16 +79,16 @@ enum AccentAssessmentStatus {
 // Values: in_progress, completed, qa_phase
 
 model User {
-  id                     String                  @id @default(cuid())
-  email                  String                  @unique
+  id                     String                    @id @default(cuid())
+  email                  String                    @unique
   password               String
   name                   String
-  avatarUrl              String                  @default("user.webp")
-  role                   Role                    @default(USER)
-  assessmentStatus       AssessmentStatus        @default(UNASSESSED)
+  avatarUrl              String                    @default("user.webp")
+  role                   Role                      @default(USER)
+  assessmentStatus       AssessmentStatus          @default(UNASSESSED)
   learningLevel          LearningLevel?
-  createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @updatedAt
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
   passwordResetTokens    PasswordResetToken[]
   refreshTokens          RefreshToken[]
   baselineAssessments    BaselineAssessment[]
@@ -99,7 +99,14 @@ model User {
   accentAssessments      AccentAssessment[]
   pronunciationAttempts  PronunciationAttempt[]
   accentProfiles         AccentProfile[]
+  vocabularyProgress     VocabularyWordProgress[]
   publicSpeakingSessions PublicSpeakingSession[]
+
+  // PDG-US-15: lifetime cumulative practice time (seconds) credited via
+  // practice_time_service pings, and the milestone-hour thresholds already
+  // celebrated (so a repeat crossing doesn't re-trigger the modal).
+  lifetimePracticeSeconds Float @default(0)
+  unlockedMilestoneHours  Int[] @default([])
 
   @@map("users")
 }
@@ -137,6 +144,28 @@ model ScenarioSession {
   @@index([userId])
   @@map("scenario_sessions")
 }
+
+// PDG-US-12: per-word usage tracking that feeds the Vocabulary Growth
+// Drill-down's Mastered (useCount >= 3) / Learning (1-2) lists. Incremented
+// from scenario_service.end_session's existing vocab-coverage grading — no
+// separate grading pass. needsReview flags a Mastered word that was targeted
+// again in a later session but not used (E-03 de-ranking).
+model VocabularyWordProgress {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word         String
+  useCount     Int       @default(0)
+  status       String    @default("learning") // learning | mastered
+  needsReview  Boolean   @default(false)
+  lastUsedAt   DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+
+  @@unique([userId, word])
+  @@index([userId, status])
+  @@map("vocabulary_word_progress")
+}
+
 
 // Admin-authored Scenario-Based Learning scenarios. Merged with the
 // built-in lib/prompts.SBL_SCENARIOS at read time. Publishing is just a DB write —

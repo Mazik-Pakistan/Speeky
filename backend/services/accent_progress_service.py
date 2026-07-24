@@ -6,6 +6,15 @@ Compares a user's Month 1 (baseline) Accent Assessment against their Month 3
 Intonation, Clarity. `monthIndex` is computed the same way
 reassessment_service tracks BaselineAssessment cycles — one Accent Assessment
 allowed per 30-day month, month 1 being the user's first ever submission.
+
+Sits on top of the real recording pipeline's `AccentAssessment` model (US-93,
+`AccentAssessmentStatus`) rather than a standalone table: only COMPLETED rows
+count as valid data points here (REJECTED_* rows carry no real scores and must
+never read as a baseline/current data point). `submit_assessment` is a manual
+check-in stand-in for that pipeline — same score contract, so swapping in the
+real recording flow later needs no changes on this tracker's side. `passageId`
+is a required column on that model with no meaning for a manual check-in, so
+it's set to a fixed sentinel here.
 """
 
 import logging
@@ -16,6 +25,7 @@ from fastapi import Depends
 
 from lib.prisma_client import db
 from middlewares.auth_middleware import require_auth
+from prisma.enums import AccentAssessmentStatus
 from schemas.accent_progress_schemas import SubmitAccentAssessmentSchema
 from utils.app_error import AppError
 
@@ -25,6 +35,7 @@ CYCLE_DAYS = 30
 BASELINE_MONTH = 1
 CURRENT_MONTH = 3
 SCORE_EPSILON = 0.01  # scores within this margin count as "stagnated", not improved/degraded
+MANUAL_CHECKIN_PASSAGE_ID = "manual-checkin"
 
 # (Prisma field name, display label) — order drives the matrix's row order.
 METRICS = [
@@ -37,7 +48,12 @@ METRICS = [
 
 async def _next_month_index(user_id: str) -> int:
     first = await db.accentassessment.find_first(
-        where={"userId": user_id}, order={"completedAt": "asc"}
+        where={
+            "userId": user_id,
+            "status": AccentAssessmentStatus.COMPLETED,
+            "completedAt": {"not": None},
+        },
+        order={"completedAt": "asc"},
     )
     if not first:
         return BASELINE_MONTH
@@ -81,7 +97,11 @@ async def submit_assessment(
     month_index = await _next_month_index(user_id)
 
     existing = await db.accentassessment.find_first(
-        where={"userId": user_id, "monthIndex": month_index}
+        where={
+            "userId": user_id,
+            "monthIndex": month_index,
+            "status": AccentAssessmentStatus.COMPLETED,
+        }
     )
     if existing:
         raise AppError(
@@ -89,14 +109,18 @@ async def submit_assessment(
             409,
         )
 
+    now = datetime.now(timezone.utc)
     assessment = await db.accentassessment.create(
         data={
             "userId": user_id,
+            "passageId": MANUAL_CHECKIN_PASSAGE_ID,
             "monthIndex": month_index,
+            "status": AccentAssessmentStatus.COMPLETED,
             "pronunciationScore": payload.pronunciation_score,
             "wordStressScore": payload.word_stress_score,
             "intonationScore": payload.intonation_score,
             "clarityScore": payload.clarity_score,
+            "completedAt": now,
         }
     )
     return {
@@ -109,9 +133,15 @@ async def submit_assessment(
 
 async def get_progress_matrix(user_id: str = Depends(require_auth)):
     # E-03: no baseline yet — force the user through a baseline Accent Assessment
-    # before rendering any historical matrix.
+    # before rendering any historical matrix. Only a COMPLETED reading counts —
+    # a REJECTED_* attempt (bad audio, no speech, etc.) must never read as one.
     baseline = await db.accentassessment.find_first(
-        where={"userId": user_id, "monthIndex": BASELINE_MONTH}, order={"completedAt": "asc"}
+        where={
+            "userId": user_id,
+            "monthIndex": BASELINE_MONTH,
+            "status": AccentAssessmentStatus.COMPLETED,
+        },
+        order={"completedAt": "asc"},
     )
     if not baseline:
         return {
@@ -121,7 +151,12 @@ async def get_progress_matrix(user_id: str = Depends(require_auth)):
         }
 
     current = await db.accentassessment.find_first(
-        where={"userId": user_id, "monthIndex": CURRENT_MONTH}, order={"completedAt": "desc"}
+        where={
+            "userId": user_id,
+            "monthIndex": CURRENT_MONTH,
+            "status": AccentAssessmentStatus.COMPLETED,
+        },
+        order={"completedAt": "desc"},
     )
 
     # E-01: Month 3 not reached/completed yet — lock the column instead of

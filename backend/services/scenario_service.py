@@ -407,6 +407,10 @@ async def _finalize_session(session_id: str, user_id: str, meta: Dict, target_vo
     except Exception:
         pass  # best-effort — scenario scoring must not fail because memory logging did
 
+    from services.vocabulary_progress_service import record_usage
+
+    await record_usage(user_id, coverage["used"], coverage["missing"])
+
     return {
         "session_id": session_id,
         "status": status,

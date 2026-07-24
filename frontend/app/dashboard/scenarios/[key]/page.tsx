@@ -12,6 +12,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { ApiError } from "@/lib/api";
 import {
   endScenarioSession,
@@ -27,6 +28,7 @@ import {
 import { getPersonalizedOpening } from "@/lib/sessionMemory";
 import { useAutoScroll } from "@/lib/useAutoScroll";
 import { useAutoSpeak } from "@/lib/useAutoSpeak";
+import { usePracticeTimePing } from "@/lib/usePracticeTimePing";
 import { useLiveKitVoice } from "@/lib/useLiveKitVoice";
 
 interface ChatTurn {
@@ -62,7 +64,18 @@ export default function ScenarioSessionPage() {
   const [greeting, setGreeting] = React.useState<string | null>(null);
   const chatTurns = step.name === "chat" ? step.turns : null;
   const scrollRef = useAutoScroll(chatTurns?.length ?? 0);
+
+  // Auto-speak assistant replies.
   useAutoSpeak(audioMode, chatTurns);
+
+  // PDG-US-15: heartbeat pings while this scenario is the active practice
+  // session, crediting lifetime practice time and surfacing any milestone
+  // that unlocks mid-session.
+  const isActivePractice = step.name === "chat";
+  const { newlyUnlocked, dismissMilestone } = usePracticeTimePing(
+    step.name === "chat" ? step.session.session_id : null,
+    isActivePractice,
+  );
 
   // Voice mode: same LiveKit mic-in pattern as Conversation — transcript fills the
   // chat input for the user to review/edit, never auto-sent. sessionIdRef tracks the
@@ -302,6 +315,10 @@ export default function ScenarioSessionPage() {
   if (step.name === "chat") {
     return (
       <div className="mx-auto flex max-w-2xl flex-col gap-4">
+        <MilestoneCelebrationModal
+          milestone={newlyUnlocked[0] ?? null}
+          onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+        />
         <div className="flex items-center justify-between">
           <h1 className="font-serif text-2xl font-semibold text-foreground">
             {step.session.label}

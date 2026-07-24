@@ -1,13 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { BookOpen, Clock, Gauge, Sparkles, TrendingUp } from "lucide-react";
+import { BookOpen, ChevronRight, Clock, Gauge, Sparkles, TrendingUp } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import {
   getProgressDashboardOverview,
   type ProgressDashboardOverview,
 } from "@/lib/progressDashboard";
 import { cn } from "@/lib/utils";
+import { VocabularyDrillDownModal } from "./VocabularyDrillDownModal";
 
 function formatPracticeTime(minutes: number): string {
   if (minutes < 1) return "< 1 min";
@@ -33,6 +34,7 @@ export function VocabularyGrowthTracker() {
   const [overview, setOverview] = React.useState<ProgressDashboardOverview | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isDrillDownOpen, setIsDrillDownOpen] = React.useState(false);
 
   React.useEffect(() => {
     getProgressDashboardOverview()
@@ -80,20 +82,40 @@ export function VocabularyGrowthTracker() {
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {tiles.map((tile) => (
-          <div
-            key={tile.id}
-            className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-4"
-          >
-            <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <tile.icon className="h-3.5 w-3.5" aria-hidden="true" />
-              {tile.label}
-            </span>
-            <span className="font-serif text-2xl font-semibold text-foreground">
-              {tile.value}
-            </span>
-          </div>
-        ))}
+        {tiles.map((tile) => {
+          const isVocabularyTile = tile.id === "vocabulary";
+          return (
+            <div
+              key={tile.id}
+              onClick={isVocabularyTile ? () => setIsDrillDownOpen(true) : undefined}
+              role={isVocabularyTile ? "button" : undefined}
+              tabIndex={isVocabularyTile ? 0 : undefined}
+              onKeyDown={
+                isVocabularyTile
+                  ? (event) => {
+                      if (event.key === "Enter" || event.key === " ") setIsDrillDownOpen(true);
+                    }
+                  : undefined
+              }
+              className={cn(
+                "flex flex-col gap-2 rounded-xl border border-border bg-surface p-4",
+                isVocabularyTile &&
+                  "cursor-pointer transition-colors hover:border-primary/40 hover:bg-secondary",
+              )}
+            >
+              <span className="flex items-center justify-between gap-1.5 text-xs font-medium text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <tile.icon className="h-3.5 w-3.5" aria-hidden="true" />
+                  {tile.label}
+                </span>
+                {isVocabularyTile ? <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /> : null}
+              </span>
+              <span className="font-serif text-2xl font-semibold text-foreground">
+                {tile.value}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
       {!overview.has_data ? (
@@ -155,6 +177,8 @@ export function VocabularyGrowthTracker() {
           ) : null}
         </div>
       )}
+
+      <VocabularyDrillDownModal open={isDrillDownOpen} onClose={() => setIsDrillDownOpen(false)} />
     </div>
   );
 }
