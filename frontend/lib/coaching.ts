@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { VoiceTokenResult } from "./useLiveKitVoice";
 
 export interface CoachingScenarioMeta {
   key: string;
@@ -82,6 +83,12 @@ export function submitCoachingSession(
   return api<CoachingResult>(`/coaching/${sessionId}/submit`, {
     method: "POST",
     body: JSON.stringify(data),
+  });
+}
+
+export function getCoachingVoiceToken(sessionId: string) {
+  return api<VoiceTokenResult>(`/coaching/${sessionId}/voice-token`, {
+    method: "POST",
   });
 }
 

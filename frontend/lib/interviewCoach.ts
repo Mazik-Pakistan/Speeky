@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { VoiceTokenResult } from "./useLiveKitVoice";
 
 export type InterviewMode = "standard" | "panel" | "case_study" | "multi_round";
 export type PersonaTone = "strict_corporate" | "friendly_startup" | "formal_panel" | "neutral";
@@ -81,6 +82,12 @@ export function startInterviewSession(data: {
   return api<SessionStartResponse>("/interview-coach/sessions", {
     method: "POST",
     body: JSON.stringify(data),
+  });
+}
+
+export function getInterviewCoachVoiceToken(sessionId: string) {
+  return api<VoiceTokenResult>(`/interview-coach/sessions/${sessionId}/voice-token`, {
+    method: "POST",
   });
 }
 

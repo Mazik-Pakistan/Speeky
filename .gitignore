@@ -6,9 +6,11 @@ tests/
 
 uploads/*
 __pycache__/
-*.env.
+**/.env
 *.env.*
 *.zip
+Dockerfile*
+.dockerignore
 *.docx
 
 !.env.example

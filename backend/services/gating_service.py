@@ -170,6 +170,18 @@ async def get_user_feature_summary(user_id: str = Depends(require_auth)):
     if not user:
         return JSONResponse(status_code=404, content={"error": "User not found"})
 
+    # Assessment line is for testing-phase.
+    assessment = await db.baselineassessment.find_first(where={"userId": user_id})
+    if assessment is None and user.assessmentStatus != AssessmentStatus.UNASSESSED:
+        await db.user.update(
+            where={"id": user_id},
+            data={
+                "assessmentStatus": AssessmentStatus.UNASSESSED,
+                "learningLevel": None,
+            },
+        )
+
+    
     access_level = await get_access_level(user_id)
     features = await get_accessible_features(user_id)
     show_prompt = await should_show_assessment_prompt(user_id)

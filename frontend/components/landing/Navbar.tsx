@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { cn } from "@/lib/utils";
 import { NAV_LINKS } from "@/lib/mock-data";
 import { useAuth } from "@/contexts/AuthContext";
@@ -49,14 +50,11 @@ export function Navbar() {
             width={142}
             height={159}
             priority
-            className="h-10 w-auto"
+            className="h-10 w-auto transition-all dark:brightness-0 dark:invert"
           />
         </Link>
 
-        <nav
-          aria-label="Primary"
-          className="hidden items-center gap-8 md:flex"
-        >
+        <nav aria-label="Primary" className="hidden items-center gap-8 md:flex">
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
@@ -69,6 +67,7 @@ export function Navbar() {
         </nav>
 
         <div className="hidden items-center gap-3 md:flex">
+          <ThemeToggle />
           {user ? (
             <Button variant="outline" size="sm" onClick={handleLogout}>
               Logout
@@ -115,21 +114,29 @@ export function Navbar() {
               {link.label}
             </Link>
           ))}
-          <div className="mt-2 flex flex-col gap-2 border-t border-border pt-3">
-            {user ? (
-              <Button variant="outline" size="sm" onClick={handleLogout}>
-                Logout
-              </Button>
-            ) : (
-              <>
-                <Button variant="outline" size="sm" href="/login">
-                  Login
+
+          <div className="mt-2 flex flex-col gap-3 border-t border-border pt-4">
+            <div className="flex items-center justify-between px-3">
+              <span className="text-sm font-medium text-foreground">Theme</span>
+              <ThemeToggle />
+            </div>
+
+            <div className="mt-2 flex flex-col gap-2 border-t border-border pt-3">
+              {user ? (
+                <Button variant="outline" size="sm" onClick={handleLogout}>
+                  Logout
                 </Button>
-                <Button size="sm" href="/signup">
-                  Get Started
-                </Button>
-              </>
-            )}
+              ) : (
+                <>
+                  <Button variant="outline" size="sm" href="/login">
+                    Login
+                  </Button>
+                  <Button size="sm" href="/signup">
+                    Get Started
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </nav>
       ) : null}

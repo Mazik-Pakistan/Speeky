@@ -3,11 +3,13 @@ import {
   Coffee,
   Compass,
   Home,
+  Mic,
   Plane,
   TrendingUp,
   User,
   UtensilsCrossed,
   Users,
+  Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -20,6 +22,8 @@ export interface DashboardNavLink {
 export const DASHBOARD_NAV_LINKS: DashboardNavLink[] = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Explore", href: "/dashboard/explore", icon: Compass },
+  { label: "Public Speaking", href: "/dashboard/public-speaking", icon: Mic },
+  { label: "Rewrite Lab", href: "/dashboard/rewrite", icon: Wand2 },
   { label: "Progress", href: "/dashboard/progress", icon: TrendingUp },
   { label: "Profile", href: "/dashboard/profile", icon: User },
 ];
@@ -147,6 +151,17 @@ export const EXPLORE_STATIC_SCENARIOS: ExploreScenario[] = [
     difficulty: "High Difficulty",
     featured: true,
     href: "/dashboard/interview-coach",
+  },
+  {
+    id: "public-speaking-coach",
+    category: "Work",
+    icon: Mic,
+    title: "Public Speaking Coach",
+    description:
+      "Practice speeches and presentations with AI feedback on pacing, tone, and delivery.",
+    difficulty: "Intermediate",
+    featured: true,
+    href: "/dashboard/public-speaking",
   },
   {
     id: "meeting-new-colleagues",

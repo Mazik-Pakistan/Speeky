@@ -239,8 +239,10 @@ in-process one, so no network or DB connection is needed.
 ### 6. (Optional) Start the voice agent for AI Conversation Practice's voice mode
 
 `voice_agent/` is a separate LiveKit worker (own deps, own venv) that transcribes
-*streamed* mic audio in real time and posts turns back to this API for Conversation
-Practice's voice mode. `docker compose up` starts it alongside Postgres:
+*streamed* mic audio in real time and sends the transcript back to the frontend
+over the LiveKit room's data channel (topic `voice_transcript`) — the client fills
+its message input with it, same "review then hit Send" flow as typing. `docker
+compose up` starts it alongside Postgres:
 
 > Note: the main API's `pyproject.toml` **also** depends on `faster-whisper` and
 > `silero-vad` now (see above) — those power Pronunciation Coach / Accent Assessment's
@@ -254,11 +256,11 @@ Practice's voice mode. `docker compose up` starts it alongside Postgres:
 docker compose up
 ```
 
-It reads `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` / `INTERNAL_AGENT_SECRET`
-from the same `.env` this API uses, and reaches the API (running on the host via step 4,
-not in Docker) at `BACKEND_URL` (defaults to `http://host.docker.internal:8000`). See
-`voice_agent/agent.py`'s module docstring for the room-naming contract, and
-`voice_agent/join_test_room.py` for publishing test mic audio without a frontend.
+It reads `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` from the same `.env`
+this API uses — it never calls this API directly, so no `BACKEND_URL` /
+`INTERNAL_AGENT_SECRET` needed. See `voice_agent/agent.py`'s module docstring for the
+room-naming contract, and `voice_agent/join_test_room.py` for publishing test mic audio
+without a frontend.
 
 ---
 

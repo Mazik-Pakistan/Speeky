@@ -20,6 +20,7 @@ import {
   type AssessmentSummary,
   type SkipAttemptResult,
 } from "@/lib/assessment";
+import { useSpeechRecognition } from "@/lib/useSpeechRecognition";
 import { useAssessmentAccess } from "@/contexts/AssessmentContext";
 
 type Step =
@@ -33,12 +34,14 @@ type Step =
       questionIndex: number;
       totalQuestions: number;
       question: string;
+      questionMode: "text" | "audio";
     }
   | { name: "results"; summary: AssessmentSummary };
 
 export default function AssessmentPage() {
   const router = useRouter();
   const { access, isLoading: accessLoading, refresh } = useAssessmentAccess();
+  console.log(access);
   const [step, setStep] = React.useState<Step>({ name: "loading" });
   const [answer, setAnswer] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -52,12 +55,25 @@ export default function AssessmentPage() {
   React.useEffect(() => {
     if (accessLoading || hasInitialized.current) return;
     hasInitialized.current = true;
-    if (access?.assessment_status === "COMPLETED" || access?.assessment_status === "PLATEAUED") {
+    if (
+      access?.assessment_status === "COMPLETED" ||
+      access?.assessment_status === "PLATEAUED"
+    ) {
       setStep({ name: "already-assessed" });
     } else {
       setStep({ name: "intro" });
     }
   }, [accessLoading, access]);
+  const [voiceStatus, setVoiceStatus] = React.useState("");
+  const voiceStartedAt = React.useRef<number | null>(null);
+  const voiceAnswerUsed = React.useRef(false);
+  const {
+    isSupported: isSpeechSupported,
+    isListening,
+    error: speechError,
+    start,
+    stop,
+  } = useSpeechRecognition();
 
   async function handleStart() {
     setError(null);
@@ -70,6 +86,7 @@ export default function AssessmentPage() {
         questionIndex: result.question_index,
         totalQuestions: result.total_questions,
         question: result.current_question,
+        questionMode: result.question_mode,
       });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
@@ -112,8 +129,22 @@ export default function AssessmentPage() {
     try {
       const result = await submitAssessmentResponse(step.assessmentId, {
         text_data: answer.trim(),
+        audio_features:
+          step.questionMode === "audio" && voiceAnswerUsed.current
+            ? {
+                duration_seconds: voiceStartedAt.current
+                  ? Math.max(
+                      0,
+                      (performance.now() - voiceStartedAt.current) / 1000,
+                    )
+                  : 0,
+              }
+            : undefined,
       });
       setAnswer("");
+      voiceStartedAt.current = null;
+      voiceAnswerUsed.current = false;
+      setVoiceStatus("");
       if (result.status === "completed") {
         const summary = await getResultsSummary(step.assessmentId);
         await refresh();
@@ -123,6 +154,7 @@ export default function AssessmentPage() {
           ...step,
           questionIndex: result.question_index,
           question: result.next_question ?? "",
+          questionMode: result.next_question_mode ?? "text",
         });
       }
     } catch (err) {
@@ -132,13 +164,95 @@ export default function AssessmentPage() {
     }
   }
 
+  function handleStartVoice() {
+    if (
+      step.name !== "question" ||
+      step.questionMode !== "audio" ||
+      isListening
+    )
+      return;
+    voiceStartedAt.current = performance.now();
+    voiceAnswerUsed.current = true;
+    setVoiceStatus("Listening...");
+    const started = start((text) => {
+      setAnswer(text);
+      setVoiceStatus("Transcript captured. Review and continue.");
+    });
+    if (!started) {
+      voiceStartedAt.current = null;
+      voiceAnswerUsed.current = false;
+      setVoiceStatus("Voice input unavailable.");
+    }
+  }
+
+  function handleStopVoice() {
+    stop();
+    setVoiceStatus("Voice stopped.");
+  }
+
   if (step.name === "loading") {
+    if (accessLoading) {
+      return (
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <span
+            className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent text-muted-foreground"
+            aria-hidden="true"
+          />
+        </div>
+      );
+    }
+
+    if (
+      access?.assessment_status === "COMPLETED" ||
+      access?.assessment_status === "PLATEAUED"
+    ) {
+      return (
+        <div className="mx-auto flex max-w-lg flex-col items-center gap-4 rounded-2xl border border-border bg-surface-elevated p-8 text-center shadow-sm">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-primary">
+            <CheckCircle2 className="h-6 w-6" aria-hidden="true" />
+          </span>
+          <h1 className="font-serif text-2xl font-semibold text-foreground">
+            You&apos;ve already completed your baseline assessment
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Head to your Profile to see your results or request a re-assessment.
+          </p>
+          <Button href="/dashboard/profile" size="sm">
+            Go to Profile
+          </Button>
+        </div>
+      );
+    }
+
     return (
-      <div className="flex min-h-[50vh] items-center justify-center">
-        <span
-          className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent text-muted-foreground"
-          aria-hidden="true"
-        />
+      <div className="mx-auto flex max-w-lg flex-col items-center gap-5 rounded-2xl border border-border bg-surface-elevated p-8 text-center shadow-sm">
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-primary">
+          <ClipboardList className="h-6 w-6" aria-hidden="true" />
+        </span>
+        <div className="flex flex-col gap-2">
+          <h1 className="font-serif text-2xl font-semibold text-foreground">
+            Baseline Communication Assessment
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            A short, five-question check-in sets your starting confidence score
+            and personalizes AI Conversation Practice, Interview Coach, and
+            Scenario-Based Learning for you. It takes about 5 minutes.
+          </p>
+        </div>
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
+        <div className="flex flex-col items-center gap-3">
+          <Button size="lg" loading={isSubmitting} onClick={handleStart}>
+            Start Assessment
+          </Button>
+          <button
+            type="button"
+            onClick={handleSkipRequest}
+            disabled={isSubmitting}
+            className="text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            Skip for now
+          </button>
+        </div>
       </div>
     );
   }
@@ -173,9 +287,9 @@ export default function AssessmentPage() {
             Baseline Communication Assessment
           </h1>
           <p className="text-sm text-muted-foreground">
-            A short, five-question check-in sets your starting confidence
-            score and personalizes AI Conversation Practice, Interview Coach,
-            and Scenario-Based Learning for you. It takes about 5 minutes.
+            A short, five-question check-in sets your starting confidence score
+            and personalizes AI Conversation Practice, Interview Coach, and
+            Scenario-Based Learning for you. It takes about 5 minutes.
           </p>
         </div>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
@@ -230,7 +344,7 @@ export default function AssessmentPage() {
 
   if (step.name === "question") {
     const progress = Math.round(
-      (step.questionIndex / step.totalQuestions) * 100
+      (step.questionIndex / step.totalQuestions) * 100,
     );
     return (
       <div className="mx-auto flex max-w-xl flex-col gap-6">
@@ -262,6 +376,29 @@ export default function AssessmentPage() {
               placeholder="Type your response here..."
             />
           </div>
+          {step.questionMode === "audio" ? (
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!isSpeechSupported}
+                onClick={isListening ? handleStopVoice : handleStartVoice}
+              >
+                {isListening ? "Stop Voice" : "Speak Answer"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                {isSpeechSupported
+                  ? "Audio answer sends transcript plus timing."
+                  : "Speech recognition not supported in this browser."}
+              </p>
+            </div>
+          ) : null}
+          {speechError ? (
+            <p className="mt-2 text-sm text-danger">{speechError}</p>
+          ) : null}
+          {voiceStatus ? (
+            <p className="mt-2 text-sm text-muted-foreground">{voiceStatus}</p>
+          ) : null}
           {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
           <Button
             size="lg"
@@ -282,7 +419,10 @@ export default function AssessmentPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
       <div className="animate-fade-up rounded-2xl border border-border bg-gradient-to-br from-primary to-primary-hover p-8 text-center text-primary-foreground shadow-sm">
-        <Sparkles className="mx-auto h-6 w-6 animate-fade-in" aria-hidden="true" />
+        <Sparkles
+          className="mx-auto h-6 w-6 animate-fade-in"
+          aria-hidden="true"
+        />
         <h1 className="mt-3 font-serif text-2xl font-semibold">
           {summary.positive_framing.title}
         </h1>

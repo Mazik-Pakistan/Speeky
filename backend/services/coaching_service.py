@@ -25,7 +25,7 @@ from fastapi import Depends
 from fastapi.responses import JSONResponse
 from prisma import Json
 
-from lib import llm_client, prompts, session_scorer
+from lib import livekit_tokens, llm_client, prompts, session_scorer
 from lib.prisma_client import db
 from lib.session_scorer import AudioFeatures, ScoredSession
 from middlewares.auth_middleware import require_auth
@@ -63,6 +63,7 @@ _SLANG = {
 _AGGRESSIVE = [
     "you didn't", "you did not do your job", "you failed", "your fault", "you never",
     "you always", "incompetent", "unacceptable", "this is ridiculous", "what is wrong with you",
+    "idiot", "loser" , "stupid"
 ]
 _OVER_PROMISE = ["i guarantee", "100%", "i promise it will never", "whatever it takes",
                  "anything you want", "we'll do everything"]
@@ -637,6 +638,22 @@ async def submit_session(session_id: str, payload: SubmitCoachingSchema,
     result["session_id"] = session_id
     result["status"] = status.value
     return result
+
+
+async def voice_token(session_id: str, user_id: str = Depends(require_auth)):
+    """Voice mode: LiveKit room token for the roleplay chat turns (mirrors
+    conversation_service.voice_token / scenario_service.voice_token)."""
+    gate = await _require_access(user_id)
+    if gate:
+        return gate
+    session = await db.coachingsession.find_unique(where={"id": session_id})
+    if not session or session.userId != user_id:
+        return JSONResponse(status_code=404, content={"error": "Coaching session not found"})
+    if not livekit_tokens.is_configured():
+        return JSONResponse(status_code=503, content={
+            "error": "Voice mode unavailable. Use text mode instead.",
+        })
+    return livekit_tokens.mint_room_token(session_id, identity=user_id)
 
 
 async def roleplay_turn(session_id: str, payload: RoleplayTurnSchema,

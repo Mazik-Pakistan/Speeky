@@ -1,5 +1,35 @@
+/*
+  Warnings:
+
+  - You are about to drop the column `intent` on the `custom_scenarios` table. All the data in the column will be lost.
+  - You are about to drop the column `safetyMode` on the `custom_scenarios` table. All the data in the column will be lost.
+  - Added the required column `passageId` to the `accent_assessments` table without a default value. This is not possible if the table is not empty.
+  - Added the required column `status` to the `accent_assessments` table without a default value. This is not possible if the table is not empty.
+
+*/
 -- CreateEnum
 CREATE TYPE "AccentAssessmentStatus" AS ENUM ('COMPLETED', 'REJECTED_NO_SPEECH', 'REJECTED_TOO_QUIET', 'REJECTED_TOO_NOISY', 'REJECTED_INCOMPLETE', 'REJECTED_MULTIPLE_VOICES');
+
+-- DropIndex
+DROP INDEX "accent_assessments_userId_monthIndex_idx";
+
+-- AlterTable
+ALTER TABLE "accent_assessments" ADD COLUMN     "passageId" TEXT NOT NULL,
+ADD COLUMN     "rejectionReason" TEXT,
+ADD COLUMN     "rhythmScore" DOUBLE PRECISION,
+ADD COLUMN     "status" "AccentAssessmentStatus" NOT NULL,
+ADD COLUMN     "stressScore" DOUBLE PRECISION,
+ADD COLUMN     "transcript" TEXT,
+ADD COLUMN     "weakPoints" JSONB NOT NULL DEFAULT '[]',
+ALTER COLUMN "pronunciationScore" DROP NOT NULL,
+ALTER COLUMN "intonationScore" DROP NOT NULL,
+ALTER COLUMN "clarityScore" DROP NOT NULL,
+ALTER COLUMN "completedAt" DROP NOT NULL,
+ALTER COLUMN "completedAt" DROP DEFAULT;
+
+-- AlterTable
+ALTER TABLE "custom_scenarios" DROP COLUMN "intent",
+DROP COLUMN "safetyMode";
 
 -- CreateTable
 CREATE TABLE "pronunciation_attempts" (
@@ -18,26 +48,6 @@ CREATE TABLE "pronunciation_attempts" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "pronunciation_attempts_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "accent_assessments" (
-    "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "passageId" TEXT NOT NULL,
-    "status" "AccentAssessmentStatus" NOT NULL,
-    "rejectionReason" TEXT,
-    "transcript" TEXT,
-    "pronunciationScore" DOUBLE PRECISION,
-    "stressScore" DOUBLE PRECISION,
-    "rhythmScore" DOUBLE PRECISION,
-    "intonationScore" DOUBLE PRECISION,
-    "clarityScore" DOUBLE PRECISION,
-    "weakPoints" JSONB NOT NULL DEFAULT '[]',
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "completedAt" TIMESTAMP(3),
-
-    CONSTRAINT "accent_assessments_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -64,16 +74,13 @@ CREATE INDEX "pronunciation_attempts_userId_idx" ON "pronunciation_attempts"("us
 CREATE UNIQUE INDEX "pronunciation_attempts_userId_sentenceId_key" ON "pronunciation_attempts"("userId", "sentenceId");
 
 -- CreateIndex
-CREATE INDEX "accent_assessments_userId_completedAt_idx" ON "accent_assessments"("userId", "completedAt");
+CREATE INDEX "accent_profiles_userId_createdAt_idx" ON "accent_profiles"("userId", "createdAt");
 
 -- CreateIndex
-CREATE INDEX "accent_profiles_userId_createdAt_idx" ON "accent_profiles"("userId", "createdAt");
+CREATE INDEX "accent_assessments_userId_completedAt_idx" ON "accent_assessments"("userId", "completedAt");
 
 -- AddForeignKey
 ALTER TABLE "pronunciation_attempts" ADD CONSTRAINT "pronunciation_attempts_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "accent_assessments" ADD CONSTRAINT "accent_assessments_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "accent_profiles" ADD CONSTRAINT "accent_profiles_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;

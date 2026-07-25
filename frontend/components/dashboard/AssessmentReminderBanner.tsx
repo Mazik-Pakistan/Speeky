@@ -1,37 +1,50 @@
 "use client";
 
-import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
+import * as React from "react";
+import { usePathname } from "next/navigation";
+import { Lock } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useAssessmentAccess } from "@/contexts/AssessmentContext";
 
-/**
- * Persistent, non-blocking reminder for "Unassessed" users (US-12 happy
- * path step 5). The backend already rate-limits how often this should
- * resurface (see gating_service.should_show_assessment_prompt), so this
- * component just reflects `show_assessment_prompt` as-is.
- */
 export function AssessmentReminderBanner() {
-  const { access } = useAssessmentAccess();
+  const { access, isLoading } = useAssessmentAccess();
+  const pathname = usePathname();
 
-  if (!access?.show_assessment_prompt) {
+  // If we are still loading, or the prompt isn't required, render nothing.
+  if (isLoading || !access?.show_assessment_prompt) {
+    return null;
+  }
+
+  // Prevent the blocking overlay from showing if the user is already navigating
+  // to the assessment page itself, or if they are just trying to manage their profile!
+  if (
+    pathname === "/dashboard/assessment" ||
+    pathname === "/dashboard/profile"
+  ) {
     return null;
   }
 
   return (
-    <div className="mb-6 flex flex-col items-start gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-start gap-2.5">
-        <AlertTriangle
-          className="mt-0.5 h-4 w-4 shrink-0 text-warning"
-          aria-hidden="true"
-        />
-        <p className="text-foreground">{access.assessment_prompt_message}</p>
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+      <div className="flex w-full max-w-md animate-fade-up flex-col items-center gap-6 rounded-2xl border border-border bg-surface-elevated p-8 text-center shadow-2xl">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-warning/10 text-warning">
+          <Lock className="h-8 w-8" aria-hidden="true" />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <h2 className="font-serif text-2xl font-semibold text-foreground">
+            Assessment Required
+          </h2>
+          <p className="text-base text-muted-foreground">
+            Complete your baseline assessment to unlock personalized learning
+            features.
+          </p>
+        </div>
+
+        <Button href="/dashboard/assessment" size="lg" className="mt-2 w-full">
+          Take Assessment
+        </Button>
       </div>
-      <Link
-        href="/dashboard/assessment"
-        className="shrink-0 rounded-lg bg-warning px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:opacity-90"
-      >
-        Take Assessment
-      </Link>
     </div>
   );
 }

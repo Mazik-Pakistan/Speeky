@@ -34,14 +34,14 @@ enum PromptKind {
   REASSESSMENT
 }
 
-// Workplace English Coach scenarios
-// Just like in lib/prompts.WORKPLACE_SCENARIOS.
+// Workplace English Coach scenarios (WEC-US-08 .. WEC-US-12). Keys mirror
+// lib/prompts.WORKPLACE_SCENARIOS.
 enum CoachingScenario {
-  EMAIL_WRITING          // (text)
-  CLIENT_COMMUNICATION   // (audio roleplay)
-  MEETING_COMMUNICATION  // (audio roleplay)
-  PRESENTATION_PREP      // (audio)
-  GENERAL_WORKPLACE      // (text or audio)
+  EMAIL_WRITING // (text)
+  CLIENT_COMMUNICATION // (audio roleplay)
+  MEETING_COMMUNICATION // (audio roleplay)
+  PRESENTATION_PREP // (audio)
+  GENERAL_WORKPLACE // (text or audio)
 }
 
 enum CoachingInputMode {
@@ -52,7 +52,7 @@ enum CoachingInputMode {
 enum CoachingStatus {
   IN_PROGRESS
   COMPLETED
-  ENDED_EARLY   // e.g. WEC-US-10 E-01 de-escalation cut-off
+  ENDED_EARLY // e.g. WEC-US-10 E-01 de-escalation cut-off
 }
 
 // Accent Assessment (US-93). REJECTED_* means the reading wasn't scored at all — see
@@ -66,27 +66,47 @@ enum AccentAssessmentStatus {
   REJECTED_MULTIPLE_VOICES
 }
 
+// Public Speaking Coach speech types (PSC-US-01, PSC-US-03, PSC-US-04, PSC-US-05, PSC-US-06, PSC-US-07)
+// Using String instead of enum for flexibility
+// Values: business_pitch, casual_event, motivational, classroom, ted_talk
+
+// Public Speaking Coach input modes
+// Using String instead of enum for flexibility
+// Values: audio, text
+
+// Public Speaking Coach session status
+// Using String instead of enum for flexibility
+// Values: in_progress, completed, qa_phase
+
 model User {
-  id                   String                @id @default(cuid())
-  email                String                @unique
-  password             String
-  name                 String
-  avatarUrl            String                @default("user.webp")
-  role                 Role                  @default(USER)
-  assessmentStatus     AssessmentStatus      @default(UNASSESSED)
-  learningLevel        LearningLevel?
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  passwordResetTokens  PasswordResetToken[]
-  refreshTokens        RefreshToken[]
-  baselineAssessments  BaselineAssessment[]
-  reassessmentRequests ReassessmentRequest[]
-  promptLogs           PromptLog[]
-  coachingSessions     CoachingSession[]
-  scenarioSessions     ScenarioSession[]
-  accentAssessments    AccentAssessment[]
-  pronunciationAttempts PronunciationAttempt[]
-  accentProfiles       AccentProfile[]
+  id                     String                    @id @default(cuid())
+  email                  String                    @unique
+  password               String
+  name                   String
+  avatarUrl              String                    @default("user.webp")
+  role                   Role                      @default(USER)
+  assessmentStatus       AssessmentStatus          @default(UNASSESSED)
+  learningLevel          LearningLevel?
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+  passwordResetTokens    PasswordResetToken[]
+  refreshTokens          RefreshToken[]
+  baselineAssessments    BaselineAssessment[]
+  reassessmentRequests   ReassessmentRequest[]
+  promptLogs             PromptLog[]
+  coachingSessions       CoachingSession[]
+  scenarioSessions       ScenarioSession[]
+  accentAssessments      AccentAssessment[]
+  pronunciationAttempts  PronunciationAttempt[]
+  accentProfiles         AccentProfile[]
+  vocabularyProgress     VocabularyWordProgress[]
+  publicSpeakingSessions PublicSpeakingSession[]
+
+  // PDG-US-15: lifetime cumulative practice time (seconds) credited via
+  // practice_time_service pings, and the milestone-hour thresholds already
+  // celebrated (so a repeat crossing doesn't re-trigger the modal).
+  lifetimePracticeSeconds Float @default(0)
+  unlockedMilestoneHours  Int[] @default([])
 
   @@map("users")
 }
@@ -97,44 +117,73 @@ model User {
 // "custom:<id>". targetVocab is snapshotted at session start so a later admin
 // edit to a custom scenario doesn't retroactively change grading.
 model ScenarioSession {
-  id               String    @id @default(cuid())
+  id               String   @id @default(cuid())
   userId           String
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   scenarioKey      String
-  status           String    @default("in_progress") // in_progress | completed | ended_early
-  turns            Json      @default("[]")          // [{role, content}]
+  status           String   @default("in_progress") // in_progress | completed | ended_early
+  turns            Json     @default("[]") // [{role, content}]
   targetVocab      String[]
-  vocabUsed        String[]  @default([])
+  vocabUsed        String[] @default([])
+  silenceStreak    Int      @default(0) // consecutive silent/empty turns — 3 in a row auto-closes
+  aggressionStreak Int      @default(0) // consecutive aggressive/cursing turns — 2 in a row ends the scenario
 
-  politenessScore  Float?
-  vocabularyScore  Float?
-  confidenceScore  Float?
-  metGoal          Boolean?  // only meaningful for goal_type "negotiation" scenarios
+  politenessScore Float?
+  vocabularyScore Float?
+  confidenceScore Float?
+  metGoal         Boolean? // only meaningful for goal_type "negotiation" scenarios
 
-  flags            Json      @default("[]")
-  summary          String?
-  createdAt        DateTime  @default(now())
-  completedAt      DateTime?
+  flags        Json      @default("[]")
+  summary      String?
+  tips         String[]  @default([]) // 2-3 concrete next-time tips (rich feedback)
+  originalLine String? // learner's weakest turn, verbatim — paired with polishedLine below
+  polishedLine String? // that turn rewritten stronger ("Post-Session Actionable Script")
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
 
   @@index([userId])
   @@map("scenario_sessions")
 }
 
+// PDG-US-12: per-word usage tracking that feeds the Vocabulary Growth
+// Drill-down's Mastered (useCount >= 3) / Learning (1-2) lists. Incremented
+// from scenario_service.end_session's existing vocab-coverage grading — no
+// separate grading pass. needsReview flags a Mastered word that was targeted
+// again in a later session but not used (E-03 de-ranking).
+model VocabularyWordProgress {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word         String
+  useCount     Int       @default(0)
+  status       String    @default("learning") // learning | mastered
+  needsReview  Boolean   @default(false)
+  lastUsedAt   DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+
+  @@unique([userId, word])
+  @@index([userId, status])
+  @@map("vocabulary_word_progress")
+}
+
+
 // Admin-authored Scenario-Based Learning scenarios. Merged with the
 // built-in lib/prompts.SBL_SCENARIOS at read time. Publishing is just a DB write —
 // no app update needed, per the story's acceptance criteria.
 model CustomScenario {
-  id             String   @id @default(cuid())
-  title          String   @unique
-  category       String
-  persona        String
-  systemPrompt   String
-  openingLine    String?
-  targetVocab    String[]
-  goalType       String   @default("roleplay") // roleplay | negotiation
-  corporateTone  Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String   @id @default(cuid())
+  title         String   @unique
+  category      String
+  persona       String
+  intent        String   @default("") // short blurb shown on the learner's pre-scenario screen
+  systemPrompt  String
+  openingLine   String?
+  targetVocab   String[]
+  goalType      String   @default("roleplay") // roleplay | negotiation
+  safetyMode    Boolean  @default(false) // breaks character on a medical-emergency phrase
+  corporateTone Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@map("custom_scenarios")
 }
@@ -144,16 +193,16 @@ model CustomScenario {
 // several turns held in `turns`). Scores are confidence-first: professionalTone is the
 // headline metric, independent of grammar.
 model CoachingSession {
-  id                 String            @id @default(cuid())
-  userId             String
-  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scenario           CoachingScenario
-  inputMode          CoachingInputMode
-  status             CoachingStatus    @default(IN_PROGRESS)
-  promptText         String                                     // scenario brief shown to user
-  submission         String?                                    // final text / transcript graded
-  turns              Json              @default("[]")            // roleplay dialogue [{role,content}]
-  audioFeatures      Json?                                      // AUDIO pipeline signal snapshot
+  id            String            @id @default(cuid())
+  userId        String
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scenario      CoachingScenario
+  inputMode     CoachingInputMode
+  status        CoachingStatus    @default(IN_PROGRESS)
+  promptText    String // scenario brief shown to user
+  submission    String? // final text / transcript graded
+  turns         Json              @default("[]") // roleplay dialogue [{role,content}]
+  audioFeatures Json? // AUDIO pipeline signal snapshot
 
   // Scores (0-100). pronunciationScore stays null for the TEXT pipeline.
   professionalTone   Float?
@@ -164,11 +213,11 @@ model CoachingSession {
   pronunciationScore Float?
   confidenceScore    Float?
 
-  feedback           Json?                                      // grader summary + polished version
-  flags              Json              @default("[]")           // exception-handling flags raised
-  metObjective       Boolean?
-  createdAt          DateTime          @default(now())
-  completedAt        DateTime?
+  feedback     Json? // grader summary + polished version
+  flags        Json      @default("[]") // exception-handling flags raised
+  metObjective Boolean?
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
 
   @@index([userId])
   @@map("coaching_sessions")
@@ -207,9 +256,9 @@ model PronunciationAttempt {
   sentenceId              String
   targetText              String
   transcript              String
-  wordResults             Json                // [{word, target_index, status, confidence}]
+  wordResults             Json // [{word, target_index, status, confidence}]
   overallScore            Float
-  accentProfileTag        String?             // US-90 Local Accent Calibration hook (stub — not applied yet)
+  accentProfileTag        String? // US-90 Local Accent Calibration hook (stub — not applied yet)
   attemptCount            Int      @default(1)
   backgroundVoiceDetected Boolean  @default(false)
   disfluencyDetected      Boolean  @default(false)
@@ -229,7 +278,9 @@ model AccentAssessment {
   userId             String
   user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   passageId          String
+  monthIndex         Int
   status             AccentAssessmentStatus
+  wordStressScore    Float
   rejectionReason    String?
   transcript         String?
   pronunciationScore Float?
@@ -241,15 +292,12 @@ model AccentAssessment {
   createdAt          DateTime               @default(now())
   completedAt        DateTime?
 
-  accentProfiles     AccentProfile[]
+  accentProfiles AccentProfile[]
 
   @@index([userId, completedAt])
   @@map("accent_assessments")
 }
 
-// Accent Assessment & Improvement (US-89). Generated only from a COMPLETED
-// AccentAssessment — services/accent_profile_service.py 404s rather than defaulting
-// if none exists yet. History kept (multiple profiles over time), "latest" is canonical.
 model AccentProfile {
   id                 String           @id @default(cuid())
   userId             String
@@ -261,7 +309,7 @@ model AccentProfile {
   rhythmScore        Float
   intonationScore    Float
   clarityScore       Float
-  weakPoints         Json             // [{issue, detail}]
+  weakPoints         Json // [{issue, detail}]
   exercises          Json             @default("[]")
   createdAt          DateTime         @default(now())
 
@@ -355,4 +403,25 @@ model SignupOtp {
   createdAt DateTime @default(now())
 
   @@map("signup_otps")
+}
+
+// Public Speaking Coach session (PSC-US-01, PSC-US-03, PSC-US-04, PSC-US-05, PSC-US-06, PSC-US-07, PSC-US-11, PSC-US-12, PSC-US-14)
+model PublicSpeakingSession {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  speechType     String // business_pitch, casual_event, motivational, classroom, ted_talk
+  inputMode      String // audio, text
+  status         String    @default("in_progress") // in_progress, completed, qa_phase
+  topic          String?
+  transcript     String?
+  scorecard      Json?
+  aiQuestion     String? // AI-generated Q&A question (PSC-US-12)
+  userQaResponse String? // User's Q&A response
+  qaScore        Json? // Q&A performance evaluation
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@index([userId, completedAt])
+  @@map("public_speaking_sessions")
 }
