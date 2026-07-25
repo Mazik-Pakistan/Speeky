@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowRight, Briefcase, FileText, Lock, MessagesSquare, Search, UserSquare2 } from "lucide-react";
+import { ArrowRight, Briefcase, FileText, Lock, MessagesSquare, Mic, Search, UserSquare2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   EXPLORE_CATEGORIES,
@@ -82,6 +82,13 @@ export default function ExplorePage() {
               icon: MessagesSquare,
               title: "AI Conversation Practice",
               description: "Open-ended conversation practice on any topic, with your AI coach.",
+              gated: true,
+            },
+            {
+              href: "/dashboard/pronunciation",
+              icon: Mic,
+              title: "Pronunciation Coach",
+              description: "Practice phoneme-targeted sentences and retry the words you miss.",
               gated: true,
             },
             {

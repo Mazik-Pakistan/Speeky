@@ -42,6 +42,7 @@ class SpeechConfig:
     max_recording_seconds: float
     pronunciation_max_upload_mb: float
     accent_max_upload_mb: float
+    daily_challenge_max_upload_mb: float
 
     # ── VAD (silero-vad) ─────────────────────────────────────────────────────
     vad_speech_threshold: float
@@ -87,10 +88,17 @@ def load_speech_config() -> SpeechConfig:
         max_recording_seconds=_float_env("MAX_RECORDING_SECONDS", 120.0),
         pronunciation_max_upload_mb=_float_env("PRONUNCIATION_MAX_UPLOAD_MB", 15.0),
         accent_max_upload_mb=_float_env("ACCENT_MAX_UPLOAD_MB", 25.0),
+        daily_challenge_max_upload_mb=_float_env("DAILY_CHALLENGE_MAX_UPLOAD_MB", 15.0),
         vad_speech_threshold=_float_env("VAD_SPEECH_THRESHOLD", 0.5),
         min_avg_dbfs=_float_env("MIN_AVG_DBFS", -40.0),
         min_snr_db=_float_env("MIN_SNR_DB", 6.0),
-        word_confidence_threshold=_float_env("WORD_CONFIDENCE_THRESHOLD", 0.55),
+        # 0.05, not the originally-committed 0.55: real browser mic audio (compressed
+        # webm/opus, resampled) on the "base" model regularly scored correct words well
+        # below 0.55 (confirmed live on "cat" verbatim). Progressively lowered through
+        # 0.35 and 0.2 before landing here. At 0.05 this gate only catches
+        # near-zero-confidence transcription (effectively noise/garbage), not genuine
+        # mispronunciation — recalibrate upward against real samples if that's too loose.
+        word_confidence_threshold=_float_env("WORD_CONFIDENCE_THRESHOLD", 0.05),
         stress_error_sensitivity=_float_env("STRESS_ERROR_SENSITIVITY", 0.4),
         disfluency_repetition_window_seconds=_float_env("DISFLUENCY_REPETITION_WINDOW_SECONDS", 2.0),
         pronunciation_retry_limit=_int_env("PRONUNCIATION_RETRY_LIMIT", 0),

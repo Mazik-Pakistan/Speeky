@@ -41,13 +41,16 @@ class RecordingAnalysis:
     rejection: Optional[RejectionReason] = None
 
 
-def analyze_recording(audio_bytes: bytes, config: SpeechConfig) -> RecordingAnalysis:
+def analyze_recording(audio_bytes: bytes, config: SpeechConfig, initial_prompt: Optional[str] = None) -> RecordingAnalysis:
     """Decode + run VAD/STT/prosody over a raw audio upload.
 
     Always returns a result, even a rejected one, so callers can tell the user *why*
     rather than raising for the ordinary "submitted silence" case. STT only runs when
     the audio clears the speech/quiet/noise checks — transcribing known-bad audio would
     just waste time and risk hallucinated text on silence.
+
+    initial_prompt is passed straight through to stt_engine.transcribe — see that
+    function's docstring for why (short/single-word clips benefit the most).
 
     Raises audio_io.AudioDecodeError only for a genuinely unreadable upload (corrupt
     file, empty body, unsupported container) — callers map that to a 400.
@@ -72,7 +75,7 @@ def analyze_recording(audio_bytes: bytes, config: SpeechConfig) -> RecordingAnal
 
     transcript, words = "", []
     if rejection is None:
-        transcription = stt_engine.transcribe(waveform, sample_rate, config)
+        transcription = stt_engine.transcribe(waveform, sample_rate, config, initial_prompt=initial_prompt)
         transcript, words = transcription.text, transcription.words
 
     return RecordingAnalysis(

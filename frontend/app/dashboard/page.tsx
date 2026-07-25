@@ -5,17 +5,16 @@ import {
   Briefcase,
   CheckCircle2,
   Coffee,
-  Flame,
   Mic,
   Plane,
   Plus,
   Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DailyChallengeCard } from "@/components/dashboard/DailyChallengeCard";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  DAILY_STREAK,
   MASTERY_METRICS,
   RECENT_SCENARIOS,
   type RecentScenario,
@@ -81,34 +80,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_2fr]">
-        <div
-          className="flex animate-fade-up flex-col justify-between gap-6 rounded-2xl bg-gradient-to-br from-accent to-accent/80 p-6 text-accent-foreground shadow-sm transition-transform duration-200 hover:-translate-y-0.5"
-          style={{ animationDelay: "75ms" }}
-        >
-          <div>
-            <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-accent-foreground/80">
-              <Flame className="h-4 w-4" aria-hidden="true" />
-              Daily Streak
-            </span>
-            <p className="mt-3 flex items-baseline gap-2">
-              <span className="text-5xl font-bold tracking-tight">
-                {DAILY_STREAK.days}
-              </span>
-              <span className="text-lg text-accent-foreground/80">Days</span>
-            </p>
-          </div>
-          <div>
-            <p className="text-sm text-accent-foreground/90">{DAILY_STREAK.message}</p>
-            <div className="mt-4 flex gap-1.5">
-              {Array.from({ length: 5 }, (_, i) => (
-                <span
-                  key={i}
-                  className="h-1.5 flex-1 rounded-full bg-accent-foreground/30"
-                />
-              ))}
-            </div>
-          </div>
-        </div>
+        <DailyChallengeCard />
 
         <div
           className="animate-fade-up rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm transition-shadow duration-200 hover:shadow-md"

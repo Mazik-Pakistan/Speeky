@@ -36,6 +36,9 @@ from routers.scenario_routes import router as scenario_router
 from routers.session_memory_routes import router as session_memory_router
 from routers.pronunciation_routes import router as pronunciation_router
 from routers.accent_routes import router as accent_router
+from routers.daily_challenge_routes import router as daily_challenge_router
+from routers.notification_routes import router as notification_router
+from routers.overuse_routes import router as overuse_router
 from utils.app_error import AppError
 
 
@@ -91,6 +94,9 @@ app.include_router(progress_dashboard_router, prefix="/api/progress-dashboard")
 app.include_router(accent_progress_router, prefix="/api/accent-progress")
 app.include_router(pronunciation_router, prefix="/api/pronunciation-coach")
 app.include_router(accent_router, prefix="/api/accent-assessment")
+app.include_router(daily_challenge_router, prefix="/api/daily-challenge")
+app.include_router(notification_router, prefix="/api/notifications")
+app.include_router(overuse_router, prefix="/api/overuse")
 
 # Local-folder avatar storage, exposed to frontend as static files
 _uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")

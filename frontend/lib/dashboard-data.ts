@@ -24,11 +24,6 @@ export const DASHBOARD_NAV_LINKS: DashboardNavLink[] = [
   { label: "Profile", href: "/dashboard/profile", icon: User },
 ];
 
-export const DAILY_STREAK = {
-  days: 14,
-  message: "You're in the top 5% of learners this month. Keep the momentum going!",
-};
-
 export interface MasteryMetric {
   id: string;
   label: string;
