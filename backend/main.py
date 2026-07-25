@@ -31,14 +31,31 @@ from routers.conversation_routes import router as conversation_router
 from routers.interview_coach_routes import router as interview_coach_router
 from routers.resume_jd_routes import router as resume_jd_router
 from routers.session_memory_routes import router as session_memory_router
+from routers.actionable_script_routes import router as actionable_script_router
+from routers.progress_dashboard_routes import router as progress_dashboard_router
+from routers.adaptive_difficulty_routes import router as adaptive_difficulty_router
 from utils.app_error import AppError
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    await db.connect()
+    db_ok = True
+    try:
+        await db.connect()
+    except Exception as err:
+        db_ok = False
+        print(f"[Warning] Database connection failed: {err}. Switching to in-memory store — data will not persist across restarts.")
+    if not db_ok:
+        # Graceful degradation: swap persistent KvStore for in-memory so every
+        # feature (progress dashboard, session memory, interview coach, etc.)
+        # continues to function correctly for this server session.
+        import lib.kv_store as _kv
+        _kv.store = _kv.InMemoryKvStore()
     yield
-    await db.disconnect()
+    try:
+        await db.disconnect()
+    except Exception:
+        pass
 
 limiter = Limiter(
     key_func=get_remote_address,
@@ -81,6 +98,9 @@ app.include_router(conversation_router, prefix="/api/conversation")
 app.include_router(interview_coach_router, prefix="/api/interview-coach")
 app.include_router(session_memory_router, prefix="/api/session-memory")
 app.include_router(resume_jd_router, prefix="/api/resume-jd-intake")
+app.include_router(actionable_script_router, prefix="/api/script")
+app.include_router(progress_dashboard_router, prefix="/api/progress-dashboard")
+app.include_router(adaptive_difficulty_router, prefix="/api/adaptive-difficulty")
 
 # Local-folder avatar storage, exposed to frontend as static files
 _uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")

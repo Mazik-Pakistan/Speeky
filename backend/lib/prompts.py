@@ -495,3 +495,87 @@ FLAG_TYPES: List[str] = [
 ]
 
 HIGHLIGHT_KINDS: List[str] = ["expected_vocab", "transition"]
+
+
+# ===========================================================================
+# Post-Session Actionable Script — Advanced Vocabulary Injection
+# ===========================================================================
+ACTIONABLE_SCRIPT_REWRITE_PROMPT = """You are Speeky's Actionable Script Coach. Your task is to rewrite an English learner's response to elevate basic vocabulary into professional-level phrasing.
+
+STRICT NON-NEGOTIABLE INSTRUCTIONS:
+1. NEVER add facts, skills, tools, experiences, or details that were NOT present in the original answer. You may ONLY elevate the vocabulary and phrasing of what the user actually said. Never invent content.
+2. Cap complexity at "Professional Conversational". Do NOT use archaic, robotic, overly complex, or dense jargon. The output must sound natural, clear, and professional in modern conversation.
+3. Keep the tone appropriate for the context: {context_note}.
+{polish_note}
+
+Original response:
+\"\"\"{submission}\"\"\"
+
+Respond with ONLY the polished rewrite text, nothing else, no quotes around it, no explanations.
+"""
+
+
+def build_actionable_script_rewrite_prompt(
+    submission: str,
+    scenario_context: Optional[str] = None,
+    is_minor_polish: bool = False,
+) -> str:
+    context_note = f"The scenario context is '{scenario_context}'." if scenario_context else "General professional communication."
+    polish_note = (
+        "NOTE: The original response is already excellent. Do NOT force a heavy rewrite. "
+        "Generate only a slightly more concise alternative while preserving all original wording where effective."
+        if is_minor_polish
+        else "Elevate basic vocabulary and refine sentence structure into polished professional phrasing."
+    )
+    return ACTIONABLE_SCRIPT_REWRITE_PROMPT.format(
+        submission=submission,
+        context_note=context_note,
+        polish_note=polish_note,
+    )
+
+
+# ===========================================================================
+# Adaptive Difficulty Progression — Targeted Accent & Pronunciation Drills
+# ===========================================================================
+ADAPTIVE_DRILL_PROMPT = """You are Speeky's Adaptive Pronunciation & Accent Coach.
+Your task is to generate a single targeted practice phrase or sentence for an English learner.
+
+Target Metric / Sound / Pattern: {metric_name}
+Difficulty Level: {level}
+
+GUIDELINES FOR DIFFICULTY LEVEL {level}:
+{level_instructions}
+
+STRICT OUTPUT REQUIREMENT:
+Respond in JSON format:
+{{
+  "drill_phrase": "the exact practice sentence or phrase",
+  "complexity_notes": "short 1-sentence note explaining why this fits Level {level}"
+}}
+"""
+
+
+def build_adaptive_drill_prompt(metric_name: str, level: int) -> str:
+    if level <= 1:
+        instructions = (
+            "- Level 1 (Beginner): Short 3 to 6 word simple phrase focusing on isolated occurrences of the target sound/pattern. "
+            "Use common, easy vocabulary (e.g. 'Thirty-three thin turtles')."
+        )
+    elif level == 2:
+        instructions = (
+            "- Level 2 (Intermediate): Medium 7 to 12 word conversational sentence embedding the target sound/pattern multiple times "
+            "in natural context (e.g. 'I thought about visiting the theater three times this Thursday')."
+        )
+    else:
+        instructions = (
+            f"- Level {level} (Advanced/Mastery): Complex 12+ word sentence featuring challenging phonetic combinations, "
+            "faster-implied pacing, tongue twisters, or nested clause structures embedding the target sound/pattern heavily."
+        )
+
+    return ADAPTIVE_DRILL_PROMPT.format(
+        metric_name=metric_name,
+        level=level,
+        level_instructions=instructions,
+    )
+
+

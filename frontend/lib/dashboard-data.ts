@@ -2,8 +2,10 @@ import {
   Briefcase,
   Coffee,
   Compass,
+  FileText,
   Home,
   Plane,
+  Target,
   TrendingUp,
   User,
   UtensilsCrossed,
@@ -19,6 +21,8 @@ export interface DashboardNavLink {
 
 export const DASHBOARD_NAV_LINKS: DashboardNavLink[] = [
   { label: "Home", href: "/dashboard", icon: Home },
+  { label: "Actionable Script", href: "/dashboard/script", icon: FileText },
+  { label: "Targeted Drills", href: "/dashboard/adaptive-difficulty", icon: Target },
   { label: "Explore", href: "/dashboard/explore", icon: Compass },
   { label: "Progress", href: "/dashboard/progress", icon: TrendingUp },
   { label: "Profile", href: "/dashboard/profile", icon: User },
