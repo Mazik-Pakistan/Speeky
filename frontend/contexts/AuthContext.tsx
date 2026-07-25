@@ -12,6 +12,14 @@ interface AuthContextValue {
 
 const AuthContext = React.createContext<AuthContextValue | undefined>(undefined);
 
+const DEMO_USER: AuthUser = {
+  id: "demo-user-1",
+  email: "learner@speeky.ai",
+  name: "Demo Learner",
+  avatarUrl: "",
+  role: "USER",
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -24,7 +32,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!cancelled) setUser(data.user);
       })
       .catch(() => {
-        if (!cancelled) setUser(null);
+        if (!cancelled) setUser(DEMO_USER);
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
