@@ -9,6 +9,7 @@ import {
   User,
   UtensilsCrossed,
   Users,
+  Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -22,6 +23,7 @@ export const DASHBOARD_NAV_LINKS: DashboardNavLink[] = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Explore", href: "/dashboard/explore", icon: Compass },
   { label: "Public Speaking", href: "/dashboard/public-speaking", icon: Mic },
+  { label: "Rewrite Lab", href: "/dashboard/rewrite", icon: Wand2 },
   { label: "Progress", href: "/dashboard/progress", icon: TrendingUp },
   { label: "Profile", href: "/dashboard/profile", icon: User },
 ];
