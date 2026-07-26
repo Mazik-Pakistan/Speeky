@@ -1,4 +1,6 @@
-export const API_URL = process.env.NEXT_PUBLIC_APP_API_URL!;
+const rawApiUrl = process.env.NEXT_PUBLIC_APP_API_URL ?? "http://localhost:8000/api";
+
+export const API_URL = rawApiUrl;
 
 // Backend serves uploads (e.g. avatars) from its origin, not under /api.
 export const API_ORIGIN = API_URL.replace(/\/api\/?$/, "");
@@ -6,7 +8,11 @@ export const API_ORIGIN = API_URL.replace(/\/api\/?$/, "");
 export class ApiError extends Error {
   constructor(
     message: string,
-    public status: number
+    public status: number,
+    // Raw parsed JSON body, when the failing response had one — lets callers
+    // read structured fields a rejection carries beyond the display message
+    // (e.g. RecordingRejectedSchema's appeal_token/appeal_prompt).
+    public body?: unknown
   ) {
     super(message);
   }
@@ -94,7 +100,7 @@ export async function api<T>(
     }
 
     const data = await response.json().catch(() => null);
-    throw new ApiError(extractErrorMessage(data), response.status);
+    throw new ApiError(extractErrorMessage(data), response.status, data);
   }
 
   const data = await response.json().catch(() => null);

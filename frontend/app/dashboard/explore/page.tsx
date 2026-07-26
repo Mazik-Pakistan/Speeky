@@ -8,6 +8,7 @@ import {
   FileText,
   Lock,
   MessagesSquare,
+  Mic,
   Search,
   UserSquare2,
 } from "lucide-react";
@@ -112,6 +113,13 @@ export default function ExplorePage() {
               title: "AI Conversation Practice",
               description:
                 "Open-ended conversation practice on any topic, with your AI coach.",
+              gated: true,
+            },
+            {
+              href: "/dashboard/pronunciation",
+              icon: Mic,
+              title: "Pronunciation Coach",
+              description: "Practice phoneme-targeted sentences and retry the words you miss.",
               gated: true,
             },
             {

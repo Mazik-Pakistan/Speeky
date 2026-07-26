@@ -72,11 +72,21 @@ const config = {
           "0%, 100%": { backgroundPosition: "0% 50%" },
           "50%": { backgroundPosition: "100% 50%" },
         },
+        "slide-in-right": {
+          "0%": { opacity: "0", transform: "translateX(16px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
+        "slide-in-left": {
+          "0%": { opacity: "0", transform: "translateX(-16px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
       },
       animation: {
         "fade-up": "fade-up 300ms ease-out both",
         "fade-in": "fade-in 200ms ease-out both",
         "gradient-shift": "gradient-shift 8s ease infinite",
+        "slide-in-right": "slide-in-right 250ms ease-out both",
+        "slide-in-left": "slide-in-left 250ms ease-out both",
       },
     },
   },

@@ -13,7 +13,15 @@ from lib.prisma_client import db
 from middlewares.auth_middleware import require_admin, require_auth
 from prisma.enums import Role
 from prisma.types import UserUpdateInput
-from schemas.user_schemas import DeleteAccountSchema, UpdateProfileSchema, UpdateRoleSchema
+from schemas.user_schemas import (
+    AccentPreferenceSchema,
+    DeleteAccountSchema,
+    UpdateAccentPreferenceSchema,
+    UpdateProfileSchema,
+    UpdateRoleSchema,
+)
+from services.accent_calibration_service import get_user_accent_preference, update_user_accent_preference
+
 from utils.jwt_utils import get_access_cookie_options, get_refresh_cookie_options
 
 AVATAR_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "avatars")
@@ -53,6 +61,26 @@ async def update_profile(payload: UpdateProfileSchema, user_id: str = Depends(re
 
     user = await db.user.update(where={"id": user_id}, data=data)
     return {"user": _serialize(user)}
+
+async def get_accent_preference(user_id: str = Depends(require_auth)):
+    pref, sub_dialect, notice = await get_user_accent_preference(user_id)
+    return AccentPreferenceSchema(
+        accent_model_preference=pref,
+        sub_dialect_preference=sub_dialect,
+        notice=notice,
+    )
+
+async def set_accent_preference(payload: UpdateAccentPreferenceSchema, user_id: str = Depends(require_auth)):
+    pref, sub_dialect, notice = await update_user_accent_preference(
+        user_id, payload.accent_model_preference, payload.sub_dialect_preference
+    )
+    return AccentPreferenceSchema(
+        accent_model_preference=pref,
+        sub_dialect_preference=sub_dialect,
+        notice=notice,
+    )
+
+
 
 def _process_avatar(contents: bytes) -> bytes:
     """

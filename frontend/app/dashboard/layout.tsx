@@ -6,6 +6,10 @@ import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { AssessmentReminderBanner } from "@/components/dashboard/AssessmentReminderBanner";
+import { PendingNotificationsBanner } from "@/components/dashboard/PendingNotificationsBanner";
+import { OveruseNudgeBanner } from "@/components/dashboard/OveruseNudgeBanner";
+import { StreakWarningBanner } from "@/components/dashboard/StreakWarningBanner";
+import { StreakNavIcon } from "@/components/dashboard/StreakNavIcon";
 import { useAuth } from "@/contexts/AuthContext";
 import { AssessmentProvider } from "@/contexts/AssessmentContext";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -46,6 +50,7 @@ export default function DashboardLayout({
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-14 items-center justify-end gap-3 border-b border-border px-6 lg:px-10">
+            <StreakNavIcon />
             <ThemeToggle />
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               <LogOut className="h-4 w-4" aria-hidden="true" />
@@ -55,6 +60,9 @@ export default function DashboardLayout({
 
           <main className="relative flex-1 px-6 py-8 lg:px-10">
             <AssessmentReminderBanner />
+            <PendingNotificationsBanner />
+            <OveruseNudgeBanner />
+            <StreakWarningBanner />
             {children}
           </main>
         </div>

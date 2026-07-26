@@ -226,6 +226,28 @@ def build_grammar_correction_prompt(text: str) -> str:
 
 
 # ===========================================================================
+# Code-Switch Detection — word/phrase -> English equivalent lookup
+# (lib/code_switch/code_switch_text.py, US-53). Replaces a prior
+# deep-translator/Google-Translate round-trip with our existing Groq
+# client, so no separate third-party translation service is needed.
+# ===========================================================================
+
+CODE_SWITCH_TRANSLATION_PROMPT = """Give a short, direct English equivalent for the word or
+phrase below, as it is used in the sentence. Answer with ONLY the English equivalent, in as
+few words as possible - no explanation, no punctuation, no surrounding quotes.
+If the word or phrase is already English, or has no clear English equivalent, reply with
+exactly one word: SAME
+
+Sentence: "{context}"
+Word or phrase: "{token}"
+"""
+
+
+def build_code_switch_translation_prompt(token: str, context: str) -> str:
+    return CODE_SWITCH_TRANSLATION_PROMPT.format(token=token, context=context)
+
+
+# ===========================================================================
 # Interview Coach — scenario-based flow (job_interview -> salary_negotiation)
 # ===========================================================================
 
@@ -767,3 +789,198 @@ def build_scenario_grading_prompt(scenario_meta: Dict, transcript: str, vocab_us
         transcript=transcript,
         goal_note=goal_note,
     )
+
+# ===========================================================================
+# Pronunciation Coach — GAP-03 / GAP-04 / GAP-05 (US-71 / US-72 / US-73)
+# Output/session-flow layer: sentence selection, classification copy, and
+# tunable thresholds. Real phoneme/silence/volume detection and transcription
+# come from lib/recording_engine.py's pipeline (STT + VAD + prosody) — this
+# layer only consumes those signals, it doesn't compute them.
+# ===========================================================================
+
+# GAP-03: content bank. Stub data — real content-team bank plugs in here later.
+SENTENCE_BANK = {
+    "th": [
+        "The three thieves thought thoroughly before they acted.",
+        "This thick thread threads through the thimble.",
+        "Thirty-three thankful thinkers thanked the teacher.",
+    ],
+    "r": [
+        "Rachel rarely runs around the rugged river road.",
+        "The red rooster roared right after sunrise.",
+        "Robert quietly rehearsed his research report.",
+    ],
+    "v": [
+        "Victor bravely volunteered for the vivid adventure.",
+        "Seven violins vibrated with a heavy vibrato.",
+        "Vivian visited the village every evening.",
+    ],
+    "sh": [
+        "She sells seashells beside the shallow shore.",
+        "The chef showed her a sharp, shiny dish.",
+        "Sherlock shared his shrewd theory with the sheriff.",
+    ],
+}
+
+# Difficulty-ordered default set — E-01 fallback for brand-new users with no
+# error history yet.
+DEFAULT_SENTENCE_SET = [
+    "The cat sat on the mat.",
+    "I like to read books on rainy days.",
+    "She walked quickly to catch the early train.",
+    "Learning a new language takes patience and practice.",
+    "The quick brown fox jumps over the lazy dog.",
+]
+
+# GAP-03 E-03: cap on consecutive same-phoneme targeting before forced rotation.
+MAX_CONSECUTIVE_SAME_PHONEME = 3
+
+# GAP-04: silence/quiet/noise gating itself is real (recording_engine.analyze_recording's
+# RejectionReason, driven by SpeechConfig.min_avg_dbfs/min_snr_db) — this is just the
+# consecutive-silent-attempts cap that turns repeated silence into a troubleshooting nudge.
+MAX_CONSECUTIVE_SILENT_ATTEMPTS = 3   # E-03: trigger mic troubleshooting flow
+
+# GAP-05: similarity thresholds — "must be configurable/tunable, not hard-coded
+# per sentence" per acceptance criteria. Overlap here is real: matched-word coverage
+# from lib/text_alignment.align_words(target_sentence, real STT transcript words).
+OFF_SCRIPT_PHONEME_OVERLAP_THRESHOLD = 0.30
+CODE_SWITCH_PARTIAL_OVERLAP_CEILING = 0.85   # below this (but above off-script) => partial/code-switch
+MAX_CONSECUTIVE_OFFSCRIPT_ATTEMPTS = 3        # E-04: resurface reference audio + simplify instructions
+
+PRONUNCIATION_MESSAGES = {
+    "no_speech_detected": "No speech detected — make sure you're being heard, then try again.",
+    "mic_troubleshoot": "It looks like your mic may not be picking up sound. Let's check your microphone settings.",
+    "too_quiet": "I caught a little something — try speaking a bit louder.",
+    "partial_muted": "Got you up until the mic cut out — the rest is marked as not scored, not wrong.",
+    "off_script": "That didn't quite match today's sentence — here it is again, give it a read.",
+    "off_script_repeated": "Let's slow down — here's the reference audio again, and a simpler version of the instructions.",
+    "code_switch_partial": "Most of that came through — one part wasn't recognized as English, so it's marked as skipped rather than wrong.",
+    "scored_ok": "All green — nice work! Moving on.",
+    "needs_retry": "Almost — a word or two weren't quite right. Give the whole sentence another go.",
+    "content_gap_flagged": "Reusing a sentence you've seen before for this sound (fresh ones are running low).",
+}
+
+
+def build_phoneme_tag(phoneme: str) -> str:
+    """GAP-03: user-facing rationale tag so the adaptive pick isn't a black box."""
+    return f"Practicing: {phoneme.upper()} sound"
+
+
+# ===========================================================================
+# US-071 / US-78: Pronunciation Retry Loop Mechanic
+# Output/session-flow layer. Per-word classification comes from
+# lib/recording_engine.classify_word_status (real STT + prosody) — this layer
+# just diffs attempts, tracks frustration, and generates the retry feedback copy.
+# ===========================================================================
+
+RETRY_FRUSTRATION_THRESHOLD = 5  # E-01: consecutive fails on the same target word
+
+RETRY_MESSAGES = {
+    "empty_audio": "Audio too short. Try again.",
+    "frustration_breakdown": "Let's listen to this word slowly, syllable by syllable.",
+    "default_ok": "Nice, that attempt is logged — keep going.",
+    "all_correct": "All green! Great work on that sentence.",
+}
+
+
+def build_retry_diff_message(fixed_word: Optional[str], broken_word: Optional[str]) -> str:
+    if fixed_word and broken_word:
+        return f"Great job fixing '{fixed_word}', but watch out for '{broken_word}'."
+    if fixed_word:
+        return f"'{fixed_word}' sounded great that time!"
+    if broken_word:
+        return f"Watch out for '{broken_word}'."
+    return RETRY_MESSAGES["default_ok"]
+
+
+# ===========================================================================
+# GAP-09: Session Interruption Recovery (Calls, Backgrounding, Connectivity Loss)
+# Output/session-flow layer only. Actual local-storage checkpointing on the
+# client and real audio queuing/upload are Speech-to-Text/client territory —
+# this layer owns server-side checkpoint state, the resume-prompt copy, and
+# the branching logic around staleness/conflicts.
+# ===========================================================================
+
+EXTENDED_ABSENCE_HOURS = 24  # E-02: past this, resume prompt changes tone
+
+INTERRUPTION_MESSAGES = {
+    "resume_prompt": "Pick up where you left off?",
+    "stale_resume_prompt": "Continue your previous session?",
+    "discard_in_flight": "That last recording didn't finish — no worries, just re-record that sentence.",
+    "conflict_second_device": "A newer session on another device is now active; the previous session has been archived.",
+    "not_found": "No interrupted session found.",
+}
+
+
+# ===========================================================================
+# Daily Challenge anti-gaming detection (US-168 / GAP-07)
+# ===========================================================================
+# Duration/turn thresholds mirror the "5-minute session" described in the story.
+DAILY_CHALLENGE_MIN_DURATION_SECONDS = 300
+DAILY_CHALLENGE_MIN_TURNS = 3
+
+# Content-quality thresholds fed to the (stubbed) quality scorer. Kept lenient on
+# purpose — AC requires beginners are never penalized for low skill, only for
+# clear filler/repetition patterns.
+DAILY_CHALLENGE_MIN_QUALITY_SCORE = 0.35
+DAILY_CHALLENGE_MIN_UNIQUE_WORD_RATIO = 0.4
+DAILY_CHALLENGE_MAX_DOMINANT_TOKEN_RATIO = 0.6
+DAILY_CHALLENGE_MIN_WORDS_FOR_REPETITION_CHECK = 4
+
+STREAK_MILESTONE_DAYS = (3, 7, 14, 30, 60, 100)
+
+LOW_ENGAGEMENT_NUDGE_MESSAGE = (
+    "That one didn't quite count towards your streak — it looked like filler or "
+    "repeated words rather than real conversation. No worries, give it another go "
+    "whenever you're ready!"
+)
+NON_INTERACTIVE_REJECTION_MESSAGE = (
+    "We couldn't confirm this was a live conversation with you, so this session "
+    "wasn't counted. Please make sure you're speaking directly into the mic."
+)
+DISPUTE_CONFIRMED_MESSAGE = (
+    "Thanks for flagging that — we've reviewed it, confirmed it was genuine, and "
+    "credited your streak."
+)
+DISPUTE_DENIED_MESSAGE = (
+    "We looked into it again and the session still doesn't meet the engagement bar. "
+    "Your streak wasn't credited for this one."
+)
+
+
+def build_milestone_message(days: int) -> str:
+    return f"🎉 {days}-day streak! You're building a real habit — keep it going."
+
+
+# ===========================================================================
+# Notification frequency controls & quiet hours (US-169 / GAP-08)
+# ===========================================================================
+NOTIFICATION_CADENCE_OPTIONS = ("off", "remind_if_not_practiced", "always")
+DEFAULT_QUIET_HOURS_START = "22:00"
+DEFAULT_QUIET_HOURS_END = "08:00"
+DEFAULT_NOTIFICATION_CADENCE = "remind_if_not_practiced"
+
+STREAK_BREAK_IN_APP_SUMMARY = (
+    "Your {streak_length}-day streak ended on {broken_date} — reminders were off, so "
+    "we didn't nudge you at the time. Ready to start a new one today?"
+)
+STREAK_REMINDER_PUSH_MESSAGE = "You haven't practiced yet today — a few minutes keeps your streak alive!"
+
+
+# ===========================================================================
+# Healthy engagement safeguard / overuse nudge (US-170 / GAP-09)
+# ===========================================================================
+# "Continuous sitting" thresholds. IDLE_BREAK resets the continuous timer — it is
+# what distinguishes one long unbroken sitting from several short sessions (E-03).
+OVERUSE_IDLE_BREAK_MINUTES = 15
+OVERUSE_THRESHOLD_MINUTES = 120
+OVERUSE_FOLLOWUP_INTERVAL_MINUTES = 120
+
+OVERUSE_NUDGE_MESSAGE = (
+    "You've been practicing for a while now — great focus! Consider taking a short "
+    "break before continuing."
+)
+OVERUSE_FOLLOWUP_NUDGE_MESSAGE = (
+    "Still going strong! Just a gentle reminder that a quick break can help you "
+    "come back sharper."
+)

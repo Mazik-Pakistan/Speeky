@@ -43,16 +43,28 @@ class TranscriptionResult:
     words: List[WordTiming]
 
 
-def transcribe(waveform: np.ndarray, sample_rate: int, config: SpeechConfig) -> TranscriptionResult:
+def transcribe(
+    waveform: np.ndarray, sample_rate: int, config: SpeechConfig, initial_prompt: Optional[str] = None
+) -> TranscriptionResult:
     """Transcribe a mono float32 waveform. faster-whisper's numpy-array input path
     expects 16kHz PCM — the recording engine always decodes at config.audio_sample_rate,
-    so this is a guard against a misconfigured .env, not a normal runtime path."""
+    so this is a guard against a misconfigured .env, not a normal runtime path.
+
+    initial_prompt biases decoding toward expected vocabulary (the target sentence for
+    a Pronunciation Coach attempt, the target word for a retry) — short, single-word
+    clips in particular have little context for the model to disambiguate against on
+    their own, so this materially improves recognition on exactly that case without
+    forcing the output (Whisper still transcribes what it actually hears)."""
     if sample_rate != 16000:
         raise ValueError(f"faster-whisper expects 16000 Hz audio for array input, got {sample_rate}")
 
     model = _get_model(config)
     segments, _info = model.transcribe(
-        waveform.astype(np.float32), beam_size=5, word_timestamps=True, language="en"
+        waveform.astype(np.float32),
+        beam_size=5,
+        word_timestamps=True,
+        language="en",
+        initial_prompt=initial_prompt,
     )
 
     words: List[WordTiming] = []

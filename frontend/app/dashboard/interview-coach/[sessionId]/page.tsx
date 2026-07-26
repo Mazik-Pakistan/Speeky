@@ -28,6 +28,8 @@ import {
   recordSessionMemory,
   resumeInterruptedSession,
 } from "@/lib/sessionMemory";
+import { getInterviewCoachFillerWords } from "@/lib/fillerWords";
+import { FillerWordsScorecardSection } from "@/components/dashboard/public-speaking/FillerWordsScorecardSection";
 
 interface Turn {
   speaker: string;
@@ -420,6 +422,9 @@ function ResultsView({ sessionId, feedback }: { sessionId: string; feedback: Ses
         <h2 className="font-serif text-lg font-semibold text-foreground">Actionable Script</h2>
         <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{feedback.actionable_script}</p>
       </div>
+
+      {/* PSC-US-08: Filler word breakdown & timeline, same scorecard as Public Speaking */}
+      <FillerWordsScorecardSection sessionId={sessionId} fetchFn={getInterviewCoachFillerWords} />
 
       <div className="flex flex-wrap items-center justify-center gap-3">
         <Button size="lg" variant="outline" onClick={() => setShareOpen(true)}>

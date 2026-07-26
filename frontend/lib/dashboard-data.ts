@@ -5,10 +5,12 @@ import {
   Home,
   Mic,
   Plane,
+  Sparkles,
   TrendingUp,
   User,
   UtensilsCrossed,
   Users,
+  Volume2,
   Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -22,16 +24,13 @@ export interface DashboardNavLink {
 export const DASHBOARD_NAV_LINKS: DashboardNavLink[] = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Explore", href: "/dashboard/explore", icon: Compass },
+  { label: "Pronunciation", href: "/dashboard/pronunciation", icon: Volume2 },
+  { label: "Accent", href: "/dashboard/accent-assessment", icon: Sparkles },
   { label: "Public Speaking", href: "/dashboard/public-speaking", icon: Mic },
   { label: "Rewrite Lab", href: "/dashboard/rewrite", icon: Wand2 },
   { label: "Progress", href: "/dashboard/progress", icon: TrendingUp },
   { label: "Profile", href: "/dashboard/profile", icon: User },
 ];
-
-export const DAILY_STREAK = {
-  days: 14,
-  message: "You're in the top 5% of learners this month. Keep the momentum going!",
-};
 
 export interface MasteryMetric {
   id: string;

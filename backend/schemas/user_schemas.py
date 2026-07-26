@@ -22,3 +22,15 @@ class UpdateRoleSchema(BaseModel):
 
 class DeleteAccountSchema(BaseModel):
     password: str = Field(min_length=1)
+
+
+class AccentPreferenceSchema(BaseModel):
+    accent_model_preference: str = Field(default="generic_global")
+    sub_dialect_preference: Optional[str] = None
+    notice: Optional[str] = None
+
+
+class UpdateAccentPreferenceSchema(BaseModel):
+    accent_model_preference: Literal["generic_global", "south_asian_pakistani"]
+    sub_dialect_preference: Optional[str] = None
+

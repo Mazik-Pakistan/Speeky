@@ -25,6 +25,10 @@ class RejectionReason(str, Enum):
     BACKGROUND_NOISE_TOO_HIGH = "background_noise_too_high"
     INCOMPLETE_RECORDING = "incomplete_recording"
     MULTIPLE_VOICES_DETECTED = "multiple_voices_detected"
+    PLAYBACK_DETECTED = "playback_detected"
+    AUDIO_DISTORTION = "audio_distortion"
+
+
 
 
 @dataclass
@@ -39,15 +43,44 @@ class RecordingAnalysis:
     prosody: prosody_engine.ProsodyData
     multiple_voices_detected: bool
     rejection: Optional[RejectionReason] = None
+    high_freq_energy_ratio: float = 1.0  # 1.0 default = "not suspicious" for callers/tests that don't set it
 
 
-def analyze_recording(audio_bytes: bytes, config: SpeechConfig) -> RecordingAnalysis:
+def _high_freq_energy_ratio(waveform, sample_rate: int) -> float:
+    """Fraction of total spectral energy sitting in the top 10% of the Nyquist band.
+
+    Best-effort proxy for compression artifacts (ACC-US-01's playback-detection AC
+    explicitly names these): lossy speech codecs and multi-generation playback/
+    re-recording commonly apply a low-pass cutoff well below Nyquist, silently gutting
+    this band, while genuine live mic capture keeps a small but nonzero tail up there
+    from sibilance and room/mic noise even in a quiet room. Not real spectral/codec
+    analysis (no format sniffing, no MDCT-block artifact detection) -- a cheap signal
+    alongside the existing noise-floor/SNR/pitch-flatness checks, not a replacement.
+    """
+    import numpy as np
+
+    if len(waveform) < 1024:
+        return 1.0
+    spectrum = np.abs(np.fft.rfft(waveform))
+    freqs = np.fft.rfftfreq(len(waveform), d=1.0 / sample_rate)
+    total_energy = float(np.sum(spectrum ** 2))
+    if total_energy <= 0:
+        return 1.0
+    cutoff_hz = 0.9 * (sample_rate / 2.0)
+    high_energy = float(np.sum(spectrum[freqs >= cutoff_hz] ** 2))
+    return high_energy / total_energy
+
+
+def analyze_recording(audio_bytes: bytes, config: SpeechConfig, initial_prompt: Optional[str] = None) -> RecordingAnalysis:
     """Decode + run VAD/STT/prosody over a raw audio upload.
 
     Always returns a result, even a rejected one, so callers can tell the user *why*
     rather than raising for the ordinary "submitted silence" case. STT only runs when
     the audio clears the speech/quiet/noise checks — transcribing known-bad audio would
     just waste time and risk hallucinated text on silence.
+
+    initial_prompt is passed straight through to stt_engine.transcribe — see that
+    function's docstring for why (short/single-word clips benefit the most).
 
     Raises audio_io.AudioDecodeError only for a genuinely unreadable upload (corrupt
     file, empty body, unsupported container) — callers map that to a 400.
@@ -62,17 +95,23 @@ def analyze_recording(audio_bytes: bytes, config: SpeechConfig) -> RecordingAnal
     prosody = prosody_engine.analyze(waveform, sample_rate)
     multiple_voices = prosody_engine.detect_multiple_voices(prosody, config)
 
+    import numpy as np
+    clipping_ratio = float(np.sum(np.abs(waveform) > 0.98)) / max(1, len(waveform))
+
     rejection: Optional[RejectionReason] = None
-    if not vad_result.has_speech:
+    if clipping_ratio > 0.02:
+        rejection = RejectionReason.AUDIO_DISTORTION
+    elif not vad_result.has_speech:
         rejection = RejectionReason.NO_SPEECH_DETECTED
     elif avg_dbfs < config.min_avg_dbfs:
         rejection = RejectionReason.AUDIO_TOO_QUIET
     elif snr_db < config.min_snr_db:
         rejection = RejectionReason.BACKGROUND_NOISE_TOO_HIGH
 
+
     transcript, words = "", []
     if rejection is None:
-        transcription = stt_engine.transcribe(waveform, sample_rate, config)
+        transcription = stt_engine.transcribe(waveform, sample_rate, config, initial_prompt=initial_prompt)
         transcript, words = transcription.text, transcription.words
 
     return RecordingAnalysis(
@@ -86,6 +125,7 @@ def analyze_recording(audio_bytes: bytes, config: SpeechConfig) -> RecordingAnal
         prosody=prosody,
         multiple_voices_detected=multiple_voices,
         rejection=rejection,
+        high_freq_energy_ratio=_high_freq_energy_ratio(waveform, sample_rate),
     )
 
 
@@ -155,3 +195,27 @@ def detect_disfluency(analysis: RecordingAnalysis, config: SpeechConfig) -> bool
         if prev.word.lower() == curr.word.lower() and (curr.start - prev.end) <= config.disfluency_repetition_window_seconds:
             return True
     return False
+
+
+def detect_playback_audio(analysis: RecordingAnalysis, config: SpeechConfig) -> Optional[RejectionReason]:
+    """ACC-US-01: Detect pre-recorded or synthetic playback file audio based on signal characteristics.
+    
+    Checks ambient noise floor cutoffs, flat artificial noise floor (< -75.0 dBFS or near zero),
+    excessively high SNR (> 55 dBFS), or zero pitch variance on speech segments.
+    """
+    if analysis.noise_floor_dbfs < config.liveness_min_noise_floor_dbfs:
+        return RejectionReason.PLAYBACK_DETECTED
+    if analysis.snr_db > 55.0 and analysis.duration_seconds > 2.0:
+        return RejectionReason.PLAYBACK_DETECTED
+    if (
+        analysis.duration_seconds > 1.0
+        and analysis.high_freq_energy_ratio < config.liveness_min_high_freq_energy_ratio
+    ):
+        return RejectionReason.PLAYBACK_DETECTED
+    if analysis.prosody and len(analysis.prosody.pitch_hz) > 10:
+        import numpy as np
+        voiced = [f for f in analysis.prosody.pitch_hz if f > 0]
+        if len(voiced) > 10 and np.std(voiced) < 0.5:
+            return RejectionReason.PLAYBACK_DETECTED
+    return None
+

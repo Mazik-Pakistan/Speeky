@@ -11,6 +11,7 @@ import {
   Volume2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import {
   endConversationSession,
@@ -20,9 +21,80 @@ import {
   type ConversationTurn,
   type EndConversationResult,
 } from "@/lib/conversation";
+import { scoreConversationTurn, type SentenceScoreResult } from "@/lib/pronunciationCoach";
+import { ScoreDisputeButton } from "@/components/dashboard/ScoreDisputeButton";
 import { playText } from "@/lib/tts";
 import { useAutoScroll } from "@/lib/useAutoScroll";
-import { useLiveKitVoice } from "@/lib/useLiveKitVoice";
+import { useLiveKitVoice, type AudioFeatures, type VoiceFeatures } from "@/lib/useLiveKitVoice";
+
+const TIER_CLASSES: Record<string, string> = {
+  green: "bg-success/15 text-success",
+  orange: "bg-warning/15 text-warning",
+  red: "bg-danger/15 text-danger",
+  gray: "bg-muted text-muted-foreground line-through",
+  unscorable: "bg-muted text-muted-foreground",
+};
+
+/**
+ * US-79/US-74: word-level pronunciation highlighting for one audio turn,
+ * fetched from the real shared pipeline (pronunciation_coach_service.score_turn).
+ * Only ever renders for a turn with input_mode "audio".
+ */
+function PronunciationBreakdown({ sessionId, turnIndex }: { sessionId: string; turnIndex: number }) {
+  const [result, setResult] = React.useState<SentenceScoreResult | null>(null);
+  const [status, setStatus] = React.useState<"idle" | "loading" | "error">("idle");
+  const [message, setMessage] = React.useState<string | null>(null);
+
+  async function handleScore() {
+    setStatus("loading");
+    setMessage(null);
+    try {
+      const response = await scoreConversationTurn(sessionId, turnIndex);
+      if (response.result) {
+        setResult(response.result);
+        setStatus("idle");
+      } else {
+        // US-74: outage/retry/hard-failure states — real backend status, not a crash.
+        setMessage(response.message);
+        setStatus("error");
+      }
+    } catch (err) {
+      setMessage(err instanceof ApiError ? err.message : "Couldn't score this turn.");
+      setStatus("error");
+    }
+  }
+
+  if (result) {
+    return (
+      <p className="mt-1.5 flex flex-wrap gap-1 text-sm">
+        {result.words.map((w) => (
+          <span
+            key={w.index}
+            title={w.note}
+            className={cn("rounded px-1", TIER_CLASSES[w.tier] ?? "")}
+          >
+            {w.target_word}
+          </span>
+        ))}
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-1.5">
+      <button
+        type="button"
+        onClick={handleScore}
+        disabled={status === "loading"}
+        className="text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+      >
+        {status === "loading" ? "Scoring pronunciation…" : "View pronunciation breakdown"}
+      </button>
+      {status === "error" && message ? <p className="mt-1 text-[11px] text-danger">{message}</p> : null}
+    </div>
+  );
+}
+
 
 export default function ConversationSessionPage() {
   const params = useParams<{ sessionId: string }>();
@@ -50,7 +122,19 @@ export default function ConversationSessionPage() {
     () => getConversationVoiceToken(params.sessionId),
     [params.sessionId],
   );
-  const onTranscript = React.useCallback((text: string) => {
+  // Stores the latest audio features from the voice agent so handleSend can
+  // attach them to the message and mark the turn as input_mode="audio".
+  const pendingAudioFeaturesRef = React.useRef<{ duration_seconds: number; word_timings: { word: string; start: number; end: number }[] } | null>(null);
+  const onTranscript = React.useCallback((text: string, audioFeatures?: AudioFeatures | VoiceFeatures) => {
+    pendingAudioFeaturesRef.current =
+      audioFeatures &&
+      Array.isArray((audioFeatures as AudioFeatures).word_timings) &&
+      typeof (audioFeatures as AudioFeatures).duration_seconds === "number"
+        ? {
+            duration_seconds: (audioFeatures as AudioFeatures).duration_seconds,
+            word_timings: (audioFeatures as AudioFeatures).word_timings,
+          }
+        : null;
     setMessage((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
   }, []);
   const {
@@ -61,6 +145,7 @@ export default function ConversationSessionPage() {
     error: voiceError,
     startVoice,
     stopVoice,
+    getLastAudioFeatures,
   } = useLiveKitVoice(fetchVoiceToken, onTranscript);
 
   React.useEffect(() => {
@@ -137,20 +222,34 @@ export default function ConversationSessionPage() {
     setError(null);
     setIsSending(true);
     const text = message.trim();
+    // Consume pending audio features from the voice agent (set by onTranscript).
+    // getLastAudioFeatures() clears the ref so a second text send doesn't re-use them.
+    const audioFeatures = pendingAudioFeaturesRef.current ?? getLastAudioFeatures();
+    pendingAudioFeaturesRef.current = null;
+    const isAudioTurn = audioFeatures !== null;
     setMessage("");
     setTurns((prev) => [
       ...(prev ?? []),
       {
         role: "user",
         content: text,
-        input_mode: "text",
+        input_mode: isAudioTurn ? "audio" : "text",
         correction_chip: null,
         created_at: "",
       },
     ]);
 
     try {
-      const result = await sendConversationMessage(params.sessionId, { text });
+      const payload: Parameters<typeof sendConversationMessage>[1] = { text };
+      if (isAudioTurn && audioFeatures) {
+        payload.input_mode = "audio";
+        payload.audio_features = {
+          transcript: text,
+          duration_seconds: audioFeatures.duration_seconds,
+          word_timings: audioFeatures.word_timings,
+        };
+      }
+      const result = await sendConversationMessage(params.sessionId, payload);
       setTurns((prev) => [
         ...(prev ?? []),
         {
@@ -203,12 +302,14 @@ export default function ConversationSessionPage() {
             <p className="mt-1 text-xl font-semibold text-foreground">
               {Math.round(summary.fluency_score)}
             </p>
+            <ScoreDisputeButton assessmentId={summary.session_id} metricName="fluency" metricLabel="Fluency" />
           </div>
           <div className="rounded-xl border border-border bg-surface-elevated p-4 text-center shadow-sm">
             <p className="text-xs text-muted-foreground">Vocabulary</p>
             <p className="mt-1 text-xl font-semibold text-foreground">
               {Math.round(summary.vocabulary_score)}
             </p>
+            <ScoreDisputeButton assessmentId={summary.session_id} metricName="vocabulary" metricLabel="Vocabulary" />
           </div>
           <div className="rounded-xl border border-border bg-surface-elevated p-4 text-center shadow-sm">
             <p className="text-xs text-muted-foreground">Pronunciation</p>
@@ -217,6 +318,9 @@ export default function ConversationSessionPage() {
                 ? Math.round(summary.pronunciation_score)
                 : "—"}
             </p>
+            {summary.pronunciation_score !== null ? (
+              <ScoreDisputeButton assessmentId={summary.session_id} metricName="pronunciation" metricLabel="Pronunciation" />
+            ) : null}
           </div>
         </div>
         {summary.new_memory_facts.length > 0 ? (
@@ -332,6 +436,9 @@ export default function ConversationSessionPage() {
                     {turn.correction_chip.explanation}
                   </p>
                 </div>
+              ) : null}
+              {turn.role === "user" && turn.input_mode === "audio" ? (
+                <PronunciationBreakdown sessionId={params.sessionId} turnIndex={i} />
               ) : null}
             </div>
           ))}
