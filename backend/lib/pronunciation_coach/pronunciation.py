@@ -8,7 +8,7 @@ This implementation provides a fallback using g2p_en for phoneme conversion.
 
 import logging
 import numpy as np
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict
 from g2p_en import G2p
 
 logging.basicConfig(level=logging.INFO)
@@ -59,7 +59,6 @@ class PronunciationScorer:
         This requires MFA to be installed separately. See documentation for setup.
         """
         try:
-            import alignment
             logger.info("Loading MFA model for British English alignment...")
             # MFA model loading would go here
             # self.mfa_model = alignment.Aligner(model_name="english_uk_mfa")

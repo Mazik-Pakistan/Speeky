@@ -6,9 +6,11 @@ from services.user_service import (
     get_profile,
     list_users,
     set_accent_preference,
+    request_email_change,
     update_profile,
     update_user_role,
     upload_avatar,
+    verify_email_change,
 )
 
 router = APIRouter()
@@ -23,6 +25,11 @@ router.add_api_route("/me/accent-preference", get_accent_preference, methods=["G
 router.add_api_route("/me/accent-preference", set_accent_preference, methods=["PATCH"])
 # Same route handles first upload and later replacement — overwrite is update
 router.add_api_route("/me/avatar", upload_avatar, methods=["PATCH"])
+# Email changes are OTP-gated: request sends a code to the NEW address,
+# verify applies it. Calling request again (e.g. "Resend code") just
+# regenerates the code — see EmailChangeOtp upsert in otp_service.
+router.add_api_route("/me/email/request-change", request_email_change, methods=["POST"])
+router.add_api_route("/me/email/verify-change", verify_email_change, methods=["POST"])
 
 
 # Admin-only (auth + role enforced via Depends(require_admin) on each handler)

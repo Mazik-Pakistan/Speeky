@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
+import { toast } from "react-toastify";
 import { CheckCircle2, Mic, MicOff, Sparkles, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -165,6 +166,7 @@ export default function CoachingSessionPage() {
     if (!started) {
       voiceStartedAt.current = null;
       setVoiceStatus("Voice input unavailable.");
+      toast.error("Voice input unavailable on this device/browser.");
     }
   }
 

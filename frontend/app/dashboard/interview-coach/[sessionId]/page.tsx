@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
+import { toast } from "react-toastify";
 import { Coffee, Mic, MicOff, Pause, Play, Share2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -230,7 +231,7 @@ export default function InterviewCoachSessionPage() {
     try {
       await takeInterviewBreak(sessionId);
     } catch {
-      // Non-critical.
+      toast.error("Couldn't start a break. Try again.");
     }
   }
 
@@ -455,7 +456,13 @@ function ResultsView({ sessionId, feedback }: { sessionId: string; feedback: Ses
                 value={shareLink}
                 className="h-10 flex-1 rounded-lg border border-input bg-surface px-3 text-xs text-foreground"
               />
-              <Button size="sm" onClick={() => navigator.clipboard.writeText(shareLink)}>
+              <Button
+                size="sm"
+                onClick={() => {
+                  navigator.clipboard.writeText(shareLink);
+                  toast.success("Link copied to clipboard.");
+                }}
+              >
                 Copy
               </Button>
             </div>

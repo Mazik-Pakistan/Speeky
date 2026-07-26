@@ -114,7 +114,7 @@ export function AuthShell({
               alt="Speeky"
               width={142}
               height={159}
-              className="h-9 w-auto"
+              className="h-9 w-auto brightness-0 invert"
             />
           </Link>
           <div className="flex flex-col gap-2">

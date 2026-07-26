@@ -28,6 +28,7 @@ import {
 import { getPersonalizedOpening } from "@/lib/sessionMemory";
 import { useAutoScroll } from "@/lib/useAutoScroll";
 import { useAutoSpeak } from "@/lib/useAutoSpeak";
+import { stopCurrent } from "@/lib/tts";
 import { usePracticeTimePing } from "@/lib/usePracticeTimePing";
 import { useLiveKitVoice } from "@/lib/useLiveKitVoice";
 
@@ -224,6 +225,7 @@ export default function ScenarioSessionPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
+      stopCurrent();
       setIsSubmitting(false);
     }
   }

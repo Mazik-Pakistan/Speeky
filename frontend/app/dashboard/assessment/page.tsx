@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "react-toastify";
 import {
   CheckCircle2,
   ClipboardList,
@@ -266,9 +267,13 @@ export default function AssessmentPage() {
   }
 
   async function handleStartVoice() {
-    if (step.name !== "question" || step.questionMode !== "audio" || isVoiceActive) {
+    if (
+      step.name !== "question" ||
+      step.questionMode !== "audio" ||
+      isVoiceActive
+    )
       return;
-    }
+
     // Wall-clock start for the audio_features.duration_seconds sent on submit (routes the
     // answer through the backend AUDIO scoring pipeline). Marked used the moment a
     // transcript lands (see the onTranscript callback above).
@@ -299,7 +304,8 @@ export default function AssessmentPage() {
             Analyzing your responses...
           </h1>
           <p className="text-sm text-muted-foreground">
-            Evaluating fluency, confidence, vocabulary diversity, and speech articulation.
+            Evaluating fluency, confidence, vocabulary diversity, and speech
+            articulation.
           </p>
         </div>
 
@@ -307,7 +313,10 @@ export default function AssessmentPage() {
         {analysisDuration >= 10 && (
           <div className="flex items-center gap-2.5 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-xs font-medium text-primary animate-fade-in">
             <Clock className="h-4 w-4 shrink-0 animate-pulse" />
-            <span>Taking a bit longer than usual — finalizing your personalized skill profile...</span>
+            <span>
+              Taking a bit longer than usual — finalizing your personalized
+              skill profile...
+            </span>
           </div>
         )}
 
@@ -358,8 +367,9 @@ export default function AssessmentPage() {
             Baseline Communication Assessment
           </h1>
           <p className="text-sm text-muted-foreground">
-            A short check-in sets your starting confidence score and personalizes
-            AI Conversation Practice, Interview Coach, and Scenario-Based Learning for you.
+            A short check-in sets your starting confidence score and
+            personalizes AI Conversation Practice, Interview Coach, and
+            Scenario-Based Learning for you.
           </p>
         </div>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
@@ -464,7 +474,8 @@ export default function AssessmentPage() {
                     : "Speak Answer"}
               </Button>
               <p className="text-xs text-muted-foreground">
-                Speak your answer — we transcribe it for you to review before you continue.
+                Speak your answer — we transcribe it for you to review before
+                you continue.
               </p>
             </div>
           ) : null}

@@ -433,7 +433,11 @@ async def _send_message(user_id: str, session_id: str, req: SendMessageSchema) -
 # ── AIC-US-16 (voice mode): LiveKit room token + agent-fed transcript intake ────
 async def _voice_token(user_id: str, session_id: str) -> Dict:
     session = await _get_session(session_id, user_id)  # raises SessionNotFoundError if not owned
-    return livekit_tokens.mint_room_token(session["room_name"], identity=user_id)
+    # "timed" (not the bare default): Conversation is the only caller that attaches
+    # word_timings + duration_seconds to the outgoing message for pronunciation scoring
+    # (US-79/74) — see agent.py's transcribe_timed(). Scenario/Coaching/Interview Coach/
+    # Assessment discard those fields, so they stay on the cheaper default pipeline.
+    return livekit_tokens.mint_room_token(session["room_name"], identity=user_id, mode="timed")
 
 
 async def _agent_send_message(session_id: str, req: SendMessageSchema, secret: Optional[str]) -> Dict:

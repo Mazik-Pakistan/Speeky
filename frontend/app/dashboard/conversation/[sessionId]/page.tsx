@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
+import { toast } from "react-toastify";
 import {
   CheckCircle2,
   Headphones,
@@ -21,11 +22,18 @@ import {
   type ConversationTurn,
   type EndConversationResult,
 } from "@/lib/conversation";
-import { scoreConversationTurn, type SentenceScoreResult } from "@/lib/pronunciationCoach";
+import {
+  scoreConversationTurn,
+  type SentenceScoreResult,
+} from "@/lib/pronunciationCoach";
 import { ScoreDisputeButton } from "@/components/dashboard/ScoreDisputeButton";
-import { playText } from "@/lib/tts";
+import { playText, stopCurrent } from "@/lib/tts";
 import { useAutoScroll } from "@/lib/useAutoScroll";
-import { useLiveKitVoice, type AudioFeatures, type VoiceFeatures } from "@/lib/useLiveKitVoice";
+import {
+  useLiveKitVoice,
+  type AudioFeatures,
+  type VoiceFeatures,
+} from "@/lib/useLiveKitVoice";
 
 const TIER_CLASSES: Record<string, string> = {
   green: "bg-success/15 text-success",
@@ -40,9 +48,17 @@ const TIER_CLASSES: Record<string, string> = {
  * fetched from the real shared pipeline (pronunciation_coach_service.score_turn).
  * Only ever renders for a turn with input_mode "audio".
  */
-function PronunciationBreakdown({ sessionId, turnIndex }: { sessionId: string; turnIndex: number }) {
+function PronunciationBreakdown({
+  sessionId,
+  turnIndex,
+}: {
+  sessionId: string;
+  turnIndex: number;
+}) {
   const [result, setResult] = React.useState<SentenceScoreResult | null>(null);
-  const [status, setStatus] = React.useState<"idle" | "loading" | "error">("idle");
+  const [status, setStatus] = React.useState<"idle" | "loading" | "error">(
+    "idle",
+  );
   const [message, setMessage] = React.useState<string | null>(null);
 
   async function handleScore() {
@@ -59,7 +75,9 @@ function PronunciationBreakdown({ sessionId, turnIndex }: { sessionId: string; t
         setStatus("error");
       }
     } catch (err) {
-      setMessage(err instanceof ApiError ? err.message : "Couldn't score this turn.");
+      setMessage(
+        err instanceof ApiError ? err.message : "Couldn't score this turn.",
+      );
       setStatus("error");
     }
   }
@@ -88,13 +106,16 @@ function PronunciationBreakdown({ sessionId, turnIndex }: { sessionId: string; t
         disabled={status === "loading"}
         className="text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
       >
-        {status === "loading" ? "Scoring pronunciation…" : "View pronunciation breakdown"}
+        {status === "loading"
+          ? "Scoring pronunciation…"
+          : "View pronunciation breakdown"}
       </button>
-      {status === "error" && message ? <p className="mt-1 text-[11px] text-danger">{message}</p> : null}
+      {status === "error" && message ? (
+        <p className="mt-1 text-[11px] text-danger">{message}</p>
+      ) : null}
     </div>
   );
 }
-
 
 export default function ConversationSessionPage() {
   const params = useParams<{ sessionId: string }>();
@@ -124,19 +145,26 @@ export default function ConversationSessionPage() {
   );
   // Stores the latest audio features from the voice agent so handleSend can
   // attach them to the message and mark the turn as input_mode="audio".
-  const pendingAudioFeaturesRef = React.useRef<{ duration_seconds: number; word_timings: { word: string; start: number; end: number }[] } | null>(null);
-  const onTranscript = React.useCallback((text: string, audioFeatures?: AudioFeatures | VoiceFeatures) => {
-    pendingAudioFeaturesRef.current =
-      audioFeatures &&
-      Array.isArray((audioFeatures as AudioFeatures).word_timings) &&
-      typeof (audioFeatures as AudioFeatures).duration_seconds === "number"
-        ? {
-            duration_seconds: (audioFeatures as AudioFeatures).duration_seconds,
-            word_timings: (audioFeatures as AudioFeatures).word_timings,
-          }
-        : null;
-    setMessage((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
-  }, []);
+  const pendingAudioFeaturesRef = React.useRef<{
+    duration_seconds: number;
+    word_timings: { word: string; start: number; end: number }[];
+  } | null>(null);
+  const onTranscript = React.useCallback(
+    (text: string, audioFeatures?: AudioFeatures | VoiceFeatures) => {
+      pendingAudioFeaturesRef.current =
+        audioFeatures &&
+        Array.isArray((audioFeatures as AudioFeatures).word_timings) &&
+        typeof (audioFeatures as AudioFeatures).duration_seconds === "number"
+          ? {
+              duration_seconds: (audioFeatures as AudioFeatures)
+                .duration_seconds,
+              word_timings: (audioFeatures as AudioFeatures).word_timings,
+            }
+          : null;
+      setMessage((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+    },
+    [],
+  );
   const {
     isVoiceActive,
     isConnectingVoice,
@@ -172,6 +200,7 @@ export default function ConversationSessionPage() {
       setTopicLabel(data.topic_label);
     } catch (err) {
       console.error("Failed to refresh conversation transcript:", err);
+      toast.error("Couldn't refresh the transcript.");
     }
   }, [params.sessionId]);
 
@@ -186,6 +215,7 @@ export default function ConversationSessionPage() {
 
   React.useEffect(() => {
     if (!audioMode || !turns?.length) {
+      stopCurrent();
       audioModeWasOn.current = audioMode;
       return;
     }
@@ -224,7 +254,8 @@ export default function ConversationSessionPage() {
     const text = message.trim();
     // Consume pending audio features from the voice agent (set by onTranscript).
     // getLastAudioFeatures() clears the ref so a second text send doesn't re-use them.
-    const audioFeatures = pendingAudioFeaturesRef.current ?? getLastAudioFeatures();
+    const audioFeatures =
+      pendingAudioFeaturesRef.current ?? getLastAudioFeatures();
     pendingAudioFeaturesRef.current = null;
     const isAudioTurn = audioFeatures !== null;
     setMessage("");
@@ -280,6 +311,7 @@ export default function ConversationSessionPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
+      stopCurrent();
       setIsEnding(false);
     }
   }
@@ -302,14 +334,22 @@ export default function ConversationSessionPage() {
             <p className="mt-1 text-xl font-semibold text-foreground">
               {Math.round(summary.fluency_score)}
             </p>
-            <ScoreDisputeButton assessmentId={summary.session_id} metricName="fluency" metricLabel="Fluency" />
+            <ScoreDisputeButton
+              assessmentId={summary.session_id}
+              metricName="fluency"
+              metricLabel="Fluency"
+            />
           </div>
           <div className="rounded-xl border border-border bg-surface-elevated p-4 text-center shadow-sm">
             <p className="text-xs text-muted-foreground">Vocabulary</p>
             <p className="mt-1 text-xl font-semibold text-foreground">
               {Math.round(summary.vocabulary_score)}
             </p>
-            <ScoreDisputeButton assessmentId={summary.session_id} metricName="vocabulary" metricLabel="Vocabulary" />
+            <ScoreDisputeButton
+              assessmentId={summary.session_id}
+              metricName="vocabulary"
+              metricLabel="Vocabulary"
+            />
           </div>
           <div className="rounded-xl border border-border bg-surface-elevated p-4 text-center shadow-sm">
             <p className="text-xs text-muted-foreground">Pronunciation</p>
@@ -319,7 +359,11 @@ export default function ConversationSessionPage() {
                 : "—"}
             </p>
             {summary.pronunciation_score !== null ? (
-              <ScoreDisputeButton assessmentId={summary.session_id} metricName="pronunciation" metricLabel="Pronunciation" />
+              <ScoreDisputeButton
+                assessmentId={summary.session_id}
+                metricName="pronunciation"
+                metricLabel="Pronunciation"
+              />
             ) : null}
           </div>
         </div>
@@ -438,7 +482,10 @@ export default function ConversationSessionPage() {
                 </div>
               ) : null}
               {turn.role === "user" && turn.input_mode === "audio" ? (
-                <PronunciationBreakdown sessionId={params.sessionId} turnIndex={i} />
+                <PronunciationBreakdown
+                  sessionId={params.sessionId}
+                  turnIndex={i}
+                />
               ) : null}
             </div>
           ))}

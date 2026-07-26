@@ -1,6 +1,4 @@
-const rawApiUrl = process.env.NEXT_PUBLIC_APP_API_URL ?? "http://localhost:8000/api";
-
-export const API_URL = rawApiUrl;
+export const API_URL = process.env.NEXT_PUBLIC_APP_API_URL!;
 
 // Backend serves uploads (e.g. avatars) from its origin, not under /api.
 export const API_ORIGIN = API_URL.replace(/\/api\/?$/, "");
@@ -12,7 +10,7 @@ export class ApiError extends Error {
     // Raw parsed JSON body, when the failing response had one — lets callers
     // read structured fields a rejection carries beyond the display message
     // (e.g. RecordingRejectedSchema's appeal_token/appeal_prompt).
-    public body?: unknown
+    public body?: unknown,
   ) {
     super(message);
   }
@@ -23,7 +21,11 @@ export class ApiError extends Error {
 // errors as {"error": "..."}; Pydantic validation failures as
 // {"error": {"fieldErrors": {...}}} — see Backend/middlewares/error_handler.py.
 function extractErrorMessage(data: unknown): string {
-  const record = data as { error?: unknown; detail?: unknown; message?: unknown } | null;
+  const record = data as {
+    error?: unknown;
+    detail?: unknown;
+    message?: unknown;
+  } | null;
 
   if (typeof record?.message === "string") return record.message;
 
@@ -70,7 +72,7 @@ function refreshSession(): Promise<boolean> {
 export async function api<T>(
   endpoint: string,
   options: RequestInit = {},
-  _isRetry = false
+  _isRetry = false,
 ): Promise<T> {
   const isFormData = options.body instanceof FormData;
 
@@ -89,7 +91,11 @@ export async function api<T>(
     // session doesn't die mid-use just because 30 minutes passed. Auth-flow
     // endpoints are excluded — a 401 there means something flow-specific
     // (bad credentials, no refresh cookie yet), not "session expired".
-    if (response.status === 401 && !_isRetry && !endpoint.startsWith("/auth/")) {
+    if (
+      response.status === 401 &&
+      !_isRetry &&
+      !endpoint.startsWith("/auth/")
+    ) {
       const refreshed = await refreshSession();
       if (refreshed) {
         return api<T>(endpoint, options, true);
@@ -101,6 +107,7 @@ export async function api<T>(
 
     const data = await response.json().catch(() => null);
     throw new ApiError(extractErrorMessage(data), response.status, data);
+    // throw new ApiError(extractErrorMessage(data), response.status);
   }
 
   const data = await response.json().catch(() => null);

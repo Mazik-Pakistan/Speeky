@@ -8,7 +8,6 @@ Ensures all accent baselines and drills share a unified data structure,
 and that historical baseline trend data is preserved without silent overwrites.
 """
 
-import copy
 import logging
 import uuid
 from dataclasses import asdict, dataclass, field
