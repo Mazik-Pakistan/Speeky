@@ -12,6 +12,7 @@ import {
   ArrowUpToLine,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
 import { ApiError } from "@/lib/api";
 import { useSpeechRecognition } from "@/lib/useSpeechRecognition";
 import { useServerPage } from "@/lib/useServerPage";
@@ -81,6 +82,9 @@ function ScriptPracticePanelImpl({ script, context }: Props) {
   );
   const history = useServerPage<PaginatedHistory>(historyFetcher, HISTORY_PAGE_SIZE);
   const [step, setStep] = React.useState(1);
+  const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
+    featureName: "Script Practice",
+  });
 
   async function handleTranscript(kind: Kind, text: string, durationSeconds: number) {
     setBusy(true);
@@ -151,6 +155,7 @@ function ScriptPracticePanelImpl({ script, context }: Props) {
 
   return (
     <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm">
+      {gate}
       <div>
         <h2 className="flex items-center gap-2 font-serif text-lg font-semibold text-foreground">
           <Mic className="h-4 w-4 text-primary" aria-hidden="true" />
@@ -186,7 +191,11 @@ function ScriptPracticePanelImpl({ script, context }: Props) {
           <Button
             variant={baselineConf === null ? "primary" : "outline"}
             size="sm"
-            onClick={() => (isListening && recording === "baseline" ? stop() : record("baseline"))}
+            onClick={() =>
+              isListening && recording === "baseline"
+                ? stop()
+                : void runWithVoiceReadiness(() => record("baseline"))
+            }
             loading={busy && recording === "baseline"}
             disabled={busy && recording !== "baseline"}
           >
@@ -223,7 +232,11 @@ function ScriptPracticePanelImpl({ script, context }: Props) {
           <Button
             variant="primary"
             size="sm"
-            onClick={() => (isListening && recording === "after" ? stop() : record("after"))}
+            onClick={() =>
+              isListening && recording === "after"
+                ? stop()
+                : void runWithVoiceReadiness(() => record("after"))
+            }
             loading={busy && recording === "after"}
             disabled={baselineConf === null || (busy && recording !== "after")}
           >

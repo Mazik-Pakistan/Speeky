@@ -43,6 +43,24 @@ const CATEGORY_STYLES: Record<
   },
 };
 
+const MASTERY_METRIC_STYLES: Record<
+  string,
+  { barClassName: string; valueClassName: string }
+> = {
+  fluency: {
+    barClassName: "bg-primary/70 last:bg-primary",
+    valueClassName: "text-primary",
+  },
+  confidence: {
+    barClassName: "bg-accent/60 last:bg-accent",
+    valueClassName: "text-accent",
+  },
+  speech: {
+    barClassName: "bg-foreground/60 last:bg-foreground",
+    valueClassName: "text-foreground",
+  },
+};
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const firstName = user?.name?.trim().split(/\s+/)[0] ?? "there";
@@ -103,7 +121,12 @@ export default function DashboardPage() {
                   <span className="tracking-wide text-muted-foreground">
                     {metric.label}
                   </span>
-                  <span className={cn("font-semibold", metric.valueClassName)}>
+                  <span
+                    className={cn(
+                      "font-semibold",
+                      MASTERY_METRIC_STYLES[metric.id]?.valueClassName,
+                    )}
+                  >
                     {metric.value}%
                   </span>
                 </div>
@@ -111,7 +134,10 @@ export default function DashboardPage() {
                   {metric.bars.map((height, i) => (
                     <span
                       key={i}
-                      className={cn("flex-1 rounded-sm", metric.barClassName)}
+                      className={cn(
+                        "flex-1 rounded-sm",
+                        MASTERY_METRIC_STYLES[metric.id]?.barClassName,
+                      )}
                       style={{ height: `${height}%` }}
                     />
                   ))}

@@ -12,6 +12,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { FillerWordsScorecardSection } from "@/components/dashboard/public-speaking/FillerWordsScorecardSection";
@@ -111,6 +112,9 @@ export default function PublicSpeakingSessionPage() {
       acc.has = true;
     }
   });
+  const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
+    featureName: "Public Speaking Practice",
+  });
 
   const handleStartVoice = async () => {
     if (isVoiceActive) return;
@@ -204,6 +208,7 @@ export default function PublicSpeakingSessionPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {gate}
       <div className="flex items-center gap-4">
         <Button
           variant="ghost"
@@ -279,7 +284,11 @@ export default function PublicSpeakingSessionPage() {
           </div>
 
           <Button
-            onClick={handleStartSession}
+          onClick={
+            inputMode === "audio"
+              ? () => void runWithVoiceReadiness(handleStartSession)
+              : handleStartSession
+          }
             disabled={isSubmitting}
             className="w-full"
           >
@@ -301,7 +310,7 @@ export default function PublicSpeakingSessionPage() {
             <div className="flex flex-col gap-4">
               <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border p-6">
                 <button
-                  onClick={isVoiceActive ? handleStopVoice : handleStartVoice}
+                  onClick={isVoiceActive ? handleStopVoice : () => void runWithVoiceReadiness(handleStartVoice)}
                   disabled={isConnectingVoice || isStoppingVoice}
                   className={cn(
                     "flex h-20 w-20 items-center justify-center rounded-full transition-all disabled:opacity-60",

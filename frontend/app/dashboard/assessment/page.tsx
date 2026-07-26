@@ -13,6 +13,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
 import {
@@ -135,6 +136,9 @@ export default function AssessmentPage() {
     // growing live. Reset happens on Stop/submit/new-question via setAnswer("").
     setAnswer((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
     voiceAnswerUsed.current = true;
+  });
+  const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
+    featureName: "Baseline Assessment",
   });
 
   async function handleStart() {
@@ -359,6 +363,7 @@ export default function AssessmentPage() {
   if (step.name === "intro") {
     return (
       <div className="mx-auto flex max-w-lg flex-col items-center gap-5 rounded-2xl border border-border bg-surface-elevated p-8 text-center shadow-sm">
+        {gate}
         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-primary">
           <ClipboardList className="h-6 w-6" aria-hidden="true" />
         </span>
@@ -374,7 +379,7 @@ export default function AssessmentPage() {
         </div>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         <div className="flex flex-col items-center gap-3">
-          <Button size="lg" loading={isSubmitting} onClick={handleStart}>
+          <Button size="lg" loading={isSubmitting} onClick={() => void runWithVoiceReadiness(handleStart)}>
             Start Assessment
           </Button>
           <button
@@ -430,6 +435,7 @@ export default function AssessmentPage() {
     );
     return (
       <div className="mx-auto flex max-w-xl flex-col gap-6">
+        {gate}
         <div>
           <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
             <span>
@@ -465,7 +471,7 @@ export default function AssessmentPage() {
                 variant="outline"
                 loading={isConnectingVoice || isStoppingVoice}
                 disabled={isConnectingVoice || isStoppingVoice}
-                onClick={isVoiceActive ? handleStopVoice : handleStartVoice}
+                onClick={isVoiceActive ? handleStopVoice : () => void runWithVoiceReadiness(handleStartVoice)}
               >
                 {isConnectingVoice
                   ? "Connecting..."

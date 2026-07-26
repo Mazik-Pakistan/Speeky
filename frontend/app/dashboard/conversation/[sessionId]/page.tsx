@@ -12,6 +12,7 @@ import {
   Volume2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import {
@@ -175,6 +176,9 @@ export default function ConversationSessionPage() {
     stopVoice,
     getLastAudioFeatures,
   } = useLiveKitVoice(fetchVoiceToken, onTranscript);
+  const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
+    featureName: "AI Conversation",
+  });
 
   React.useEffect(() => {
     getConversationTranscript(params.sessionId)
@@ -395,6 +399,7 @@ export default function ConversationSessionPage() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
+      {gate}
       <div className="flex items-center justify-between">
         <h1 className="font-serif text-2xl font-semibold text-foreground">
           {topicLabel || "Conversation"}
@@ -531,7 +536,7 @@ export default function ConversationSessionPage() {
               size="md"
               variant="outline"
               loading={isConnectingVoice}
-              onClick={() => void handleStartVoice()}
+              onClick={() => void runWithVoiceReadiness(handleStartVoice)}
             >
               <Mic className="h-4 w-4" aria-hidden="true" />
               Start Voice

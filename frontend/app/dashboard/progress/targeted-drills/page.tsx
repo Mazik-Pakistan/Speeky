@@ -14,6 +14,7 @@ import {
   SkipForward,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
 import { cn } from "@/lib/utils";
 import {
   getTargetedDrills,
@@ -39,6 +40,9 @@ export default function TargetedDrillsPage() {
 
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
+  const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
+    featureName: "targeted drills",
+  });
 
   const loadDrills = React.useCallback(async () => {
     setIsLoading(true);
@@ -162,6 +166,7 @@ export default function TargetedDrillsPage() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
+      {gate}
       <div className="flex items-center justify-between">
         <Link href="/dashboard/progress">
           <Button variant="ghost" size="sm" className="gap-1.5">
@@ -227,7 +232,7 @@ export default function TargetedDrillsPage() {
           {/* Record Button */}
           <div className="mt-4 flex flex-col items-center gap-3">
             <button
-              onClick={isRecording ? handleStopRecording : handleStartRecording}
+              onClick={isRecording ? handleStopRecording : () => void runWithVoiceReadiness(handleStartRecording)}
               disabled={isSubmitting}
               className={cn(
                 "flex h-20 w-20 items-center justify-center rounded-full transition-all shadow-md",

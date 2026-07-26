@@ -12,6 +12,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
 import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { ApiError } from "@/lib/api";
 import {
@@ -101,6 +102,9 @@ export default function ScenarioSessionPage() {
     startVoice,
     stopVoice,
   } = useLiveKitVoice(fetchVoiceToken, onTranscript);
+  const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
+    featureName: "Scenario Practice",
+  });
   React.useEffect(() => {
     if (voiceError) setError(voiceError);
   }, [voiceError]);
@@ -269,6 +273,7 @@ export default function ScenarioSessionPage() {
     const { detail } = step;
     return (
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
+        {gate}
         <div>
           <h1 className="font-serif text-2xl font-semibold text-foreground">
             {detail.label}
@@ -305,7 +310,7 @@ export default function ScenarioSessionPage() {
             size="lg"
             className="mt-6"
             loading={isSubmitting}
-            onClick={handleStart}
+            onClick={() => void runWithVoiceReadiness(handleStart)}
           >
             Start Scenario
           </Button>
@@ -317,6 +322,7 @@ export default function ScenarioSessionPage() {
   if (step.name === "chat") {
     return (
       <div className="mx-auto flex max-w-2xl flex-col gap-4">
+        {gate}
         <MilestoneCelebrationModal
           milestone={newlyUnlocked[0] ?? null}
           onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
@@ -423,7 +429,7 @@ export default function ScenarioSessionPage() {
                 size="md"
                 variant="outline"
                 loading={isConnectingVoice}
-                onClick={() => void startVoice()}
+                onClick={() => void runWithVoiceReadiness(startVoice)}
               >
                 <Mic className="h-4 w-4" aria-hidden="true" />
                 Start Voice
@@ -445,6 +451,7 @@ export default function ScenarioSessionPage() {
   const { result } = step;
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
+      {gate}
       <div className="animate-fade-up rounded-2xl border border-border bg-gradient-to-br from-primary to-primary-hover p-8 text-center text-primary-foreground shadow-sm">
         <Sparkles className="mx-auto h-6 w-6" aria-hidden="true" />
         <h1 className="mt-3 font-serif text-2xl font-semibold">

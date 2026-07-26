@@ -10,6 +10,7 @@ import { PendingNotificationsBanner } from "@/components/dashboard/PendingNotifi
 import { OveruseNudgeBanner } from "@/components/dashboard/OveruseNudgeBanner";
 import { StreakWarningBanner } from "@/components/dashboard/StreakWarningBanner";
 import { StreakNavIcon } from "@/components/dashboard/StreakNavIcon";
+import { VoiceStatusWidget } from "@/components/common/VoiceStatusWidget";
 import { useAuth } from "@/contexts/AuthContext";
 import { AssessmentProvider } from "@/contexts/AssessmentContext";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -50,6 +51,7 @@ export default function DashboardLayout({
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-14 items-center justify-end gap-3 border-b border-border px-6 lg:px-10">
+            <VoiceStatusWidget />
             <StreakNavIcon />
             <ThemeToggle />
             <Button variant="ghost" size="sm" onClick={handleLogout}>

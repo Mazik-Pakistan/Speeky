@@ -11,6 +11,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
@@ -45,6 +46,9 @@ export default function AccentAssessmentPage() {
 
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
+  const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
+    featureName: "Accent Assessment",
+  });
 
   const loadPassage = React.useCallback(async () => {
     setIsLoading(true);
@@ -227,6 +231,7 @@ export default function AccentAssessmentPage() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
+      {gate}
       <div className="flex flex-col gap-1">
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
           Accent Assessment
@@ -268,7 +273,7 @@ export default function AccentAssessmentPage() {
 
           <div className="mt-8 flex flex-col items-center gap-4">
             <button
-              onClick={isRecording ? handleStopRecording : handleStartRecording}
+              onClick={isRecording ? handleStopRecording : () => void runWithVoiceReadiness(handleStartRecording)}
               disabled={isSubmitting}
               className={cn(
                 "flex h-20 w-20 items-center justify-center rounded-full transition-all shadow-md",
@@ -320,7 +325,11 @@ export default function AccentAssessmentPage() {
               size="sm"
               variant={isAppealRecording ? "danger" : "primary"}
               loading={isSubmittingAppeal}
-              onClick={isAppealRecording ? handleStopAppealRecording : handleStartAppealRecording}
+              onClick={
+                isAppealRecording
+                  ? handleStopAppealRecording
+                  : () => void runWithVoiceReadiness(handleStartAppealRecording)
+              }
             >
               {isAppealRecording ? "Stop & Submit Appeal" : "Record Short Verification"}
             </Button>

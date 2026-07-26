@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { toast } from "react-toastify";
 import { Coffee, Mic, MicOff, Pause, Play, Share2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
 import { Modal } from "@/components/ui/modal";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -86,6 +87,9 @@ export default function InterviewCoachSessionPage() {
     startVoice,
     stopVoice,
   } = useLiveKitVoice(fetchVoiceToken, onTranscript);
+  const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
+    featureName: "Interview Coach",
+  });
   React.useEffect(() => {
     if (voiceError) setError(voiceError);
   }, [voiceError]);
@@ -241,6 +245,7 @@ export default function InterviewCoachSessionPage() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
+      {gate}
       <div className="flex items-center justify-between">
         <h1 className="font-serif text-2xl font-semibold capitalize text-foreground">
           {mode.replace("_", " ")} Interview
@@ -337,7 +342,7 @@ export default function InterviewCoachSessionPage() {
                 size="md"
                 variant="outline"
                 loading={isConnectingVoice}
-                onClick={() => void startVoice()}
+                onClick={() => void runWithVoiceReadiness(startVoice)}
               >
                 <Mic className="h-4 w-4" aria-hidden="true" />
                 Start Voice
@@ -392,6 +397,7 @@ function ResultsView({ sessionId, feedback }: { sessionId: string; feedback: Ses
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
+      {gate}
       <div className="animate-fade-up rounded-2xl border border-border bg-gradient-to-br from-primary to-primary-hover p-8 text-center text-primary-foreground shadow-sm">
         <Sparkles className="mx-auto h-6 w-6" aria-hidden="true" />
         <h1 className="mt-3 font-serif text-2xl font-semibold">Overall Score: {feedback.overall_score}</h1>

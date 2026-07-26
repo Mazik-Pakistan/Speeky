@@ -264,3 +264,52 @@
 .Toastify__progress-bar--info {
   background: hsl(var(--info));
 }
+
+.voice-wave-ribbon {
+  animation: voice-wave-drift 18s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.voice-wave-line {
+  animation: voice-wave-breathe 8s ease-in-out infinite;
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
+.voice-status-dot-ready {
+  animation: voice-status-glow 2.6s ease-in-out infinite;
+}
+
+@keyframes voice-wave-drift {
+  0% {
+    transform: translateX(-9%) translateY(0);
+  }
+
+  100% {
+    transform: translateX(-24%) translateY(-4px);
+  }
+}
+
+@keyframes voice-wave-breathe {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: translateY(0) scaleY(1);
+  }
+
+  50% {
+    opacity: 0.86;
+    transform: translateY(-8px) scaleY(1.08);
+  }
+}
+
+@keyframes voice-status-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--success) / 0.45);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px hsl(var(--success) / 0);
+  }
+}

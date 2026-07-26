@@ -50,9 +50,8 @@ const config = {
         "2xl": "1rem",
       },
       fontFamily: {
-        // Plus Jakarta Sans acts as the default font for the whole app
         sans: ["var(--font-body)", "system-ui", "sans-serif"],
-        // Outfit is reserved specifically for your titles and buttons
+        serif: ["var(--font-heading)", "Georgia", "serif"],
         heading: ["var(--font-heading)", "system-ui", "sans-serif"],
       },
       boxShadow: {
