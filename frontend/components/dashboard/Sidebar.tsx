@@ -41,7 +41,7 @@ export function Sidebar() {
             height={28}
             className="h-7 w-7 transition-all dark:brightness-0 dark:invert"
           />
-          <span className="hidden font-serif text-2xl font-semibold tracking-tight text-primary dark:text-white lg:block">
+          <span className="hidden font-serif text-h2 font-semibold tracking-tight text-primary dark:text-white lg:block">
             Speeky
           </span>
         </Link>
