@@ -1,7 +1,13 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-type BadgeTone = "neutral" | "brand" | "accent" | "success" | "warning" | "danger";
+type BadgeTone =
+  | "neutral"
+  | "brand"
+  | "accent"
+  | "success"
+  | "warning"
+  | "danger";
 type BadgeSize = "sm" | "md";
 
 interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
@@ -60,7 +66,10 @@ export function Badge({
       {...props}
     >
       {dot ? (
-        <span className={cn("h-1.5 w-1.5 rounded-full", dotClasses[tone])} aria-hidden="true" />
+        <span
+          className={cn("h-1.5 w-1.5 rounded-full", dotClasses[tone])}
+          aria-hidden="true"
+        />
       ) : null}
       {children}
     </span>

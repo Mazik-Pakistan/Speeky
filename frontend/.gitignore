@@ -9,6 +9,6 @@ coverage/
 .DS_Store
 
 # Playwright UI audit: minted QA JWT + run artifacts, never commit
-/e2e/.auth.json
+./e2e/**
 /test-results/
 /playwright-report/
