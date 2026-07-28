@@ -31,16 +31,16 @@
     /* #D6E8ED — muted cyan-blue border */
     --input: 196 28% 88%;
     /* #D6E8ED */
-    --ring: 224 100% 22%;
-    /* #00246E */
+    --ring: 200 100% 22%;
+    /* #004B70 */
 
     /* Royal blue. Hue MUST stay in the 224 family so the focus ring (--ring) and the
        control it rings read as the same colour. Previously --primary sat on hue 200,
        which rendered #004B70 (teal) while every comment and --ring said #00246E. */
-    --primary: 224 100% 22%;
-    /* #00246E — Royal Blue */
-    --primary-hover: 224 66% 33%;
-    /* #1D3B8A */
+    --primary: 200 100% 22%;
+    /* #004B70 */
+    --primary-hover: 200 66% 33%;
+    /* #006A9C */
     --primary-foreground: 0 0% 100%;
     /* #FFFFFF */
 
