@@ -23,6 +23,7 @@ async def generate(
     *,
     max_tokens: int = 600,
     temperature: float = 0.4,
+    log_tokens: bool = False, 
 ) -> str:
     if not llm_client.is_configured():
         return _offline(system_prompt, user_message)
@@ -34,6 +35,7 @@ async def generate(
             ],
             temperature=temperature,
             max_tokens=max_tokens,
+            log_tokens=log_tokens,
         )
     except llm_client.LLMError:
         return _offline(system_prompt, user_message)

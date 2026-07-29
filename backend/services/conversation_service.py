@@ -108,7 +108,7 @@ async def validate_topic(topic: str) -> Dict:
         return {"verdict": "safe", "preset_match": None, "reason": "Offline mode — accepted without classification."}
 
     raw = await ai_client.generate(
-        system_prompt=prompts.build_topic_validation_prompt(topic), user_message="", max_tokens=100,
+        system_prompt=prompts.build_topic_validation_prompt(topic), user_message="", max_tokens=100, log_tokens=True,
     )
     verdict, preset_match, reason = "safe", None, "Looks fine."
     for line in raw.splitlines():
@@ -156,7 +156,7 @@ async def _maybe_adjust_level(session: dict) -> None:
         return
     try:
         raw = await ai_client.generate(
-            system_prompt=prompts.build_level_judge_prompt(window), user_message="", max_tokens=10,
+            system_prompt=prompts.build_level_judge_prompt(window), user_message="", max_tokens=10, log_tokens=True,
         )
     except Exception:
         return
@@ -209,7 +209,7 @@ async def _extract_and_store_facts(user_id: str, transcript_texts: List[str]) ->
         try:
             raw = await llm_client.chat_json(
                 [{"role": "user", "content": prompts.build_memory_fact_extraction_prompt(text)}],
-                temperature=0.0, max_tokens=200,
+                temperature=0.0, max_tokens=200, log_tokens=True,
             )
         except llm_client.LLMError:
             continue
@@ -328,7 +328,7 @@ async def _start_session(user_id: str, req: StartConversationSchema) -> Dict:
     memory = await _get_memory(user_id)
     memory_note = _memory_callback_note(memory)
     system_prompt = _build_system_prompt(session, safety_note=memory_note or None)
-    opening = await ai_client.generate(system_prompt=system_prompt, user_message="", max_tokens=150)
+    opening = await ai_client.generate(system_prompt=system_prompt, user_message="", max_tokens=150, log_tokens=True)
 
     session["turns"].append({"role": "assistant", "content": opening, "input_mode": None,
                              "correction_chip": None, "created_at": now})
@@ -411,7 +411,7 @@ async def _send_message(user_id: str, session_id: str, req: SendMessageSchema) -
         # (same convention interview_coach_service._transcript_text uses) — pass the
         # whole turn history as one block so multi-turn context/topic-steering holds.
         reply = await ai_client.generate(
-            system_prompt=system_prompt, user_message=_transcript_text(session), max_tokens=250,
+            system_prompt=system_prompt, user_message=_transcript_text(session), max_tokens=250, log_tokens=True,
         )
 
     session["turns"].append({"role": "assistant", "content": reply, "input_mode": None,

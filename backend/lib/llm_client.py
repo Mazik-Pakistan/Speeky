@@ -54,12 +54,14 @@ async def chat(
     json_mode: bool = False,
     model: Optional[str] = None,
     timeout: float = 30.0,
+    log_tokens: bool = False,
 ) -> str:
     """
     Send a chat completion to Groq and return the assistant's text content.
 
     messages: OpenAI-style [{"role": "system"|"user"|"assistant", "content": ...}].
     Raises LLMNotConfigured if no key, LLMError on transport / API / parse errors.
+    log_tokens=True logs the number of tokens used in the request and response.
     """
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
@@ -89,7 +91,19 @@ async def chat(
         raise LLMError(f"Groq request failed: {e}") from e
 
     try:
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
+        
+        # Log token usage if requested
+        if log_tokens and "usage" in data:
+            usage = data["usage"]
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", 0)
+            logger.info(
+                f"TOKEN USAGE - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}"
+            )
+        
+        return content
     except (KeyError, IndexError, TypeError) as e:
         raise LLMError(f"Unexpected Groq response shape: {data!r}") from e
 
@@ -100,6 +114,7 @@ async def chat_json(
     temperature: float = 0.2,
     max_tokens: int = 1024,
     model: Optional[str] = None,
+    log_tokens: bool = False,
 ) -> Dict:
     """chat() in JSON mode, parsed into a dict. Raises LLMError on bad JSON."""
     raw = await chat(
@@ -108,6 +123,7 @@ async def chat_json(
         max_tokens=max_tokens,
         json_mode=True,
         model=model,
+        log_tokens=log_tokens,
     )
     try:
         return json.loads(raw)
