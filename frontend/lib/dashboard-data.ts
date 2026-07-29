@@ -4,6 +4,7 @@ import {
   Compass,
   FileText,
   Home,
+  Map,
   Plane,
   Target,
   TrendingUp,
@@ -24,6 +25,7 @@ export const DASHBOARD_NAV_LINKS: DashboardNavLink[] = [
   { label: "Actionable Script", href: "/dashboard/script", icon: FileText },
   { label: "Targeted Drills", href: "/dashboard/adaptive-difficulty", icon: Target },
   { label: "Explore", href: "/dashboard/explore", icon: Compass },
+  { label: "Learning Path", href: "/dashboard/learning-path", icon: Map },
   { label: "Progress", href: "/dashboard/progress", icon: TrendingUp },
   { label: "Profile", href: "/dashboard/profile", icon: User },
 ];

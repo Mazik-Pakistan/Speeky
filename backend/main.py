@@ -34,6 +34,7 @@ from routers.session_memory_routes import router as session_memory_router
 from routers.actionable_script_routes import router as actionable_script_router
 from routers.progress_dashboard_routes import router as progress_dashboard_router
 from routers.adaptive_difficulty_routes import router as adaptive_difficulty_router
+from routers.learning_path_routes import router as learning_path_router
 from utils.app_error import AppError
 
 
@@ -101,6 +102,7 @@ app.include_router(resume_jd_router, prefix="/api/resume-jd-intake")
 app.include_router(actionable_script_router, prefix="/api/script")
 app.include_router(progress_dashboard_router, prefix="/api/progress-dashboard")
 app.include_router(adaptive_difficulty_router, prefix="/api/adaptive-difficulty")
+app.include_router(learning_path_router, prefix="/api/learning-path")
 
 # Local-folder avatar storage, exposed to frontend as static files
 _uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
