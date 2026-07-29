@@ -14,6 +14,7 @@ import { LearningGoalGate } from "@/components/dashboard/LearningGoalGate";
 import { VoiceStatusWidget } from "@/components/common/VoiceStatusWidget";
 import { useAuth } from "@/contexts/AuthContext";
 import { AssessmentProvider } from "@/contexts/AssessmentContext";
+import { ActiveSessionsProvider } from "@/contexts/ActiveSessionsContext";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 export default function DashboardLayout({
@@ -55,6 +56,7 @@ export default function DashboardLayout({
 
   return (
     <AssessmentProvider>
+    <ActiveSessionsProvider>
       <div className="flex min-h-screen bg-background">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -77,6 +79,7 @@ export default function DashboardLayout({
           </main>
         </div>
       </div>
+    </ActiveSessionsProvider>
     </AssessmentProvider>
   );
 }
