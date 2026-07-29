@@ -20,6 +20,7 @@ from prisma import Json
 
 from lib.confidence_engine import ConfidenceScoreEngine, SessionScore
 from lib.prisma_client import db
+from lib.session_scorer import _written_fluency_score
 from middlewares.auth_middleware import require_auth
 from prisma.enums import AssessmentStatus, LearningLevel
 from prisma.models import BaselineAssessment
@@ -101,10 +102,12 @@ class AssessmentIntegrityChecker:
             return True, "Clipboard paste detected"
 
         words = text.split()
-        if words:
-            avg_length = sum(len(w) for w in words) / len(words)
-            if avg_length < 2:
-                return True, "Suspiciously short words (possible gibberish)"
+        if len(words) < 3:
+            return True, "Response too short (minimum 3 words required)"
+
+        avg_length = sum(len(w) for w in words) / len(words)
+        if avg_length < 2:
+            return True, "Suspiciously short words (possible gibberish)"
 
         if re.search(r"(.)\1{4,}", text):
             return True, "Repetitive character pattern detected"
@@ -177,7 +180,7 @@ def _estimate_vocabulary_score(text: str) -> float:
     if not text:
         return 0.0
     words = text.split()
-    if not words:
+    if not words or len(words) < 3:
         return 0.0
 
     unique_words = len(set(w.lower() for w in words))
@@ -345,6 +348,8 @@ async def submit_response(
             "vocabulary_score": scored.vocabulary_score,
             "is_audio": True,
             "processing_success": True,
+            "pitch_range_semitones": af.pitch_range_semitones,
+            "snr_db": af.snr_db,
         }
     else:
         # TEXT pipeline — typed answer, no audio signal (fluency/pronunciation unscored).
@@ -354,7 +359,7 @@ async def submit_response(
             "is_flagged": False,
             "flag_reason": None,
             "transcription": payload.text_data,
-            "fluency_score": 0,
+            "fluency_score": _written_fluency_score(payload.text_data),
             "pronunciation_score": None,
             "vocabulary_score": _estimate_vocabulary_score(payload.text_data),
             "is_audio": False,
@@ -515,7 +520,7 @@ async def get_voice_token(assessment_id: str, user_id: str = Depends(require_aut
             status_code=503,
             content={"error": "Voice mode unavailable. Use text mode instead."},
         )
-    return livekit_tokens.mint_room_token(assessment_id, identity=user_id)
+    return livekit_tokens.mint_room_token(assessment_id, identity=user_id, mode="full")
 
 
 async def restart_assessment(user_id: str = Depends(require_auth)):

@@ -65,8 +65,8 @@ _executor = ThreadPoolExecutor(max_workers=1)
 
 def transcribe_plain(frame: rtc.AudioFrame) -> str:
     """Fastest path — text only, no word alignment. Used by every mode that never
-    reads word_timings/duration_seconds back (Scenario, Coaching, Interview Coach,
-    Assessment), so they get the same speed/accuracy the old worker had rather than
+    reads word_timings/duration_seconds back (Scenario, Coaching, Interview Coach),
+    so they get the same speed/accuracy the old worker had rather than
     paying for word-timestamp alignment nobody consumes."""
     wav_bytes = frame.to_wav_bytes()
     # temperature=0: single decode pass. faster-whisper's default temperature-fallback
@@ -215,9 +215,9 @@ async def process_audio(track: rtc.Track, identity: str, vad: silero.VAD, room: 
 def _participant_mode(participant: rtc.RemoteParticipant) -> str:
     """Read the pipeline mode the caller requested from its participant metadata (stamped
     by livekit_tokens.mint_room_token):
-      "transcript" (default) — Scenario / Coaching / Interview Coach / Assessment
+      "transcript" (default) — Scenario / Coaching / Interview Coach
       "timed"                — Conversation (word_timings + duration_seconds)
-      "full"                 — Public Speaking Coach (+ prosody)"""
+      "full"                 — Public Speaking Coach, Baseline Assessment (+ prosody)"""
     try:
         meta = json.loads(participant.metadata or "{}")
         mode = meta.get("mode")

@@ -22,11 +22,11 @@ def is_configured() -> bool:
 def mint_room_token(room: str, identity: str, mode: str = "transcript") -> dict:
     """Mint a join token. `mode` is stamped into the participant metadata so the shared
     voice_agent worker knows which pipeline to run:
-      "transcript" — fastest, text only (Scenario / Coaching / Interview Coach / Assessment)
+      "transcript" — fastest, text only (Scenario / Coaching / Interview Coach)
       "timed"      — text + word_timings + duration_seconds, no prosody (Conversation, for
                      pronunciation scoring on audio turns)
       "full"       — text + word_timings + prosody + level, for delivery scoring
-                     (Public Speaking Coach)."""
+                     (Public Speaking Coach, Baseline Assessment)."""
     token = (
         api.AccessToken(os.environ["LIVEKIT_API_KEY"], os.environ["LIVEKIT_API_SECRET"])
         .with_identity(identity)

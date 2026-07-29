@@ -108,7 +108,6 @@ export default function AssessmentPage() {
       setStep({ name: "intro" });
     }
   }, [accessLoading, access]);
-  const voiceStartedAt = React.useRef<number | null>(null);
   const voiceAnswerUsed = React.useRef(false);
 
   // LiveKit voice mode — same proven pipeline as AI Conversation (server-side Silero VAD
@@ -267,18 +266,10 @@ export default function AssessmentPage() {
         text_data: answer.trim(),
         audio_features:
           step.questionMode === "audio" && voiceAnswerUsed.current
-            ? {
-                duration_seconds: voiceStartedAt.current
-                  ? Math.max(
-                      0,
-                      (performance.now() - voiceStartedAt.current) / 1000,
-                    )
-                  : 0,
-              }
+            ? getLastAudioFeatures() ?? undefined
             : undefined,
       });
       setAnswer("");
-      voiceStartedAt.current = null;
       voiceAnswerUsed.current = false;
       if (isVoiceActive) void stopVoice();
       if (result.status === "completed") {
@@ -312,10 +303,6 @@ export default function AssessmentPage() {
     )
       return;
 
-    // Wall-clock start for the audio_features.duration_seconds sent on submit (routes the
-    // answer through the backend AUDIO scoring pipeline). Marked used the moment a
-    // transcript lands (see the onTranscript callback above).
-    voiceStartedAt.current = performance.now();
     await startVoice();
   }
 

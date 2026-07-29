@@ -19,6 +19,8 @@ class AssessmentAudioSchema(BaseModel):
     filled_pauses: Optional[int] = None
     avg_db: Optional[float] = None
     pronunciation_score: Optional[float] = None
+    pitch_range_semitones: Optional[float] = None
+    snr_db: Optional[float] = None
 
 
 class SubmitResponseSchema(BaseModel):
