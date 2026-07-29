@@ -1,0 +1,92 @@
+{
+  "beginner": [
+    {
+      "sentence_id": "pron_beg_1",
+      "difficulty": "beginner",
+      "text": "She sells seashells by the seashore.",
+      "focus_sounds": ["sh", "s"]
+    },
+    {
+      "sentence_id": "pron_beg_2",
+      "difficulty": "beginner",
+      "text": "I think this is the best day of my life.",
+      "focus_sounds": ["th", "final consonant"]
+    },
+    {
+      "sentence_id": "pron_beg_3",
+      "difficulty": "beginner",
+      "text": "The weather is nice today.",
+      "focus_sounds": ["th", "w"]
+    },
+    {
+      "sentence_id": "pron_beg_4",
+      "difficulty": "beginner",
+      "text": "Can you help me find the nearest bus stop?",
+      "focus_sounds": ["r", "final consonant cluster"]
+    },
+    {
+      "sentence_id": "pron_beg_5",
+      "difficulty": "beginner",
+      "text": "I would like a cup of coffee, please.",
+      "focus_sounds": ["w", "final consonant"]
+    }
+  ],
+  "intermediate": [
+    {
+      "sentence_id": "pron_int_1",
+      "difficulty": "intermediate",
+      "text": "Thirty-three thieves thought that they thrilled the throne throughout Thursday.",
+      "focus_sounds": ["th", "consonant clusters"]
+    },
+    {
+      "sentence_id": "pron_int_2",
+      "difficulty": "intermediate",
+      "text": "The receptionist scheduled a meeting with the specialist for Wednesday afternoon.",
+      "focus_sounds": ["word-final stress", "consonant clusters"]
+    },
+    {
+      "sentence_id": "pron_int_3",
+      "difficulty": "intermediate",
+      "text": "Could you please clarify the requirements before we proceed with the project?",
+      "focus_sounds": ["r", "word stress"]
+    },
+    {
+      "sentence_id": "pron_int_4",
+      "difficulty": "intermediate",
+      "text": "The comfortable temperature made the vegetables particularly enjoyable.",
+      "focus_sounds": ["word stress", "syllable reduction"]
+    },
+    {
+      "sentence_id": "pron_int_5",
+      "difficulty": "intermediate",
+      "text": "Unfortunately, the negotiation was postponed until further notice.",
+      "focus_sounds": ["word stress", "final consonant"]
+    }
+  ],
+  "advanced": [
+    {
+      "sentence_id": "pron_adv_1",
+      "difficulty": "advanced",
+      "text": "The entrepreneur's unprecedented enthusiasm significantly influenced the organization's strategy.",
+      "focus_sounds": ["word stress", "consonant clusters", "th"]
+    },
+    {
+      "sentence_id": "pron_adv_2",
+      "difficulty": "advanced",
+      "text": "Irrespective of the circumstances, the committee unanimously approved the recommendation.",
+      "focus_sounds": ["r", "word-final stress"]
+    },
+    {
+      "sentence_id": "pron_adv_3",
+      "difficulty": "advanced",
+      "text": "The pharmaceutical company's quarterly earnings substantially exceeded analysts' expectations.",
+      "focus_sounds": ["word stress", "consonant clusters"]
+    },
+    {
+      "sentence_id": "pron_adv_4",
+      "difficulty": "advanced",
+      "text": "Simultaneously, the researchers documented an extraordinarily thorough analysis of the phenomenon.",
+      "focus_sounds": ["th", "word stress", "syllable reduction"]
+    }
+  ]
+}

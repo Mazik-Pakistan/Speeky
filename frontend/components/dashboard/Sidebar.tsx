@@ -3,12 +3,16 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { ClipboardList, ShieldCheck, Crown } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { DASHBOARD_NAV_LINKS } from "@/lib/dashboard-data";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAssessmentAccess } from "@/contexts/AssessmentContext";
+import { useActiveSessions } from "@/contexts/ActiveSessionsContext";
 import { API_ORIGIN } from "@/lib/api";
 
 const ROLE_LABELS: Record<string, string> = {
+  SUPER_ADMIN: "Super Admin",
   ADMIN: "Administrator",
   USER: "Learner",
 };
@@ -16,15 +20,43 @@ const ROLE_LABELS: Record<string, string> = {
 export function Sidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
+  const { access } = useAssessmentAccess();
+  const { explore, publicSpeaking, pronunciation } = useActiveSessions();
+
+  // Resumable-session dot — grouped per nav link so a user can tell, without
+  // opening each section, that leaving mid-session didn't just silently lose it.
+  const RESUMABLE_HREFS: Record<string, boolean> = {
+    "/dashboard/explore": Boolean(explore?.active),
+    "/dashboard/pronunciation": Boolean(pronunciation?.found),
+    "/dashboard/public-speaking": Boolean(publicSpeaking?.found),
+  };
+
+  // Persistent entry to the baseline assessment for anyone who hasn't completed it.
+  // Without this the ONLY path was the throttled AssessmentReminderBanner overlay, which
+  // is suppressed for an hour right after a skip — so a user who skipped (or backed out
+  // mid-assessment) had no way back until it reappeared. A permanent nav item is
+  // discoverable regardless of the prompt throttle.
+  const showAssessmentLink =
+    access != null &&
+    access.assessment_status !== "COMPLETED" &&
+    access.assessment_status !== "PLATEAUED";
 
   return (
     <aside className="flex w-[4.5rem] shrink-0 flex-col items-center border-r border-border bg-surface-elevated px-2 py-6 lg:w-64 lg:items-stretch lg:px-4">
-      <div className="px-2 text-center lg:text-left">
-        <span className="font-serif text-2xl font-semibold tracking-tight text-primary">
-          S
-          <span className="hidden lg:inline">peeky</span>
-        </span>
-        <p className="hidden text-xs font-medium tracking-wide text-muted-foreground lg:block">
+      <div className="flex flex-col items-center px-2 lg:items-start">
+        <Link href="/dashboard" className="flex items-center gap-2">
+          <Image
+            src="/logo-icon.png"
+            alt="Speeky"
+            width={28}
+            height={28}
+            className="h-7 w-7 transition-all dark:brightness-0 dark:invert"
+          />
+          <span className="hidden font-serif text-h2 font-semibold tracking-tight text-primary dark:text-white lg:block">
+            Speeky
+          </span>
+        </Link>
+        <p className="hidden pl-9 text-xs font-medium tracking-wide text-muted-foreground lg:block">
           AI COACH
         </p>
       </div>
@@ -36,24 +68,81 @@ export function Sidebar() {
         {DASHBOARD_NAV_LINKS.map((link) => {
           const isActive = pathname === link.href;
           const Icon = link.icon;
+          const hasResumable = RESUMABLE_HREFS[link.href];
           return (
             <Link
               key={link.href}
               href={link.href}
-              aria-label={link.label}
-              title={link.label}
+              aria-label={hasResumable ? `${link.label} — unfinished session to resume` : link.label}
+              title={hasResumable ? `${link.label} — unfinished session to resume` : link.label}
               className={cn(
-                "flex items-center justify-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors lg:justify-start",
+                "relative flex items-center justify-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors lg:justify-start",
                 isActive
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-surface hover:text-foreground",
               )}
             >
-              <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="relative shrink-0">
+                <Icon className="h-4 w-4" aria-hidden="true" />
+                {hasResumable ? (
+                  <span
+                    className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-warning"
+                    aria-hidden="true"
+                  />
+                ) : null}
+              </span>
               <span className="hidden lg:inline">{link.label}</span>
             </Link>
           );
         })}
+        {showAssessmentLink ? (
+          <Link
+            href="/dashboard/assessment"
+            aria-label="Baseline Assessment"
+            title="Baseline Assessment"
+            className={cn(
+              "flex items-center justify-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors lg:justify-start",
+              pathname === "/dashboard/assessment"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-surface hover:text-foreground",
+            )}
+          >
+            <ClipboardList className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="hidden lg:inline">Assessment</span>
+          </Link>
+        ) : null}
+        {user?.role === "ADMIN" || user?.role === "SUPER_ADMIN" ? (
+          <Link
+            href="/dashboard/admin"
+            aria-label="Admin"
+            title="Admin"
+            className={cn(
+              "flex items-center justify-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors lg:justify-start",
+              pathname.startsWith("/dashboard/admin") && pathname !== "/dashboard/admin/users"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-surface hover:text-foreground",
+            )}
+          >
+            <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="hidden lg:inline">Admin</span>
+          </Link>
+        ) : null}
+        {user?.role === "SUPER_ADMIN" ? (
+          <Link
+            href="/dashboard/admin/users"
+            aria-label="Super Admin: Manage Users"
+            title="Super Admin: Manage Users"
+            className={cn(
+              "flex items-center justify-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors lg:justify-start",
+              pathname === "/dashboard/admin/users"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-surface hover:text-foreground",
+            )}
+          >
+            <Crown className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="hidden lg:inline">Super Admin</span>
+          </Link>
+        ) : null}
       </nav>
 
       {user ? (

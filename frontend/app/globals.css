@@ -12,72 +12,456 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;            /* #FFFFFF */
-    --surface: 210 40% 98%;             /* #F8FAFC */
-    --surface-elevated: 0 0% 100%;      /* #FFFFFF */
+    --background: 211 40% 97%;
+    /* #FFFFFF */
+    --surface: 210 40% 98%;
+    /* #F8FAFC */
+    --surface-elevated: 0 0% 100%;
+    /* #FFFFFF */
 
-    --foreground: 222 47% 11%;          /* #0F172A */
-    --muted: 210 40% 96%;               /* #F1F5F9 */
-    --muted-foreground: 215 16% 47%;    /* #64748B */
+    --foreground: 222 47% 11%;
+    /* #0F172A */
+    --muted: 192 35% 95%;
+    /* #EBF5F7 — whisper cyan tint */
+    --muted-foreground: 215 20% 42%;
+    /* #566579 — darkened from 47%L: at 12px the old value measured 4.48:1 on
+       --surface, just under the WCAG AA 4.5:1 floor for small text. */
 
-    --border: 214 32% 91%;              /* #E2E8F0 */
-    --input: 214 32% 91%;               /* #E2E8F0 */
-    --ring: 224 100% 22%;               /* Brand Primary */
+    --border: 196 28% 88%;
+    /* #D6E8ED — muted cyan-blue border */
+    --input: 196 28% 88%;
+    /* #D6E8ED */
+    --ring: 200 100% 22%;
+    /* #004B70 */
 
-    --primary: 224 100% 22%;            /* #00246E — Royal Blue (matches product UI) */
-    --primary-hover: 226 66% 33%;       /* #1D3B8A */
-    --primary-foreground: 0 0% 100%;    /* #FFFFFF */
+    /* Royal blue. Hue MUST stay in the 224 family so the focus ring (--ring) and the
+       control it rings read as the same colour. Previously --primary sat on hue 200,
+       which rendered #004B70 (teal) while every comment and --ring said #00246E. */
+    --primary: 200 100% 22%;
+    /* #004B70 */
+    --primary-hover: 200 66% 33%;
+    /* #006A9C */
+    --primary-foreground: 0 0% 100%;
+    /* #FFFFFF */
 
-    --secondary: 227 100% 92%;          /* #DBE1FF — soft blue tint */
-    --secondary-foreground: 224 100% 22%;/* #00246E */
+    --secondary: 192 55% 91%;
+    /* #D5EDF2 — soft steel-cyan wash */
+    --secondary-foreground: 196 82% 18%;
+    /* #065368 */
 
-    --accent: 0 66% 43%;                /* #B52424 — Crimson (matches product UI) */
-    --accent-foreground: 0 0% 100%;     /* #FFFFFF */
+    --accent: 190 82% 31%;
+    /* #0E7490 — Steel Cyan */
+    --accent-hover: 190 78% 37%;
+    /* #1189A8 */
+    --accent-foreground: 0 0% 100%;
+    /* #FFFFFF */
 
-    --success: 142 72% 29%;             /* #15803D — darkened from #16A34A for 4.5:1 text contrast on white */
-    --warning: 32 92% 37%;              /* #B45309 — darkened from #D97706 for 4.5:1 text contrast on white */
-    --danger: 0 74% 51%;                /* #DC2626 */
-    --info: 199 89% 41%;                /* #0284C7 */
+    --success: 142 72% 29%;
+    /* #15803D */
+    --warning: 32 92% 37%;
+    /* #B45309 */
+    --danger: 0 74% 42%;
+    /* #BB1F1F — darkened so white text clears AA on the filled danger button. */
+    --info: 224 100% 22%;
+    /* #00246E — primary as info */
 
-    --radius: 0.75rem;                  /* rounded-xl base */
+    --radius: 0.75rem;
+
+    /* ── Elevation ────────────────────────────────────────────────────────
+       Brand-tinted rather than neutral black: shadows carry a trace of the
+       navy foreground so stacked surfaces read as one material instead of
+       grey haze. Scale is perceptual, not linear — each step roughly doubles
+       apparent lift. */
+    --shadow-color: 222 47% 11%;
+    --elevation-1: 0 1px 2px -1px hsl(var(--shadow-color) / 0.08);
+    --elevation-2: 0 2px 4px -2px hsl(var(--shadow-color) / 0.08),
+                   0 4px 12px -4px hsl(var(--shadow-color) / 0.06);
+    --elevation-3: 0 4px 8px -4px hsl(var(--shadow-color) / 0.10),
+                   0 12px 24px -8px hsl(var(--shadow-color) / 0.08);
+    --elevation-4: 0 8px 16px -8px hsl(var(--shadow-color) / 0.12),
+                   0 24px 48px -12px hsl(var(--shadow-color) / 0.12);
+    --elevation-ring: 0 0 0 1px hsl(var(--border) / 0.9);
+
+    /* ── Motion ───────────────────────────────────────────────────────────
+       One easing vocabulary so nothing in the product animates "differently"
+       for no reason. Expo-out for entrances (fast start, soft landing),
+       spring for interactive feedback, standard for everything else. */
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+    --duration-instant: 80ms;
+    --duration-fast: 160ms;
+    --duration-normal: 240ms;
+    --duration-slow: 400ms;
   }
 
   .dark {
     --background: 222 47% 8%;
+    /* #0B1120 — deep navy */
     --surface: 222 44% 11%;
-    --surface-elevated: 222 40% 14%;
+    /* #111B2E */
+    --surface-elevated: 222 40% 16%;
+    /* #1A2640 */
 
-    --foreground: 210 40% 98%;
-    --muted: 222 30% 18%;
-    --muted-foreground: 215 20% 65%;
+    --foreground: 193 40% 94%;
+    /* #E6F3F6 — steel-cyan white */
+    --muted: 220 32% 18%;
+    /* #1C2840 */
+    --muted-foreground: 205 20% 60%;
+    /* #839BB0 */
 
-    --border: 222 25% 22%;
-    --input: 222 25% 22%;
-    --ring: 227 100% 84%;
+    --border: 208 26% 22%;
+    /* #222F42 */
+    --input: 208 26% 22%;
+    /* #222F42 */
+    --ring: 190 42% 58%;
+    /* #52B8CC */
 
-    --primary: 227 100% 84%;            /* #B5C4FF — lighter blue for dark mode */
-    --primary-hover: 227 100% 90%;
-    --primary-foreground: 224 60% 14%;
+    --primary: 224 55% 72%;
+    /* #849EC8 — muted dusty blue, pastel */
+    --primary-hover: 224 58% 78%;
+    /* #97AED4 */
+    --primary-foreground: 224 60% 12%;
+    /* #0A1538 */
 
-    --secondary: 222 30% 18%;
-    --secondary-foreground: 227 100% 84%;
+    --secondary: 220 32% 18%;
+    /* #1C2840 */
+    --secondary-foreground: 224 55% 72%;
+    /* #849EC8 */
 
-    --accent: 3 100% 68%;               /* #FF5A52 — lighter crimson for dark mode */
-    --accent-foreground: 0 60% 15%;
+    --accent: 190 42% 58%;
+    /* #52B8CC — muted steel cyan for dark */
+    --accent-hover: 190 42% 65%;
+    /* #6BC6D8 */
+    --accent-foreground: 190 82% 9%;
+    /* #041E28 */
 
-    --success: 142 60% 45%;
-    --warning: 32 85% 55%;
-    --danger: 0 70% 60%;
-    --info: 199 80% 55%;
+    --success: 142 45% 42%;
+    --warning: 32 75% 50%;
+    --danger: 0 62% 46%;
+    --info: 224 55% 72%;
+
+    --radius: 0.75rem;
+
+    /* On a dark surface a black shadow is invisible; lift comes from a darker
+       spread plus a subtle light ring on the top edge. */
+    --shadow-color: 222 60% 3%;
+    --elevation-1: 0 1px 2px -1px hsl(var(--shadow-color) / 0.5);
+    --elevation-2: 0 2px 6px -2px hsl(var(--shadow-color) / 0.55),
+                   0 6px 16px -6px hsl(var(--shadow-color) / 0.45);
+    --elevation-3: 0 6px 12px -6px hsl(var(--shadow-color) / 0.6),
+                   0 16px 32px -12px hsl(var(--shadow-color) / 0.5);
+    --elevation-4: 0 10px 20px -10px hsl(var(--shadow-color) / 0.7),
+                   0 32px 64px -16px hsl(var(--shadow-color) / 0.6);
+    --elevation-ring: 0 0 0 1px hsl(0 0% 100% / 0.06);
   }
 
   * {
     @apply border-border;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
   }
 
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "cv11", "ss01";
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* One consistent, visible focus treatment for keyboard users across every
+     interactive element — WCAG 2.4.7. :focus-visible (not :focus) so pointer
+     users don't get a ring on click, which is why authors often remove focus
+     styles altogether and break keyboard access. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: calc(var(--radius) / 2);
+  }
+
+  /* Respect the OS "reduce motion" setting — WCAG 2.3.3. Vestibular-disorder
+     users can be made ill by transform/parallax motion. Animations collapse to
+     a near-instant state change rather than being removed, so anything that
+     depends on an animation/transition end event still fires. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Keeps in-page anchor jumps from teleporting (respects the guard above). */
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Put Toastify overrides here, outside Tailwind layers */
+/* Toastify theme integration */
+:root {
+  --toastify-color-light: hsl(var(--surface-elevated));
+  --toastify-color-dark: hsl(var(--surface-elevated));
+
+  --toastify-text-color-light: hsl(var(--foreground));
+  --toastify-text-color-dark: hsl(var(--foreground));
+
+  --toastify-toast-background: hsl(var(--surface-elevated));
+  --toastify-toast-bd-radius: var(--radius);
+  --toastify-toast-shadow:
+    0 10px 30px -10px rgb(15 23 42 / 0.18);
+
+  --toastify-font-family: var(--font-body), system-ui, sans-serif;
+  --toastify-z-index: 9999;
+
+  --toastify-color-success: hsl(var(--success));
+  --toastify-color-error: hsl(var(--danger));
+  --toastify-color-warning: hsl(var(--warning));
+  --toastify-color-info: hsl(var(--info));
+
+  --toastify-icon-color-success: hsl(var(--success));
+  --toastify-icon-color-error: hsl(var(--danger));
+  --toastify-icon-color-warning: hsl(var(--warning));
+  --toastify-icon-color-info: hsl(var(--info));
+
+  --toastify-color-progress-success: hsl(var(--success));
+  --toastify-color-progress-error: hsl(var(--danger));
+  --toastify-color-progress-warning: hsl(var(--warning));
+  --toastify-color-progress-info: hsl(var(--info));
+
+  --toastify-spinner-color: hsl(var(--primary));
+  --toastify-spinner-color-empty-area: hsl(var(--border));
+}
+
+.Toastify__toast {
+  background: hsl(var(--surface-elevated)) !important;
+  color: hsl(var(--foreground)) !important;
+
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+
+  box-shadow:
+    0 12px 32px -12px rgb(15 23 42 / 0.25);
+
+  backdrop-filter: blur(12px);
+  transition: all .25s ease-in-out;
+}
+
+.Toastify__toast--success {
+  border-color: hsl(var(--success) / 0.22);
+  border-left: 3px solid hsl(var(--success));
+
+  background:
+    linear-gradient(135deg,
+      hsl(var(--success) / 0.12),
+      hsl(var(--surface-elevated))) !important;
+}
+
+.Toastify__toast--error {
+  border-color: hsl(var(--danger) / 0.22);
+  border-left: 3px solid hsl(var(--danger));
+
+  background:
+    linear-gradient(135deg,
+      hsl(var(--danger) / 0.12),
+      hsl(var(--surface-elevated))) !important;
+}
+
+.Toastify__toast--warning {
+  border-color: hsl(var(--warning) / 0.22);
+  border-left: 3px solid hsl(var(--warning));
+
+  background:
+    linear-gradient(135deg,
+      hsl(var(--warning) / 0.12),
+      hsl(var(--surface-elevated))) !important;
+}
+
+.Toastify__toast--info {
+  border-color: hsl(var(--info) / 0.22);
+  border-left: 3px solid hsl(var(--info));
+
+  background:
+    linear-gradient(135deg,
+      hsl(var(--info) / 0.12),
+      hsl(var(--surface-elevated))) !important;
+}
+
+.Toastify__toast-body {
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+
+.Toastify__close-button {
+  color: hsl(var(--muted-foreground));
+  opacity: 1;
+}
+
+.Toastify__close-button:hover {
+  color: hsl(var(--foreground));
+}
+
+
+.Toastify__progress-bar {
+  height: 3px;
+}
+
+.Toastify__progress-bar--success {
+  background: hsl(var(--success));
+}
+
+.Toastify__progress-bar--error {
+  background: hsl(var(--danger));
+}
+
+.Toastify__progress-bar--warning {
+  background: hsl(var(--warning));
+}
+
+.Toastify__progress-bar--info {
+  background: hsl(var(--info));
+}
+
+.voice-wave-ribbon {
+  animation: voice-wave-drift 18s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.voice-wave-line {
+  animation: voice-wave-breathe 8s ease-in-out infinite;
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
+.voice-status-dot-ready {
+  animation: voice-status-glow 2.6s ease-in-out infinite;
+}
+
+.voice-listening-button {
+  position: relative;
+  border-color: hsl(var(--success) / 0.45);
+  background:
+    radial-gradient(circle at 30% 20%, hsl(var(--success) / 0.14), transparent 34%),
+    hsl(var(--success) / 0.06);
+  color: hsl(var(--success));
+  box-shadow:
+    0 0 0 0 hsl(var(--success) / 0.24),
+    0 0 18px hsl(var(--success) / 0.14);
+  animation: voice-listening-button-glow 2.4s ease-in-out infinite;
+}
+
+.dark .voice-listening-button {
+  border-color: hsl(var(--primary) / 0.55);
+  background:
+    radial-gradient(circle at 30% 20%, hsl(var(--primary) / 0.14), transparent 34%),
+    hsl(var(--primary) / 0.05);
+  color: hsl(var(--foreground));
+  box-shadow:
+    0 0 0 0 hsl(var(--primary) / 0.26),
+    0 0 18px hsl(var(--primary) / 0.16);
+  animation-name: voice-listening-button-glow-dark;
+}
+
+.voice-listening-button::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 1px solid hsl(var(--success) / 0.22);
+  opacity: 0;
+  pointer-events: none;
+  animation: voice-listening-button-ring 2.4s ease-in-out infinite;
+}
+
+.dark .voice-listening-button::after {
+  border-color: hsl(var(--primary) / 0.22);
+}
+
+@keyframes voice-wave-drift {
+  0% {
+    transform: translateX(-9%) translateY(0);
+  }
+
+  100% {
+    transform: translateX(-24%) translateY(-4px);
+  }
+}
+
+@keyframes voice-wave-breathe {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: translateY(0) scaleY(1);
+  }
+
+  50% {
+    opacity: 0.86;
+    transform: translateY(-8px) scaleY(1.08);
+  }
+}
+
+@keyframes voice-status-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--success) / 0.45);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px hsl(var(--success) / 0);
+  }
+}
+
+@keyframes voice-listening-button-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 hsl(var(--success) / 0.22),
+      0 0 14px hsl(var(--success) / 0.12);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 5px hsl(var(--success) / 0),
+      0 0 24px hsl(var(--success) / 0.24);
+  }
+}
+
+@keyframes voice-listening-button-ring {
+  0%,
+  100% {
+    opacity: 0.18;
+    transform: scale(0.98);
+  }
+
+  50% {
+    opacity: 0.78;
+    transform: scale(1.03);
+  }
+}
+
+@keyframes voice-listening-button-glow-dark {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 hsl(var(--primary) / 0.24),
+      0 0 14px hsl(var(--primary) / 0.14);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 5px hsl(var(--primary) / 0),
+      0 0 24px hsl(var(--primary) / 0.28);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-listening-button,
+  .voice-listening-button::after {
+    animation: none;
   }
 }

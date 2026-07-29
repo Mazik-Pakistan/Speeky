@@ -1,0 +1,59 @@
+"""
+Live Speech Verification & Anti-Cheat Service (ACC-US-01)
+
+Implements session prompt token generation/validation and playback-detection gating.
+Each recording is judged independently on its own signal characteristics — no
+cross-attempt flag counting, account suspension, or appeal workflow.
+"""
+
+from datetime import datetime, timezone
+from typing import Optional
+import uuid
+
+from lib import kv_store
+from lib.speech_config import load_speech_config
+
+LIVENESS_TOKEN_NS = "liveness_tokens"
+
+
+async def create_prompt_token(user_id: str, item_id: str) -> str:
+    """Generate a dynamic runtime prompt token per session (ACC-US-01 / E-04)."""
+    token = f"prm_{uuid.uuid4().hex}"
+    value = {
+        "user_id": user_id,
+        "item_id": item_id,
+        "used": False,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await kv_store.store.create(LIVENESS_TOKEN_NS, token, value)
+    return token
+
+
+async def validate_and_consume_prompt_token(user_id: str, item_id: str, prompt_token: Optional[str]) -> bool:
+    """Check prompt token validity and mark single-use (E-04 static prompt reuse rejection)."""
+    if not prompt_token:
+        return False
+
+    entry = await kv_store.store.get(LIVENESS_TOKEN_NS, prompt_token)
+    if not entry:
+        return False
+
+    if entry.get("used"):
+        return False
+
+    if entry.get("user_id") != user_id or entry.get("item_id") != item_id:
+        return False
+
+    config = load_speech_config()
+    created_at = entry.get("created_at")
+    if created_at:
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at)
+        age = (datetime.now(timezone.utc) - created_at).total_seconds()
+        if age > config.liveness_token_ttl_seconds:
+            return False
+
+    # Mark as used (single-use token)
+    entry["used"] = True
+    await kv_store.store.update(LIVENESS_TOKEN_NS, prompt_token, entry)
+    return True

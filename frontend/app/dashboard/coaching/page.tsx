@@ -13,6 +13,8 @@ import {
 import { ApiError } from "@/lib/api";
 import { getCoachingScenarios, type CoachingScenarioMeta } from "@/lib/coaching";
 import { useAssessmentAccess } from "@/contexts/AssessmentContext";
+import { CodeSwitchWordsCard } from "@/components/dashboard/CodeSwitchWordsCard";
+import { ExploreResumeBanner } from "@/components/dashboard/ExploreResumeBanner";
 import { cn } from "@/lib/utils";
 
 const SCENARIO_ICONS: Record<string, typeof Mail> = {
@@ -39,7 +41,7 @@ export default function CoachingPage() {
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
+        <h1 className="font-serif text-h1 font-semibold text-foreground">
           Workplace English Coach
         </h1>
         <p className="mt-2 max-w-xl text-sm text-muted-foreground">
@@ -47,6 +49,8 @@ export default function CoachingPage() {
           presentations — and get feedback on tone, clarity, and effectiveness.
         </p>
       </div>
+
+      <ExploreResumeBanner />
 
       {!isUnlocked ? (
         <div className="flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
@@ -111,6 +115,8 @@ export default function CoachingPage() {
           );
         })}
       </div>
+
+      {isUnlocked ? <CodeSwitchWordsCard /> : null}
     </div>
   );
 }

@@ -16,6 +16,12 @@ export interface StartConversationResult {
   started_at: string;
 }
 
+export interface VoiceTokenResult {
+  url: string;
+  token: string;
+  room: string;
+}
+
 export interface SendMessageResult {
   session_id: string;
   reply: string;
@@ -51,6 +57,18 @@ export interface MemoryFact {
   updated_at: string;
 }
 
+export interface ConversationSessionSummary {
+  session_id: string;
+  topic_label: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export function listConversationSessions() {
+  return api<{ sessions: ConversationSessionSummary[] }>("/conversation/sessions");
+}
+
 export function listTopics() {
   return api<{ topics: ConversationTopic[] }>("/conversation/topics");
 }
@@ -73,9 +91,27 @@ export function startConversation(data: {
   });
 }
 
+export function getConversationVoiceToken(sessionId: string) {
+  return api<VoiceTokenResult>(
+    `/conversation/sessions/${sessionId}/voice-token`,
+    {
+      method: "POST",
+    }
+  );
+}
+
 export function sendConversationMessage(
   sessionId: string,
-  data: { text: string; input_mode?: string; show_corrections?: boolean }
+  data: {
+    text: string;
+    input_mode?: string;
+    show_corrections?: boolean;
+    audio_features?: {
+      transcript: string;
+      duration_seconds: number;
+      word_timings: { word: string; start: number; end: number }[];
+    };
+  }
 ) {
   return api<SendMessageResult>(`/conversation/sessions/${sessionId}/messages`, {
     method: "POST",

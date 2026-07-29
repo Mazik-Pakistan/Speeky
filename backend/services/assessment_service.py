@@ -50,19 +50,43 @@ class AssessmentQuestionBank:
 
         self._by_id = {q.question_id: q for qs in self.questions.values() for q in qs}
     
-    def get_assessment_questions(self, count: int = 25) -> List[AssessmentQuestion]:
-        selected = [random.choice(qs) for qs in self.questions.values()]
-        all_questions = [q for qs in self.questions.values() for q in qs]
-        remaining = [q for q in all_questions if q not in selected]
+    def get_assessment_questions(
+        self,
+        text_count: int = 3,
+        audio_count: int = 7,
+    ) -> List[AssessmentQuestion]:
+        text_categories = {"introduction", "vocabulary"}
+        audio_categories = {"fluency", "pronunciation"}
 
-        needed = max(0, count - len(selected))
-        if needed:
-            selected.extend(
-                random.sample(remaining, min(needed, len(remaining)))
-            )
-            
+        text_questions = [
+            q for category, questions in self.questions.items()
+            if category in text_categories
+            for q in questions
+        ]
+        audio_questions = [
+            q for category, questions in self.questions.items()
+            if category in audio_categories
+            for q in questions
+        ]
+
+        selected: List[AssessmentQuestion] = []
+        selected.extend(random.sample(text_questions, min(text_count, len(text_questions))))
+        selected.extend(random.sample(audio_questions, min(audio_count, len(audio_questions))))
+
+        target_count = text_count + audio_count
+        if len(selected) < target_count:
+            all_questions = [q for qs in self.questions.values() for q in qs]
+            remaining = [q for q in all_questions if q not in selected]
+            needed = min(target_count - len(selected), len(remaining))
+            if needed:
+                selected.extend(random.sample(remaining, needed))
+
         random.shuffle(selected)
-        return selected[:count]
+        return selected[:target_count]
+
+    @staticmethod
+    def get_question_mode(question: AssessmentQuestion) -> str:
+        return "audio" if question.category in {"fluency", "pronunciation"} else "text"
 
     def get_by_id(self, question_id: str) -> Optional[AssessmentQuestion]:
         return self._by_id.get(question_id)
@@ -220,9 +244,36 @@ async def start_assessment(user_id: str = Depends(require_auth)):
 async def _begin_assessment(user_id: str):
     existing = await db.baselineassessment.find_first(where={"userId": user_id, "completedAt": None})
     if existing:
-        return JSONResponse(status_code=400, content={"error": "Assessment already in progress."})
+        # BAS-US-01 E-02 recovery: every question is already answered but the row never
+        # completed (scoring crashed / the app died between the last answer and scoring).
+        # Handing back the last question here would dead-end the user for good — the next
+        # submit answers "No more questions to submit", /start keeps returning the same
+        # question, and assessmentStatus stays IN_PROGRESS so the whole app remains locked.
+        # /start is the one entry point the UI always has after a crash (the assessment_id
+        # is gone), so retry scoring from the saved responses right here instead.
+        if existing.currentIndex >= len(existing.questionIds):
+            result = await _try_complete_assessment(existing)
+            if result.get("status") == "processing":
+                return result  # still failing — honest "results processing", not a dead question
+            return {**result, "resumed": True, "recovered": True}
 
-    questions = _question_bank.get_assessment_questions(count=5)
+        # Resume, don't dead-end. A browser back / refresh / accidental navigation loses
+        # the client-side assessment_id; the old 400 then trapped the user (can't start a
+        # second, can't resume the first). Return the current question so "Start" resumes
+        # exactly where they left off.
+        idx = min(existing.currentIndex, len(existing.questionIds) - 1)
+        resume_q = _question_bank.get_by_id(existing.questionIds[idx])
+        return {
+            "assessment_id": existing.id,
+            "total_questions": len(existing.questionIds),
+            "current_question": resume_q.text if resume_q else "",
+            "question_index": idx,
+            "question_mode": _question_bank.get_question_mode(resume_q) if resume_q else "text",
+            "estimated_duration_minutes": len(existing.questionIds),
+            "resumed": True,
+        }
+
+    questions = _question_bank.get_assessment_questions(text_count=3, audio_count=7)
 
     assessment = await db.baselineassessment.create(
         data={"userId": user_id, "questionIds": [q.question_id for q in questions]}
@@ -234,6 +285,7 @@ async def _begin_assessment(user_id: str):
         "total_questions": len(questions),
         "current_question": questions[0].text,
         "question_index": 0,
+        "question_mode": _question_bank.get_question_mode(questions[0]),
         "estimated_duration_minutes": len(questions),
     }
 
@@ -318,15 +370,37 @@ async def submit_response(
     )
 
     if new_index >= len(assessment.questionIds):
-        return await _complete_assessment(updated)
+        return await _try_complete_assessment(updated)
 
     next_question = _question_bank.get_by_id(assessment.questionIds[new_index])
     return {
         "status": "in_progress",
         "next_question": next_question.text if next_question else None,
         "question_index": new_index,
+        "next_question_mode": _question_bank.get_question_mode(next_question) if next_question else None,
         "previous_result": processing_result,
     }
+
+
+async def _try_complete_assessment(assessment: BaselineAssessment) -> Dict:
+    """BAS-US-01 E-02: responses are already durably saved by the time this runs (the
+    caller persists them before invoking completion), so a scoring failure here — a
+    confidence-engine bug, a transient DB error — must not strand the user with no way
+    forward. Flag the row for retry instead of raising, so a later call (background
+    job or the next /summary request) can pick up scoring again from saved responses."""
+    try:
+        return await _complete_assessment(assessment)
+    except Exception:
+        logger.exception(f"Scoring failed for assessment {assessment.id}; flagging for retry")
+        await db.baselineassessment.update(
+            where={"id": assessment.id},
+            data={"scoringFailed": True},
+        )
+        return {
+            "status": "processing",
+            "assessment_id": assessment.id,
+            "message": "Your responses are saved and your results are still processing. Check back shortly.",
+        }
 
 
 async def _complete_assessment(assessment: BaselineAssessment) -> Dict:
@@ -377,6 +451,7 @@ async def _complete_assessment(assessment: BaselineAssessment) -> Dict:
         where={"id": assessment.id},
         data={
             "completedAt": completed_at,
+            "scoringFailed": False,
             "fluencyScore": avg_fluency,
             "vocabularyScore": avg_vocabulary,
             "pronunciationScore": avg_pronunciation,
@@ -421,6 +496,61 @@ async def _complete_assessment(assessment: BaselineAssessment) -> Dict:
     }
 
 
+async def get_voice_token(assessment_id: str, user_id: str = Depends(require_auth)):
+    """Mint a LiveKit room token for a spoken assessment answer — same voice pipeline as
+    AI Conversation (lib/livekit_tokens + the generic voice_agent/ worker). The room name
+    IS the assessment_id; the worker auto-joins, runs Silero VAD + faster-whisper on the
+    mic track, and publishes the transcript back over the data channel. Backend never
+    touches raw audio. Replaces the browser Web Speech API path, which needed a secure
+    context (HTTPS/localhost) and was Chromium-only — the cause of the baseline audio error."""
+    from lib import livekit_tokens
+
+    assessment = await db.baselineassessment.find_unique(where={"id": assessment_id})
+    if not assessment or assessment.userId != user_id:
+        return JSONResponse(status_code=404, content={"error": "Assessment not found"})
+    if assessment.completedAt:
+        return JSONResponse(status_code=400, content={"error": "Assessment already completed"})
+    if not livekit_tokens.is_configured():
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Voice mode unavailable. Use text mode instead."},
+        )
+    return livekit_tokens.mint_room_token(assessment_id, identity=user_id)
+
+
+async def restart_assessment(user_id: str = Depends(require_auth)):
+    """Discard an unfinished baseline and hand back a fresh one (BAS-US-01 E-02 escape hatch).
+
+    Without this, a baseline that can never finish scoring — corrupt saved responses, a
+    permanently failing scorer — leaves the account stuck at `assessment_required` with
+    every gated feature locked and no user-reachable way out.
+
+    Deliberately refuses once a baseline HAS completed: that path must go through
+    /reassessment/start so the 30-day cycle and early-retake cooldown still apply, and so
+    a finished baseline can never be silently thrown away.
+    """
+    completed = await db.baselineassessment.count(
+        where={"userId": user_id, "completedAt": {"not": None}}
+    )
+    if completed:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Baseline already completed. Use re-assessment to retake."},
+        )
+
+    discarded = await db.baselineassessment.delete_many(
+        where={"userId": user_id, "completedAt": None}
+    )
+    # Back to UNASSESSED so gating reports "not started" rather than a phantom in-progress run.
+    await db.user.update(
+        where={"id": user_id}, data={"assessmentStatus": AssessmentStatus.UNASSESSED}
+    )
+    logger.info("Restarted baseline for user %s (discarded %s unfinished row(s))", user_id, discarded)
+
+    fresh = await _begin_assessment(user_id)
+    return {**fresh, "restarted": True, "discarded_attempts": discarded}
+
+
 async def get_assessment_status(assessment_id: str, user_id: str = Depends(require_auth)):
     assessment = await db.baselineassessment.find_unique(where={"id": assessment_id})
     if not assessment or assessment.userId != user_id:
@@ -434,8 +564,9 @@ async def get_assessment_status(assessment_id: str, user_id: str = Depends(requi
         }
 
     elapsed = (datetime.now(timezone.utc) - assessment.startedAt).total_seconds()
+    all_answered = assessment.currentIndex >= len(assessment.questionIds)
     return {
-        "status": "in_progress",
+        "status": "processing" if (all_answered and assessment.scoringFailed) else "in_progress",
         "current_question_index": assessment.currentIndex,
         "total_questions": len(assessment.questionIds),
         "elapsed_seconds": elapsed,
@@ -490,6 +621,11 @@ def _skill_description(skill: str, score: float) -> str:
             "medium": "Your pronunciation is generally clear with some areas to refine.",
             "developing": "Working on clarity and accuracy in pronunciation.",
         },
+        "confidence": {
+            "high": "You come across as self-assured and composed.",
+            "medium": "You're showing steady confidence with room to grow.",
+            "developing": "Building your confidence one session at a time.",
+        },
     }
     tier = "high" if score >= 70 else "medium" if score >= 50 else "developing"
     return descriptions[skill][tier]
@@ -529,6 +665,15 @@ def _skill_breakdown(assessment: BaselineAssessment) -> Dict:
             "description": _skill_description("pronunciation", assessment.pronunciationScore),
             "strength": _skill_strength(assessment.pronunciationScore),
         }
+    # BAS-US-01 AC: breakdown must cover Fluency/Vocabulary/Pronunciation/Confidence —
+    # Confidence as its own row here, distinct from the separate top-line score above.
+    breakdown["confidence"] = {
+        "score": assessment.confidenceScore,
+        "display": f"{assessment.confidenceScore:.1f}/100",
+        "label": "Confidence",
+        "description": _skill_description("confidence", assessment.confidenceScore),
+        "strength": _skill_strength(assessment.confidenceScore),
+    }
     return breakdown
 
 
@@ -564,7 +709,16 @@ async def get_results_summary(assessment_id: str, user_id: str = Depends(require
     if not assessment or assessment.userId != user_id:
         return JSONResponse(status_code=404, content={"error": "Assessment not found"})
     if not assessment.completedAt:
-        return JSONResponse(status_code=400, content={"error": "Assessment not completed"})
+        # BAS-US-01 E-02: all responses are in but a prior scoring attempt failed (or
+        # this is the first attempt reaching a fully-answered assessment) — retry
+        # scoring now instead of flatly 400ing forever.
+        if assessment.currentIndex >= len(assessment.questionIds):
+            retry_result = await _try_complete_assessment(assessment)
+            if retry_result.get("status") == "processing":
+                return JSONResponse(status_code=202, content=retry_result)
+            assessment = await db.baselineassessment.find_unique(where={"id": assessment_id})
+        else:
+            return JSONResponse(status_code=400, content={"error": "Assessment not completed"})
 
     user = await db.user.find_unique(where={"id": user_id})
 

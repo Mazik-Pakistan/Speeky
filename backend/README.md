@@ -43,12 +43,17 @@ backend/
 │   ├── coaching_routes.py         # /api/coaching         (WEC-US: Workplace English Coach)
 │   ├── interview_coach_routes.py  # /api/interview-coach  (INT-US: mock interviews, peer review sharing)
 │   ├── resume_jd_routes.py        # /api/resume-jd-intake (resume/JD intake feeding Interview Coach)
-│   └── session_memory_routes.py   # /api/session-memory   (interruption/resume + cross-session memory, generic across features)
+│   ├── session_memory_routes.py   # /api/session-memory   (interruption/resume + cross-session memory, generic across features)
+│   ├── pronunciation_routes.py    # /api/pronunciation-coach (US-95: word-level pronunciation feedback)
+│   └── accent_routes.py           # /api/accent-assessment  (US-93 passage scoring, US-89 profile + exercises)
 │
 ├── services/                 # Business logic — one module per router above, plus:
 │   ├── auth_serivce.py
 │   ├── gating_service.py          # feature-access gating (assessment required to unlock most features)
-│   └── reassessment_service.py    # periodic re-assessment cadence/eligibility
+│   ├── reassessment_service.py    # periodic re-assessment cadence/eligibility
+│   ├── pronunciation_coach_service.py  # US-95
+│   ├── accent_assessment_service.py    # US-93
+│   └── accent_profile_service.py       # US-89 — triggered by accent_assessment_service on a COMPLETED assessment
 │
 ├── middlewares/
 │   ├── auth_middleware.py   # require_auth / require_admin — FastAPI dependencies
@@ -64,19 +69,28 @@ backend/
 │   ├── pii.py                # Shared PII detection/redaction (resume intake + conversation practice)
 │   ├── tts_client.py         # AIC-US-16 text-to-speech via Piper
 │   ├── confidence_engine.py  # Aggregate confidence score (fluency/vocabulary/pronunciation)
-│   └── session_scorer.py     # TEXT vs. AUDIO scoring pipelines shared by assessment/coaching/conversation
+│   ├── session_scorer.py     # TEXT vs. AUDIO scoring pipelines shared by assessment/coaching/conversation
+│   ├── speech_config.py      # Single source of truth for every Pronunciation Coach/Accent Assessment env value
+│   ├── audio_io.py           # Raw upload decoding (PyAV) + RMS/dBFS waveform math
+│   ├── vad_engine.py         # Silero VAD — speech segments, silence/incomplete detection, noise/SNR estimate
+│   ├── stt_engine.py         # faster-whisper wrapper — transcript + word timings + per-word confidence
+│   ├── prosody_engine.py     # praat-parselmouth wrapper — pitch/intensity/syllable-nuclei, multi-voice heuristic
+│   ├── text_alignment.py     # difflib target↔transcript word alignment + CMU-dict stress lookup
+│   └── recording_engine.py   # Shared Assessment/Recording Engine (US-95/US-93/US-89 foundation) — ties the six above together
 │
 ├── schemas/                  # Pydantic request models, one file per feature
 │
 ├── utils/
 │   ├── app_error.py          # AppError class
-│   ├── feature_errors.py     # Typed errors (404/400/409/429) for the ported features
+│   ├── feature_errors.py     # Typed errors (404/400/409/429/413/422) for the ported + pronunciation/accent features
 │   ├── jwt_utils.py          # Token sign/verify helpers, cookie option factories, hash_token
 │   └── email_utils.py        # send_password_reset_email
 │
 ├── data/
-│   ├── assessment_qs.json    # Baseline assessment question bank
-│   └── tts/                  # Piper voice model (not committed — see data/tts/README.md)
+│   ├── assessment_qs.json           # Baseline assessment question bank
+│   ├── pronunciation_sentences.json # US-95 target-sentence bank
+│   ├── accent_passages.json         # US-93 target-passage bank
+│   └── tts/                         # Piper voice model (not committed — see data/tts/README.md)
 │
 ├── tests/                    # pytest — offline/network-free (LLM + kv_store both mocked, see tests/conftest.py)
 │
@@ -98,6 +112,8 @@ backend/
 | `/api/interview-coach`   | Mock interviews (standard/panel/case-study/multi-round), peer review sharing                     |
 | `/api/resume-jd-intake`  | Resume/CV + job-description upload, PII redaction, resume↔JD mismatch check (feeds Interview Coach) |
 | `/api/session-memory`    | Session interruption/auto-resume and cross-session personalization — generic, reused by Conversation Practice and Interview Coach via `session_type` |
+| `/api/pronunciation-coach` | US-95 — read-a-sentence-aloud word-level pronunciation feedback (correct/mispronounced/stress-error/skipped), unlimited retries |
+| `/api/accent-assessment` | US-93 passage-level rhythm/stress/intonation/clarity/pronunciation scoring + US-89 accent profile & generated practice exercises |
 
 ---
 
@@ -160,6 +176,11 @@ See `.env.example` for the full list. In addition to the original auth-slice var
 > Without it, `/api/conversation/tts` returns 503 and the client is expected to fall back
 > to its own native TTS.
 
+> **Pronunciation Coach / Accent Assessment**: every threshold (STT model/device, audio
+> limits, silence/noise/word-confidence/coverage cutoffs, exercise batch size, etc.) has a
+> default and lives in `lib/speech_config.py` — see `.env.example`'s dedicated section.
+> Nothing in that module is hardcoded.
+
 ---
 
 ## Getting Started
@@ -180,6 +201,10 @@ This reads `prisma/schema.prisma` and generates the typed `db.*` client used thr
 `services/*.py`. **Re-run this any time `schema.prisma` changes** — a stale generated
 client (e.g. missing a newly added enum) fails at import time for every service that
 touches the affected model.
+
+> Added `PronunciationAttempt` / `AccentAssessment` / `AccentProfile`? Generate + apply
+> the migration against a running Postgres before starting the server:
+> `uv run prisma migrate dev --name add_pronunciation_accent`.
 
 ### 3. Set up the database
 
@@ -210,6 +235,32 @@ uv run pytest
 
 Fully offline — `tests/conftest.py` forces the LLM offline and swaps the KV store for an
 in-process one, so no network or DB connection is needed.
+
+### 6. (Optional) Start the voice agent for AI Conversation Practice's voice mode
+
+`voice_agent/` is a separate LiveKit worker (own deps, own venv) that transcribes
+*streamed* mic audio in real time and sends the transcript back to the frontend
+over the LiveKit room's data channel (topic `voice_transcript`) — the client fills
+its message input with it, same "review then hit Send" flow as typing. `docker
+compose up` starts it alongside Postgres:
+
+> Note: the main API's `pyproject.toml` **also** depends on `faster-whisper` and
+> `silero-vad` now (see above) — those power Pronunciation Coach / Accent Assessment's
+> one-shot recording uploads (`lib/stt_engine.py`, `lib/vad_engine.py`), a different use
+> case from `voice_agent/`'s continuous LiveKit room streaming. They're separate
+> integrations of the same underlying models, not a shared dependency — `voice_agent/`
+> keeps its own copies in its own venv so the main API's dev-reload server doesn't need
+> to reload a LiveKit worker's deps, and vice versa.
+
+```bash
+docker compose up
+```
+
+It reads `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` from the same `.env`
+this API uses — it never calls this API directly, so no `BACKEND_URL` /
+`INTERNAL_AGENT_SECRET` needed. See `voice_agent/agent.py`'s module docstring for the
+room-naming contract, and `voice_agent/join_test_room.py` for publishing test mic audio
+without a frontend.
 
 ---
 
@@ -272,6 +323,22 @@ All routes below are prefixed as shown. See `/docs` for full request/response sc
 `POST /interruptions`, `GET /interruptions/{session_id}/status`, `POST /resume`,
 `POST /profile/record-session`, `GET /profile`, `GET /profile/personalized-opening`.
 
+### `/api/pronunciation-coach` — requires `access_token` cookie
+
+| Method | Path                              | Body                                        | Description |
+| ------ | --------------------------------- | -------------------------------------------- | ------------ |
+| `GET`  | `/sentences`                      | query: `sentence_id?`, `difficulty?`        | Fetch a specific or random target sentence. |
+| `POST` | `/sentences/{sentence_id}/attempts` | multipart: `audio` (file), `accent_profile?` (form field, US-90 stub) | Submit a recording against that sentence. Word-level `correct/mispronounced/stress_error/skipped` results + overall score. Retries **replace** the sentence's stored score (no history). `422` with a `reason` code if the recording fails a quality check. |
+
+### `/api/accent-assessment` — requires `access_token` cookie
+
+| Method | Path                              | Body                     | Description |
+| ------ | --------------------------------- | ------------------------- | ------------ |
+| `GET`  | `/passages`                       | query: `passage_id?`, `difficulty?` | Fetch a specific or random target passage. |
+| `POST` | `/passages/{passage_id}/assessments` | multipart: `audio` (file) | Submit a full-passage recording. Returns 4 separate scores (pronunciation/stress/rhythm/intonation/clarity) + weak points on success. `422` with a `reason` code (`no_speech_detected` / `audio_too_quiet` / `background_noise_too_high` / `incomplete_recording` / `multiple_voices_detected`) instead of a false baseline otherwise. A `COMPLETED` result automatically generates/updates the user's Accent Profile (US-89). |
+| `GET`  | `/profile`                        | —                          | Latest Accent Profile (4 scores + weak points). `404` if no assessment has ever completed. |
+| `GET`  | `/profile/exercises`              | —                          | Targeted practice sentences generated from the profile's weak points (Groq LLM, deterministic offline fallback). `404` under the same condition as `/profile`. |
+
 ---
 
 ## Authentication Flow
@@ -311,6 +378,12 @@ See `prisma/schema.prisma`: `User`, `RefreshToken`, `PasswordResetToken`,
 generic `KvEntry` table backing the kv_store-based features (Interview Coach, Session &
 Memory, Resume/JD Intake, Conversation Practice).
 
+Pronunciation Coach / Accent Assessment add three more: `PronunciationAttempt` (one row
+per `userId`+`sentenceId`, updated in place on retry), `AccentAssessment` (one row per
+passage-reading attempt, history kept — `REJECTED_*` statuses carry no scores), and
+`AccentProfile` (generated from a `COMPLETED` `AccentAssessment`; history kept, latest
+is canonical).
+
 ---
 
 ## Error Handling
@@ -320,6 +393,14 @@ Memory, Resume/JD Intake, Conversation Practice).
 → 409, `RateLimitedError` → 429) all render through the same handler
 (`middlewares/error_handler.py`'s `app_error_handler`). `requireAuth` failures bypass it
 (`AuthError`, its own 401 shape). Everything else uncaught → 500 generic message.
+
+Pronunciation Coach / Accent Assessment add `UnreadableAudioError` (400 — corrupt/empty
+upload), `UploadTooLargeError` (413), `SentenceNotFoundError`/`PassageNotFoundError` (404),
+and `NoCompletedAssessmentError` (404 — profile/exercises requested before any assessment
+completed). A recording that's readable but fails a *quality* check (silence, too quiet,
+too noisy, incomplete, multiple voices) is **not** one of these exceptions — it's a normal
+`422` JSON response with a `reason` code (see `lib/recording_engine.RejectionReason`),
+since it's an expected outcome the client needs to branch on, not a server error.
 
 ---
 

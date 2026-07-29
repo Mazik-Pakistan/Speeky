@@ -1,21 +1,50 @@
 import { api } from "./api";
+import type { VoiceTokenResult } from "./useLiveKitVoice";
 
 // ── Types (mirrors Backend/services/assessment_service.py, gating_service.py,
 // reassessment_service.py response shapes) ──────────────────────────────────
 
-export interface StartAssessmentResult {
+export interface StartAssessmentQuestion {
   assessment_id: string;
   total_questions: number;
   current_question: string;
   question_index: number;
+  question_mode: "text" | "audio";
   estimated_duration_minutes: number;
   is_re_assessment?: boolean;
+  // True when start resumed an existing in-progress assessment (browser back/refresh)
+  // instead of creating a new one — see assessment_service._begin_assessment.
+  resumed?: boolean;
+  // True when /restart discarded an unfinishable attempt and issued this fresh one.
+  restarted?: boolean;
+  discarded_attempts?: number;
+}
+
+/** /start can also come back without a question: the previous attempt had every answer
+ *  saved but never finished scoring, so the server retried it instead of handing back a
+ *  dead question (see assessment_service._begin_assessment). */
+export interface StartAssessmentRecovered {
+  status: "completed";
+  assessment_id: string;
+}
+
+export type StartAssessmentResult =
+  | StartAssessmentQuestion
+  | StartAssessmentRecovered
+  | AssessmentProcessing;
+
+/** Narrowing helper: did /start hand back an actual question to answer? */
+export function isAssessmentQuestion(
+  result: StartAssessmentResult,
+): result is StartAssessmentQuestion {
+  return !("status" in result);
 }
 
 export interface SubmitResponseInProgress {
   status: "in_progress";
   next_question: string | null;
   question_index: number;
+  next_question_mode: "text" | "audio" | null;
   previous_result: {
     question_id: string;
     category: string | null;
@@ -40,7 +69,8 @@ export interface SubmitResponseCompleted {
 
 export type SubmitResponseResult =
   | SubmitResponseInProgress
-  | SubmitResponseCompleted;
+  | SubmitResponseCompleted
+  | AssessmentProcessing;
 
 export interface SkillDetail {
   score: number;
@@ -61,6 +91,7 @@ export interface AssessmentSummary {
     fluency: SkillDetail;
     vocabulary: SkillDetail;
     pronunciation?: SkillDetail;
+    confidence: SkillDetail;
   };
   positive_framing: {
     title: string;
@@ -130,9 +161,22 @@ export function startAssessment() {
   return api<StartAssessmentResult>("/assessment/start", { method: "POST" });
 }
 
+/** Discard an unfinished baseline and get a fresh one. Only valid while no baseline has
+ *  completed — the escape hatch for an attempt that can never finish scoring. */
+export function restartAssessment() {
+  return api<StartAssessmentQuestion>("/assessment/restart", { method: "POST" });
+}
+
 export function submitAssessmentResponse(
   assessmentId: string,
-  data: { text_data: string; clipboard_detected?: boolean }
+  data: {
+    text_data: string;
+    clipboard_detected?: boolean;
+    audio_features?: {
+      duration_seconds: number;
+      word_timings?: { word: string; start: number; end: number }[];
+    };
+  }
 ) {
   return api<SubmitResponseResult>(`/assessment/${assessmentId}/respond`, {
     method: "POST",
@@ -140,8 +184,25 @@ export function submitAssessmentResponse(
   });
 }
 
+export interface AssessmentProcessing {
+  status: "processing";
+  assessment_id: string;
+  message: string;
+}
+
 export function getResultsSummary(assessmentId: string) {
-  return api<AssessmentSummary>(`/assessment/${assessmentId}/summary`);
+  return api<AssessmentSummary | AssessmentProcessing>(
+    `/assessment/${assessmentId}/summary`,
+  );
+}
+
+// Voice mode: LiveKit room token for a spoken answer. Same pipeline as AI Conversation —
+// the generic voice_agent/ worker joins the room (name == assessmentId), transcribes, and
+// pushes the transcript back over the data channel (handled by useLiveKitVoice).
+export function getAssessmentVoiceToken(assessmentId: string) {
+  return api<VoiceTokenResult>(`/assessment/${assessmentId}/voice-token`, {
+    method: "POST",
+  });
 }
 
 // ── Feature-Access Gating (US-12) ────────────────────────────────────────────

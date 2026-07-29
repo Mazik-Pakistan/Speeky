@@ -4,6 +4,8 @@ from services.assessment_service import (
     get_assessment_status,
     get_progress_comparison,
     get_results_summary,
+    get_voice_token,
+    restart_assessment,
     start_assessment,
     submit_response,
 )
@@ -22,7 +24,12 @@ router = APIRouter()
 
 # Initial Communication Assessment + Results Summary 
 router.add_api_route("/start", start_assessment, methods=["POST"])
+# Escape hatch for a baseline that can never finish (E-02) — discards the unfinished
+# attempt and issues a fresh one. Registered before "/{assessment_id}/..." so the literal
+# path can never be shadowed by the path-param routes below.
+router.add_api_route("/restart", restart_assessment, methods=["POST"])
 router.add_api_route("/{assessment_id}/respond", submit_response, methods=["POST"])
+router.add_api_route("/{assessment_id}/voice-token", get_voice_token, methods=["POST"])
 router.add_api_route("/{assessment_id}/status", get_assessment_status, methods=["GET"])
 router.add_api_route("/{assessment_id}/summary", get_results_summary, methods=["GET"])
 router.add_api_route("/progress", get_progress_comparison, methods=["GET"])

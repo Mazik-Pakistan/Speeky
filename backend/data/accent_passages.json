@@ -1,0 +1,44 @@
+{
+  "beginner": [
+    {
+      "passage_id": "accent_beg_1",
+      "difficulty": "beginner",
+      "title": "A Morning Routine",
+      "text": "Every morning, I wake up at seven o'clock. First, I make a cup of coffee and check my messages. Then I get ready for work and eat a small breakfast. I usually leave the house by eight thirty. The walk to the station takes about ten minutes, and the train ride gives me time to plan my day."
+    },
+    {
+      "passage_id": "accent_beg_2",
+      "difficulty": "beginner",
+      "title": "My Weekend Plans",
+      "text": "This weekend, I am planning to visit my parents. We will have lunch together on Saturday and go for a walk in the park afterward. On Sunday, I want to finish reading my book and clean the apartment. It should be a relaxing weekend before another busy week at work."
+    }
+  ],
+  "intermediate": [
+    {
+      "passage_id": "accent_int_1",
+      "difficulty": "intermediate",
+      "title": "Adapting to a New Workplace",
+      "text": "Starting a new job can be both exciting and overwhelming at the same time. During the first few weeks, it is important to observe how the team communicates and to ask questions whenever something is unclear. Building relationships with colleagues takes time, but it becomes easier once you understand the unwritten expectations of the workplace. Patience and curiosity are usually the two most valuable qualities during this transition."
+    },
+    {
+      "passage_id": "accent_int_2",
+      "difficulty": "intermediate",
+      "title": "The Value of Continuous Learning",
+      "text": "Many professionals underestimate how quickly their industry can change. Skills that were considered essential a decade ago might now be outdated, while entirely new tools and techniques have emerged to take their place. Setting aside time each week for learning, even if it is only thirty minutes, can make a significant difference over the course of a year. Consistency, rather than intensity, is usually what determines long-term progress."
+    }
+  ],
+  "advanced": [
+    {
+      "passage_id": "accent_adv_1",
+      "difficulty": "advanced",
+      "title": "Negotiating Under Uncertainty",
+      "text": "Effective negotiation rarely depends on having complete information about the other party's priorities. Instead, experienced negotiators focus on asking clarifying questions, listening for underlying interests rather than stated positions, and remaining flexible enough to adjust their approach as new information emerges. Overconfidence in one's initial assumptions is often the single greatest obstacle to reaching a mutually beneficial outcome, particularly in cross-cultural or high-stakes professional settings."
+    },
+    {
+      "passage_id": "accent_adv_2",
+      "difficulty": "advanced",
+      "title": "The Economics of Attention",
+      "text": "In an environment saturated with information, attention itself has become one of the scarcest and most contested resources. Organizations increasingly compete not merely on the quality of their products, but on their ability to capture and sustain the fleeting focus of an audience accustomed to constant interruption. This shift has significant implications for how professionals structure communication, favoring clarity and brevity over exhaustive detail."
+    }
+  ]
+}

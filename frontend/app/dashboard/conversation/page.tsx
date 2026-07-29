@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "react-toastify";
 import { Lock, MessagesSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,7 +28,7 @@ export default function ConversationPage() {
     if (!isUnlocked) return;
     listTopics()
       .then((data) => setTopics(data.topics))
-      .catch(() => {});
+      .catch(() => toast.error("Couldn't load conversation topics."));
   }, [isUnlocked]);
 
   async function handleStart() {
@@ -54,7 +55,7 @@ export default function ConversationPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
       <div>
-        <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
+        <h1 className="font-serif text-h1 font-semibold text-foreground">
           AI Conversation Practice
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
