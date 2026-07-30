@@ -1,5 +1,16 @@
 from fastapi import APIRouter
 
+from services.content_intelligence_service import (
+    admin_capture_performance_snapshot,
+    admin_deployment_confidence,
+    admin_deployment_history,
+    admin_explain_prompt,
+    admin_get_explanation,
+    admin_get_vocab_coverage,
+    admin_performance_detail,
+    admin_score_vocab_coverage,
+    rate_session,
+)
 from services.scenario_service import (
     admin_archive_custom,
     admin_assess_readiness,
@@ -40,8 +51,27 @@ router.add_api_route("/admin/custom/{scenario_id}/rollback/{version}", admin_rol
 router.add_api_route("/admin/custom/{scenario_id}/evaluate", admin_evaluate_template, methods=["POST"])
 router.add_api_route("/admin/custom/{scenario_id}/readiness", admin_assess_readiness, methods=["POST"])
 
+# Sprint 3 content intelligence. GET returns the cached result (cheap, no LLM);
+# POST recomputes. Both stay under /admin/custom/... so the existing
+# require_admin-per-handler pattern and the route ordering above still hold.
+# US-192 Vocabulary Coverage Score
+router.add_api_route("/admin/custom/{scenario_id}/vocab-coverage", admin_get_vocab_coverage, methods=["GET"])
+router.add_api_route("/admin/custom/{scenario_id}/vocab-coverage", admin_score_vocab_coverage, methods=["POST"])
+# US-195 Prompt Explainability Report
+router.add_api_route("/admin/custom/{scenario_id}/explain", admin_get_explanation, methods=["GET"])
+router.add_api_route("/admin/custom/{scenario_id}/explain", admin_explain_prompt, methods=["POST"])
+# US-193 Template Performance Dashboard (per-template detail + trend snapshot)
+router.add_api_route("/admin/custom/{scenario_id}/performance", admin_performance_detail, methods=["GET"])
+router.add_api_route("/admin/custom/{scenario_id}/performance/snapshot", admin_capture_performance_snapshot, methods=["POST"])
+# US-198 Deployment Confidence Monitoring
+router.add_api_route("/admin/custom/{scenario_id}/deployment-confidence", admin_deployment_confidence, methods=["POST"])
+router.add_api_route("/admin/custom/{scenario_id}/deployments", admin_deployment_history, methods=["GET"])
+
 router.add_api_route("/{session_id}/turn", send_turn, methods=["POST"])
 router.add_api_route("/{session_id}/voice-token", voice_token, methods=["POST"])
 router.add_api_route("/{session_id}/end", end_session, methods=["POST"])
-router.add_api_route("/{key}", get_scenario_detail, methods=["GET"])
+# US-193/US-196 input: a learner rates their own finished session.
+router.add_api_route("/sessions/{session_id}/rating", rate_session, methods=["POST"])
 router.add_api_route("/sessions/{session_id}", get_session, methods=["GET"])
+# Catch-all LAST so none of the literal paths above get swallowed by it.
+router.add_api_route("/{key}", get_scenario_detail, methods=["GET"])

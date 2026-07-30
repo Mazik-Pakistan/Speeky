@@ -22,7 +22,7 @@ from prisma import Json
 from lib import kv_store, prosody_engine, recording_engine, text_alignment
 from lib.audio_io import AudioDecodeError
 from lib.prisma_client import db
-from lib.recording_engine import RecordingAnalysis, RejectionReason
+from lib.recording_engine import RejectionReason
 from lib.speech_config import SpeechConfig, load_speech_config
 from lib.text_alignment import AlignedWord, WordStatus
 from middlewares.auth_middleware import require_auth

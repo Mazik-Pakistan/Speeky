@@ -46,6 +46,7 @@ async def _provision() -> None:
     import bcrypt
 
     from lib.prisma_client import db
+    from services.user_service import CURRENT_PRIVACY_POLICY_VERSION
     from utils.jwt_utils import sign_access_token
 
     await db.connect()
@@ -57,11 +58,36 @@ async def _provision() -> None:
                     "email": QA_EMAIL,
                     "name": QA_NAME,
                     "password": bcrypt.hashpw(QA_PASSWORD, bcrypt.gensalt()).decode(),
+                    # The Sprint 3 admin surface (Content Intelligence, Custom
+                    # Scenarios) renders nothing without this, so the audit would
+                    # silently pass against empty pages.
+                    "role": "ADMIN",
+                    # LearningGoalGate blocks EVERY dashboard route until a goal is
+                    # chosen. Without this the whole audit renders the onboarding
+                    # card instead of the pages, and every assertion passes vacuously
+                    # against an identical 483-character body.
+                    "learningGoal": "improve_english",
+                    "learningGoalSet": True,
+                    # PRIV-US-02 ConsentGate wraps LearningGoalGate and the whole
+                    # dashboard. Sourced from user_service rather than hardcoded so a
+                    # policy-version bump cannot silently re-block the audit.
+                    "isConsented": True,
+                    "consentVersion": CURRENT_PRIVACY_POLICY_VERSION,
                 }
             )
             print(f"created QA user {user.id}")
         else:
-            print(f"reusing QA user {user.id}")
+            patch = {}
+            if user.role not in ("ADMIN", "SUPER_ADMIN"):
+                patch["role"] = "ADMIN"
+            if not user.learningGoalSet:
+                patch["learningGoalSet"] = True
+            if not user.isConsented or user.consentVersion != CURRENT_PRIVACY_POLICY_VERSION:
+                patch["isConsented"] = True
+                patch["consentVersion"] = CURRENT_PRIVACY_POLICY_VERSION
+            if patch:
+                user = await db.user.update(where={"id": user.id}, data=patch)
+            print(f"reusing QA user {user.id} (role {user.role})")
 
         AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
         AUTH_FILE.write_text(

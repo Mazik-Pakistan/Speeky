@@ -315,12 +315,12 @@ import base64
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from fastapi import Depends, File, Form, UploadFile
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 
-from lib import kv_store, recording_engine, text_alignment, tts_client
+from lib import recording_engine, text_alignment, tts_client
 from lib.audio_io import AudioDecodeError
 from lib.prompts import (
     CODE_SWITCH_PARTIAL_OVERLAP_CEILING,
@@ -348,7 +348,7 @@ from schemas.pronunciation_schemas import (
     StartSessionRequest,
     WordResultSchema,
 )
-from services import accent_calibration_service, liveness_service
+from services import accent_calibration_service
 from utils.feature_errors import (
     InvalidSubmissionError,
     SessionAlreadyEndedError,
