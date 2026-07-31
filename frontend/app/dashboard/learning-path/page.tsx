@@ -5,11 +5,9 @@ import {
   Map,
   CheckCircle2,
   Lock,
-  Unlock,
   Trophy,
   RotateCcw,
   Play,
-  Pause,
   Star,
   ChevronRight,
   AlertTriangle,
@@ -30,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRouter } from "next/navigation";
 import {
   getRecommendation,
   switchPath,
@@ -40,6 +39,7 @@ import {
   checkModuleAccess,
   checkPathCompletion,
   getCertification,
+  getModuleSessionHref,
   type RecommendationResponse,
   type LearningPath,
   type LPModule,
@@ -64,7 +64,6 @@ function fmtSeconds(s: number): string {
 const TABS = [
   { id: "path",        label: "My Path",       icon: Map },
   { id: "milestones",  label: "Milestones",    icon: Trophy },
-  { id: "resume",      label: "Pause & Resume", icon: Pause },
   { id: "completion",  label: "Completion",    icon: Award },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -232,35 +231,14 @@ function Confetti() {
   );
 }
 
-// ── Lock-shatter animation for newly unlocked modules ─────────────────────────
-function UnlockBurst({ active }: { active: boolean }) {
-  if (!active) return null;
-  return (
-    <span
-      className="absolute inset-0 flex items-center justify-center pointer-events-none"
-      aria-hidden="true"
-    >
-      {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
-        <span
-          key={deg}
-          className="absolute h-1 w-1 rounded-full bg-amber-400 animate-fade-in"
-          style={{
-            transform: `rotate(${deg}deg) translateX(16px)`,
-            opacity: 0,
-            animation: `fade-in 400ms ease-out ${Math.random() * 80}ms both`,
-          }}
-        />
-      ))}
-      <Sparkles className="h-5 w-5 text-amber-400 animate-fade-in" />
-    </span>
-  );
-}
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PIECE 1 & 2 — Path Recommendation + Switching ("My Path" tab)
 // ═══════════════════════════════════════════════════════════════════════════════
 function PathTab() {
   const { user } = useAuth();
+  const router = useRouter();
   const [rec, setRec] = React.useState<RecommendationResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -272,10 +250,15 @@ function PathTab() {
   const [switchMsg, setSwitchMsg] = React.useState<{ type: "success" | "error"; text: string } | null>(null);
   const [accepted, setAccepted] = React.useState(false);
 
-  // Module access state (keyed by module_id)
+  // Module access & completion state
   const [moduleAccess, setModuleAccess] = React.useState<Record<string, ModuleAccessResponse>>({});
-  const [newlyUnlocked, setNewlyUnlocked] = React.useState<string | null>(null);
-  const [milestoneMsg, setMilestoneMsg] = React.useState<string | null>(null);
+  const [completedModuleIds, setCompletedModuleIds] = React.useState<string[]>([]);
+
+  // Paused-session banner state
+  const [pausedSession, setPausedSession] = React.useState<
+    (PauseResumeResponse & { _pathId: string; _module: LPModule }) | null
+  >(null);
+  const [pauseChecked, setPauseChecked] = React.useState(false);
 
   async function load() {
     setLoading(true);
@@ -289,12 +272,39 @@ function PathTab() {
       );
       if (path?.modules) {
         loadModuleAccess(path.path_id, path.modules);
+        // Also fetch which modules are already completed
+        try {
+          const completion = await checkPathCompletion(data.recommended_path_id);
+          const incomplete = new Set(completion.incomplete_module_ids);
+          const allIds = path.modules.map((m) => m.module_id);
+          setCompletedModuleIds(allIds.filter((id) => !incomplete.has(id)));
+        } catch {
+          // Non-fatal: completed state just won't show
+        }
+        // Silently scan for any paused session on this path's modules
+        checkForPausedSession(path.path_id, path.modules);
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load recommendation.");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function checkForPausedSession(pathId: string, modules: LPModule[]) {
+    const sorted = [...modules].sort((a, b) => a.sequence_order - b.sequence_order);
+    for (const mod of sorted) {
+      try {
+        const r = await resumeModule({ path_id: pathId, module_id: mod.module_id });
+        if (r.success && r.resumed) {
+          setPausedSession({ ...r, _pathId: pathId, _module: mod });
+          break;
+        }
+      } catch {
+        // Non-fatal — no paused session for this module
+      }
+    }
+    setPauseChecked(true);
   }
 
   async function loadModuleAccess(path_id: string, modules: LPModule[]) {
@@ -368,40 +378,6 @@ function PathTab() {
     }
   }
 
-  // Module completion (marks complete + evaluates milestones)
-  async function handleCompleteModule(path_id: string, module_id: string) {
-    setNewlyUnlocked(null);
-    setMilestoneMsg(null);
-    try {
-      const r = await evaluateMilestone({ path_id, module_id, score: 85 });
-      if (r.awarded_badges.length > 0) {
-        setMilestoneMsg(`🏅 Badge${r.awarded_badges.length > 1 ? "s" : ""} earned: ${r.awarded_badges.join(", ")}`);
-        setNewlyUnlocked(module_id);
-      } else {
-        setMilestoneMsg(r.message);
-      }
-      // Refresh access checks
-      if (rec) {
-        const path = rec.available_paths.find((p) => p.path_id === path_id);
-        if (path?.modules) {
-          await loadModuleAccess(path_id, path.modules);
-          // Flash the newly-unlocked next module
-          const sortedMods = [...path.modules].sort(
-            (a, b) => a.sequence_order - b.sequence_order
-          );
-          const idx = sortedMods.findIndex((m) => m.module_id === module_id);
-          if (idx >= 0 && idx + 1 < sortedMods.length) {
-            setNewlyUnlocked(sortedMods[idx + 1].module_id);
-            setTimeout(() => setNewlyUnlocked(null), 2000);
-          }
-        }
-      }
-    } catch (e) {
-      setMilestoneMsg(
-        e instanceof ApiError ? e.message : "Failed to mark module complete."
-      );
-    }
-  }
 
   if (loading)
     return (
@@ -426,6 +402,54 @@ function PathTab() {
         title="Your Learning Path"
         subtitle="A personalized path recommended based on your baseline assessment."
       />
+
+      {/* Resume banner — shown automatically when a paused session exists for a module on this path */}
+      {pauseChecked && pausedSession?.resumed && (
+        <div className="animate-fade-up rounded-2xl border-2 border-primary/40 bg-primary/10 p-5 shadow-sm">
+          <div className="flex items-start gap-4">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+              <Play className="h-5 w-5" />
+            </span>
+            <div className="flex-1">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <p className="font-serif font-semibold text-base text-foreground">
+                  Resume Interview — {pausedSession._module.title}
+                </p>
+                <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                  Question {pausedSession.question_index + 1}
+                </span>
+              </div>
+              <p className="text-sm text-muted-foreground mb-3">
+                {pausedSession.message}
+              </p>
+              {pausedSession.conversation_context && pausedSession.conversation_context.length > 0 && (
+                <div className="mb-3 rounded-xl border border-border bg-surface p-3 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground block mb-1">Restored context:</span>
+                  <span className="italic">
+                    "{pausedSession.conversation_context[pausedSession.conversation_context.length - 1]?.content}"
+                  </span>
+                </div>
+              )}
+              {pausedSession.was_interrupted && (
+                <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  Your previous session was interrupted mid-processing. Please repeat your last input.
+                </div>
+              )}
+              <div className="flex items-center gap-2 mt-2">
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    router.push(getModuleSessionHref(pausedSession._pathId, pausedSession._module))
+                  }
+                >
+                  <Play className="h-3.5 w-3.5" /> Continue Now
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Recommendation card */}
       <Card
@@ -495,13 +519,7 @@ function PathTab() {
           : <ErrorAlert message={switchMsg.text} />
       )}
 
-      {/* Milestone notification */}
-      {milestoneMsg && (
-        <div className="flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-          <Sparkles className="h-4 w-4 shrink-0" />
-          {milestoneMsg}
-        </div>
-      )}
+
 
       {/* Module list for active path */}
       {activePath && sortedModules.length > 0 && (
@@ -517,30 +535,33 @@ function PathTab() {
             {sortedModules.map((mod, idx) => {
               const access = moduleAccess[mod.module_id];
               const isAccessible = access?.accessible ?? true;
-              const isJustUnlocked = newlyUnlocked === mod.module_id;
+              const isCompleted = completedModuleIds.includes(mod.module_id);
 
               return (
                 <div
                   key={mod.module_id}
                   className={cn(
                     "relative flex items-center gap-3 rounded-xl border p-4 transition-all duration-300",
-                    isJustUnlocked && "border-amber-400/60 bg-amber-400/10",
-                    isAccessible && !isJustUnlocked && "border-border bg-surface",
-                    !isAccessible && "border-border bg-muted opacity-60"
+                    isCompleted && "border-success/30 bg-success/5",
+                    isAccessible && !isCompleted && "border-border bg-surface",
+                    !isAccessible && !isCompleted && "border-border bg-muted opacity-60"
                   )}
                 >
-                  <UnlockBurst active={isJustUnlocked} />
 
                   {/* Step indicator */}
                   <span
                     className={cn(
                       "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold",
-                      isAccessible
+                      isCompleted
+                        ? "bg-success/15 text-success"
+                        : isAccessible
                         ? "bg-primary/15 text-primary"
                         : "bg-muted text-muted-foreground"
                     )}
                   >
-                    {isAccessible ? (
+                    {isCompleted ? (
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    ) : isAccessible ? (
                       <span>{idx + 1}</span>
                     ) : (
                       <Lock className="h-3.5 w-3.5" />
@@ -552,9 +573,9 @@ function PathTab() {
                       <span className="font-medium text-sm text-foreground">
                         {mod.title}
                       </span>
-                      {isJustUnlocked && (
-                        <StatusBadge variant="warn">
-                          <Unlock className="h-3 w-3" /> Just Unlocked!
+                      {isCompleted && (
+                        <StatusBadge variant="success">
+                          <CheckCircle2 className="h-3 w-3" /> Completed
                         </StatusBadge>
                       )}
                     </div>
@@ -576,26 +597,46 @@ function PathTab() {
                         Requires: {mod.prerequisites.join(", ")}
                       </p>
                     )}
+                    {isAccessible && !isCompleted && (
+                      <p className="text-xs text-primary/70 mt-0.5 flex items-center gap-1">
+                        <ChevronRight className="h-3 w-3" />
+                        Launches Workplace English Coach practice session
+                      </p>
+                    )}
                   </div>
 
-                  <Button
-                    size="sm"
-                    variant={isAccessible ? "primary" : "outline"}
-                    disabled={!isAccessible}
-                    onClick={() =>
-                      handleCompleteModule(activePath.path_id, mod.module_id)
-                    }
-                  >
-                    {isAccessible ? (
-                      <>
-                        <Play className="h-3.5 w-3.5" /> Start
-                      </>
-                    ) : (
-                      <>
-                        <Lock className="h-3.5 w-3.5" /> Locked
-                      </>
-                    )}
-                  </Button>
+                  {isCompleted ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        router.push(getModuleSessionHref(activePath.path_id, mod))
+                      }
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" /> Practice Again
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant={isAccessible ? "primary" : "outline"}
+                      disabled={!isAccessible}
+                      onClick={() => {
+                        if (isAccessible) {
+                          router.push(getModuleSessionHref(activePath.path_id, mod));
+                        }
+                      }}
+                    >
+                      {isAccessible ? (
+                        <>
+                          <Play className="h-3.5 w-3.5" /> Start Lesson
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="h-3.5 w-3.5" /> Locked
+                        </>
+                      )}
+                    </Button>
+                  )}
                 </div>
               );
             })}
@@ -957,186 +998,6 @@ function MilestonesTab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PIECE 6 — Pause & Resume tab
-// ═══════════════════════════════════════════════════════════════════════════════
-function PauseResumeTab() {
-  const [pathId, setPathId] = React.useState("beginner-path");
-  const [moduleId, setModuleId] = React.useState("mod_b1");
-  const [resumeData, setResumeData] = React.useState<PauseResumeResponse | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [pauseMsg, setPauseMsg] = React.useState<string | null>(null);
-  const [questionIndex, setQuestionIndex] = React.useState(0);
-  const [hasPaused, setHasPaused] = React.useState(false);
-
-  // On mount: check for any paused session automatically
-  React.useEffect(() => {
-    handleResume(true);
-  }, []);
-
-  async function handlePause() {
-    setLoading(true);
-    setPauseMsg(null);
-    try {
-      await pauseModule({
-        path_id: pathId,
-        module_id: moduleId,
-        question_index: questionIndex,
-        conversation_context: [
-          { role: "system", content: "You are a language coach." },
-          { role: "user", content: "We were discussing professional email subject lines." },
-        ],
-        in_progress_data: { draft: "Subject: Q3 Update — Action Required" },
-      });
-      setPauseMsg("Session paused. Your progress is saved server-side — you can resume on any device.");
-      setHasPaused(true);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to pause session.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleResume(silent = false) {
-    if (!silent) setLoading(true);
-    setError(null);
-    try {
-      const r = await resumeModule({ path_id: pathId, module_id: moduleId });
-      if (r.success && r.resumed) {
-        setResumeData(r);
-        setQuestionIndex(r.question_index);
-      } else if (r.stale_reset) {
-        setResumeData(r);
-      } else if (r.content_updated) {
-        setResumeData(r);
-      }
-    } catch {
-      // No paused session is fine — silent is best
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-5">
-      <SectionHeader
-        icon={Pause}
-        title="Pause & Resume"
-        subtitle="Your session state is saved server-side — resume exactly where you left off, on any device."
-      />
-
-      {/* Resume banner — shown when there's an active paused session */}
-      {resumeData && resumeData.resumed && (
-        <div className="animate-fade-up rounded-2xl border-2 border-primary/40 bg-primary/8 p-5">
-          <div className="flex items-start gap-4">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-              <Play className="h-5 w-5" />
-            </span>
-            <div className="flex-1">
-              <p className="font-serif font-semibold text-base text-foreground mb-0.5">
-                Resume Interview
-              </p>
-              <p className="text-sm text-muted-foreground mb-3">
-                {resumeData.message}
-              </p>
-              {resumeData.conversation_context.length > 0 && (
-                <div className="mb-3 rounded-xl border border-border bg-surface p-3 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground block mb-1">Restored context:</span>
-                  <span className="italic">
-                    "{resumeData.conversation_context[resumeData.conversation_context.length - 1]?.content}"
-                  </span>
-                </div>
-              )}
-              {resumeData.was_interrupted && (
-                <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  Your previous session was interrupted mid-processing. Please repeat your last input.
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <StatusBadge variant="info">Question {resumeData.question_index + 1}</StatusBadge>
-                <Button size="sm" onClick={() => handleResume()}>
-                  <Play className="h-3.5 w-3.5" /> Continue Now
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {resumeData && resumeData.stale_reset && (
-        <div className="animate-fade-up flex items-start gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm">
-          <Info className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-          <span className="text-amber-700 dark:text-amber-400">
-            Your paused session was abandoned for more than 7 days and has been cleared. The module has been reset to the beginning.
-          </span>
-        </div>
-      )}
-
-      {resumeData && resumeData.content_updated && (
-        <div className="animate-fade-up flex items-start gap-3 rounded-xl border border-info/30 bg-info/10 p-4 text-sm">
-          <Info className="h-4 w-4 text-info shrink-0 mt-0.5" />
-          <span className="text-info">
-            This module's content was updated by an administrator while you had it paused. The module has been restarted fresh with the new content.
-          </span>
-        </div>
-      )}
-
-      {error && <ErrorAlert message={error} />}
-
-      {/* Session controls */}
-      <Card>
-        <h3 className="font-semibold text-sm text-foreground mb-4 flex items-center gap-2">
-          <Clock className="h-4 w-4 text-primary" />
-          Session Controls
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Path ID</label>
-            <input
-              type="text"
-              value={pathId}
-              onChange={(e) => setPathId(e.target.value)}
-              className="h-9 w-full rounded-lg border border-input bg-surface px-3 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Module ID</label>
-            <input
-              type="text"
-              value={moduleId}
-              onChange={(e) => setModuleId(e.target.value)}
-              className="h-9 w-full rounded-lg border border-input bg-surface px-3 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-2 mb-4">
-          <label className="text-xs text-muted-foreground">Question index:</label>
-          <input
-            type="number"
-            min={0}
-            value={questionIndex}
-            onChange={(e) => setQuestionIndex(Number(e.target.value))}
-            className="h-9 w-20 rounded-lg border border-input bg-surface px-3 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
-          />
-        </div>
-        {pauseMsg && <SuccessAlert message={pauseMsg} />}
-        <div className="flex flex-wrap gap-2 mt-4">
-          <Button size="sm" variant="outline" onClick={handlePause} loading={loading && !resumeData}>
-            <Pause className="h-3.5 w-3.5" />
-            Pause Session
-          </Button>
-          <Button size="sm" onClick={() => handleResume()} loading={loading}>
-            <Play className="h-3.5 w-3.5" />
-            Check for Resume
-          </Button>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // PIECE 8 — Path Completion & Certification tab
 // ═══════════════════════════════════════════════════════════════════════════════
 function CompletionTab() {
@@ -1361,9 +1222,9 @@ export default function LearningPathPage() {
   const TAB_CONTENT: Record<TabId, React.ReactNode> = {
     path:       <PathTab />,
     milestones: <MilestonesTab />,
-    resume:     <PauseResumeTab />,
     completion: <CompletionTab />,
   };
+
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">

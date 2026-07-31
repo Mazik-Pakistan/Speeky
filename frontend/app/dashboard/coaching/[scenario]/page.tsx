@@ -9,6 +9,9 @@ import {
   MicOff,
   Sparkles,
   TriangleAlert,
+  Award,
+  ArrowRight,
+  Pause,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AiCoachAvatar } from "@/components/common/AiCoachAvatar";
@@ -17,6 +20,7 @@ import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
+import { evaluateMilestone, pauseModule } from "@/lib/learningPath";
 import {
   getCoachingScenarios,
   getCoachingSessionState,
@@ -59,11 +63,113 @@ type Step =
 export default function CoachingSessionPage() {
   const params = useParams<{ scenario: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const lpPathId = searchParams.get("lp_path_id");
+  const lpModuleId = searchParams.get("lp_module_id");
+  const lpPassingScoreStr = searchParams.get("lp_passing_score");
+  const lpPassingScore = lpPassingScoreStr ? parseFloat(lpPassingScoreStr) : 60;
+
+  const [lpStatus, setLpStatus] = React.useState<{
+    evaluated: boolean;
+    passed: boolean;
+    score: number;
+    message?: string;
+    badges?: string[];
+  } | null>(null);
+
+  const processLpEvaluation = React.useCallback(
+    async (res: CoachingResult) => {
+      if (!lpPathId || !lpModuleId) return;
+      const scoreVals = Object.values(res.scores).filter(
+        (v): v is number => v !== null && v !== undefined
+      );
+      const avgScore =
+        scoreVals.length > 0
+          ? Math.round(
+              scoreVals.reduce((a, b) => a + b, 0) / scoreVals.length
+            )
+          : 80;
+      const passed = avgScore >= lpPassingScore;
+
+      if (passed) {
+        try {
+          const ev = await evaluateMilestone({
+            path_id: lpPathId,
+            module_id: lpModuleId,
+            score: avgScore,
+          });
+          setLpStatus({
+            evaluated: true,
+            passed: true,
+            score: avgScore,
+            message: ev.message,
+            badges: ev.awarded_badges,
+          });
+          toast.success("🎉 Learning Path module completed! Next module unlocked.");
+        } catch {
+          setLpStatus({
+            evaluated: true,
+            passed: true,
+            score: avgScore,
+            message: "Module score recorded.",
+          });
+        }
+      } else {
+        setLpStatus({
+          evaluated: true,
+          passed: false,
+          score: avgScore,
+          message: `Scored ${avgScore}% (Passing threshold: ${lpPassingScore}%). Practice again to unlock the next module!`,
+        });
+        toast.warn(`Scored ${avgScore}%. Minimum ${lpPassingScore}% required to pass.`);
+      }
+    },
+    [lpPathId, lpModuleId, lpPassingScore]
+  );
+
   const [step, setStep] = React.useState<Step>({ name: "loading" });
   const [draftText, setDraftText] = React.useState("");
   const [subject, setSubject] = React.useState("");
   const [chatInput, setChatInput] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [isPausing, setIsPausing] = React.useState(false);
+
+  const handlePauseSession = React.useCallback(async () => {
+    if (!lpPathId || !lpModuleId) return;
+    setIsPausing(true);
+    try {
+      let context: Array<{ role: string; content: string }> = [];
+      let inProgressData: Record<string, unknown> = {};
+
+      if (step.name === "roleplay") {
+        context = step.turns.map((t) => ({ role: t.role, content: t.content }));
+        inProgressData = { transcript: step.transcript };
+      } else if (step.name === "draft") {
+        if (draftText.trim()) {
+          context = [{ role: "user", content: draftText }];
+          inProgressData = { draftText, subject };
+        }
+      }
+
+      await pauseModule({
+        path_id: lpPathId,
+        module_id: lpModuleId,
+        question_index: step.name === "roleplay" ? Math.floor(step.turns.length / 2) : 0,
+        conversation_context: context,
+        in_progress_data: inProgressData,
+        was_interrupted: false,
+      });
+
+      toast.info("Session paused. Progress saved to your Learning Path.");
+      router.push("/dashboard/learning-path");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Failed to pause session.");
+    } finally {
+      setIsPausing(false);
+    }
+  }, [lpPathId, lpModuleId, step, draftText, subject, router]);
+
   const [error, setError] = React.useState<string | null>(null);
   const [voiceStatus, setVoiceStatus] = React.useState("");
   const scrollRef = useAutoScroll(
@@ -110,8 +216,8 @@ export default function CoachingSessionPage() {
     if (voiceError) setError(voiceError);
   }, [voiceError]);
 
-  const searchParams = useSearchParams();
   const resumeSessionId = searchParams.get("resume");
+
 
   React.useEffect(() => {
     let cancelled = false;
@@ -224,6 +330,7 @@ export default function CoachingSessionPage() {
       voiceStartedAt.current = null;
       setVoiceStatus("");
       setStep({ name: "results", result });
+      await processLpEvaluation(result);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
@@ -297,6 +404,7 @@ export default function CoachingSessionPage() {
         audio_features: audioFeatures,
       });
       setStep({ name: "results", result });
+      await processLpEvaluation(result);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
@@ -390,15 +498,27 @@ export default function CoachingSessionPage() {
 
           {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
 
-          <Button
-            size="lg"
-            className="mt-4"
-            loading={isSubmitting}
-            disabled={!draftText.trim()}
-            onClick={handleSubmitDraft}
-          >
-            Submit for Feedback
-          </Button>
+          <div className="mt-4 flex items-center gap-2">
+            <Button
+              size="lg"
+              loading={isSubmitting}
+              disabled={!draftText.trim() || isPausing}
+              onClick={handleSubmitDraft}
+            >
+              Submit for Feedback
+            </Button>
+            {lpPathId && lpModuleId && (
+              <Button
+                size="lg"
+                variant="outline"
+                loading={isPausing}
+                disabled={isSubmitting}
+                onClick={handlePauseSession}
+              >
+                <Pause className="h-4 w-4" /> Pause Module
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -412,15 +532,30 @@ export default function CoachingSessionPage() {
           <h1 className="font-serif text-h2 font-semibold text-foreground">
             {step.session.label}
           </h1>
-          <Button
-            size="sm"
-            variant="outline"
-            loading={isSubmitting}
-            onClick={handleEndRoleplay}
-          >
-            End &amp; Get Feedback
-          </Button>
+          <div className="flex items-center gap-2">
+            {lpPathId && lpModuleId && (
+              <Button
+                size="sm"
+                variant="outline"
+                loading={isPausing}
+                disabled={isSubmitting}
+                onClick={handlePauseSession}
+              >
+                <Pause className="h-3.5 w-3.5" /> Pause
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              loading={isSubmitting}
+              disabled={isPausing}
+              onClick={handleEndRoleplay}
+            >
+              End &amp; Get Feedback
+            </Button>
+          </div>
         </div>
+
 
         <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm">
           <div
@@ -621,14 +756,86 @@ export default function CoachingSessionPage() {
         </div>
       ) : null}
 
-      <Button
-        size="lg"
-        variant="outline"
-        className="self-center"
-        onClick={() => router.push("/dashboard/coaching")}
-      >
-        Back to Coaching
-      </Button>
+      {/* Learning Path completion banner — only shown when session was launched from a module */}
+      {lpPathId && lpModuleId && lpStatus && (
+        <div
+          className={`animate-fade-up rounded-2xl border p-5 shadow-sm ${
+            lpStatus.passed
+              ? "border-success/30 bg-success/10"
+              : "border-amber-400/30 bg-amber-400/10"
+          }`}
+          style={{ animationDelay: "340ms" }}
+        >
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/30">
+              {lpStatus.passed ? (
+                <Award className="h-5 w-5 text-success" />
+              ) : (
+                <TriangleAlert className="h-5 w-5 text-amber-500" />
+              )}
+            </span>
+            <div className="flex-1 min-w-0">
+              <p
+                className={`font-semibold text-sm ${
+                  lpStatus.passed ? "text-success" : "text-amber-700 dark:text-amber-400"
+                }`}
+              >
+                {lpStatus.passed
+                  ? "✅ Learning Path Module Passed!"
+                  : "⚠️ Module Not Yet Passed"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {lpStatus.message}
+              </p>
+              {lpStatus.passed && lpStatus.badges && lpStatus.badges.length > 0 && (
+                <p className="text-xs text-success mt-1">
+                  🏅 Badges earned: {lpStatus.badges.join(", ")}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {lpStatus.passed ? (
+              <Button
+                size="sm"
+                onClick={() => router.push("/dashboard/learning-path")}
+              >
+                <ArrowRight className="h-3.5 w-3.5" />
+                Continue Learning Path
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  // Restart the same session
+                  window.location.reload();
+                }}
+              >
+                Practice Again
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => router.push("/dashboard/learning-path")}
+            >
+              Back to Learning Path
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {!lpPathId && (
+        <Button
+          size="lg"
+          variant="outline"
+          className="self-center"
+          onClick={() => router.push("/dashboard/coaching")}
+        >
+          Back to Coaching
+        </Button>
+      )}
     </div>
   );
 }

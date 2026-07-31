@@ -277,3 +277,55 @@ export function getCertification(path_id: string): Promise<PathSummaryResponse> 
     `/learning-path/paths/${path_id}/certification`
   );
 }
+
+/**
+ * Maps a Learning Path module to its corresponding real practice session route URL
+ * with query parameters tracking the path_id, module_id, and passing_score requirement.
+ */
+export function getModuleSessionHref(pathId: string, module: LPModule): string {
+  const id = module.module_id.toLowerCase();
+  const title = module.title.toLowerCase();
+  const passingScore = module.passing_score ?? 60;
+
+  let baseRoute = "/dashboard/coaching/general_workplace";
+
+  if (id.includes("email") || title.includes("email")) {
+    baseRoute = "/dashboard/coaching/email_writing";
+  } else if (
+    id.includes("meeting") ||
+    title.includes("meeting") ||
+    title.includes("greetings") ||
+    title.includes("contribution")
+  ) {
+    baseRoute = "/dashboard/coaching/meeting_communication";
+  } else if (
+    id.includes("presentation") ||
+    title.includes("presentation") ||
+    title.includes("boardroom")
+  ) {
+    baseRoute = "/dashboard/coaching/presentation_prep";
+  } else if (
+    id.includes("client") ||
+    title.includes("client") ||
+    title.includes("phone") ||
+    title.includes("update")
+  ) {
+    baseRoute = "/dashboard/coaching/client_communication";
+  } else if (
+    id.includes("interview") ||
+    title.includes("interview") ||
+    title.includes("objection") ||
+    title.includes("negotiation")
+  ) {
+    baseRoute = "/dashboard/interview-coach";
+  } else if (id.includes("script") || title.includes("script")) {
+    baseRoute = "/dashboard/script";
+  }
+
+  return `${baseRoute}?lp_path_id=${encodeURIComponent(
+    pathId
+  )}&lp_module_id=${encodeURIComponent(
+    module.module_id
+  )}&lp_passing_score=${passingScore}`;
+}
+
