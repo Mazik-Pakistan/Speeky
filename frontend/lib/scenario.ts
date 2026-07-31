@@ -52,6 +52,26 @@ export function getScenarios() {
   return api<{ scenarios: ScenarioListItem[] }>("/scenarios/");
 }
 
+export interface RecentScenarioSession {
+  session_id: string;
+  scenario_key: string;
+  title: string;
+  category: string;
+  description: string;
+  status: "in_progress" | "completed" | "ended_early";
+  met_goal: boolean | null;
+  confidence_score: number | null;
+  vocabulary_score: number | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+// Learner Dashboard's "Recent Scenarios" cards — up to the 6 most recently
+// started scenario sessions (in progress or completed), most recent first.
+export function getRecentScenarioSessions() {
+  return api<{ scenarios: RecentScenarioSession[] }>("/scenarios/recent");
+}
+
 export function getScenarioDetail(key: string) {
   return api<ScenarioDetail>(`/scenarios/${encodeURIComponent(key)}`);
 }

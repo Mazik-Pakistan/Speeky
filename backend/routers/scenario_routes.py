@@ -14,6 +14,7 @@ from services.scenario_service import (
     end_session,
     get_scenario_detail,
     get_scenarios,
+    get_recent_sessions,
     get_session,
     send_turn,
     start_session,
@@ -25,6 +26,8 @@ router = APIRouter()
 # Scenario-Based Learning
 router.add_api_route("/", get_scenarios, methods=["GET"])
 router.add_api_route("/start", start_session, methods=["POST"])
+# Registered before "/{key}" so "recent" doesn't get swallowed by the catch-all path param.
+router.add_api_route("/recent", get_recent_sessions, methods=["GET"])
 
 # Admin: custom scenario CRUD registered before "/{key}" so doesn't get swallowed by the catch-all path param.
 router.add_api_route("/admin/preview", admin_preview_custom, methods=["POST"])

@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { AiCoachAvatar } from "@/components/common/AiCoachAvatar";
 import { UserChatAvatar } from "@/components/common/UserChatAvatar";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
+import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
@@ -28,6 +29,7 @@ import {
   type StartCoachingResult,
 } from "@/lib/coaching";
 import { useAutoScroll } from "@/lib/useAutoScroll";
+import { usePracticeTimePing } from "@/lib/usePracticeTimePing";
 import { buildVoiceWsUrl, useVoiceSocket } from "@/lib/useVoiceSocket";
 import { useSpeechRecognition } from "@/lib/useSpeechRecognition";
 import { cn } from "@/lib/utils";
@@ -107,6 +109,17 @@ export default function CoachingSessionPage() {
   React.useEffect(() => {
     if (voiceError) setError(voiceError);
   }, [voiceError]);
+
+  // PDG-US-15: heartbeat pings while this coaching session (draft or roleplay)
+  // is the active practice session, crediting lifetime practice time and
+  // surfacing any milestone that unlocks mid-session.
+  const activePracticeSessionId =
+    step.name === "draft" || step.name === "roleplay" ? step.session.session_id : null;
+  const { newlyUnlocked, dismissMilestone } = usePracticeTimePing(
+    "coaching",
+    activePracticeSessionId,
+    activePracticeSessionId !== null,
+  );
 
   const searchParams = useSearchParams();
   const resumeSessionId = searchParams.get("resume");
@@ -329,6 +342,10 @@ export default function CoachingSessionPage() {
     return (
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
         {gate}
+        <MilestoneCelebrationModal
+          milestone={newlyUnlocked[0] ?? null}
+          onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+        />
         <div>
           <h1 className="font-serif text-h2 font-semibold text-foreground">
             {step.session.label}
@@ -406,6 +423,10 @@ export default function CoachingSessionPage() {
     return (
       <div className="mx-auto flex max-w-2xl flex-col gap-4">
         {gate}
+        <MilestoneCelebrationModal
+          milestone={newlyUnlocked[0] ?? null}
+          onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+        />
         <div className="flex items-center justify-between">
           <h1 className="font-serif text-h2 font-semibold text-foreground">
             {step.session.label}
