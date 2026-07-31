@@ -78,6 +78,7 @@ export default function ScenarioSessionPage() {
   // that unlocks mid-session.
   const isActivePractice = step.name === "chat";
   const { newlyUnlocked, dismissMilestone } = usePracticeTimePing(
+    "scenario",
     step.name === "chat" ? step.session.session_id : null,
     isActivePractice,
   );

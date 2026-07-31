@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { AiCoachAvatar } from "@/components/common/AiCoachAvatar";
 import { UserChatAvatar } from "@/components/common/UserChatAvatar";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
+import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import {
@@ -24,6 +25,7 @@ import {
   type ConversationTurn,
   type EndConversationResult,
 } from "@/lib/conversation";
+import { usePracticeTimePing } from "@/lib/usePracticeTimePing";
 import {
   scoreConversationTurn,
   type SentenceScoreResult,
@@ -190,6 +192,15 @@ export default function ConversationSessionPage() {
   const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
     featureName: "AI Conversation",
   });
+
+  // PDG-US-15: heartbeat pings while this conversation is the active practice
+  // session, crediting lifetime practice time and surfacing any milestone
+  // that unlocks mid-session.
+  const { newlyUnlocked, dismissMilestone } = usePracticeTimePing(
+    "conversation",
+    params.sessionId,
+    !summary,
+  );
 
   React.useEffect(() => {
     getConversationTranscript(params.sessionId)
@@ -371,6 +382,10 @@ export default function ConversationSessionPage() {
   if (summary) {
     return (
       <div className="mx-auto flex max-w-xl flex-col gap-6">
+        <MilestoneCelebrationModal
+          milestone={newlyUnlocked[0] ?? null}
+          onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+        />
         <div className="animate-fade-up rounded-2xl border border-border bg-gradient-to-br from-primary to-primary-hover p-8 text-center text-primary-foreground shadow-sm">
           <CheckCircle2 className="mx-auto h-6 w-6" aria-hidden="true" />
           <h1 className="mt-3 font-serif text-h2 font-semibold">
@@ -448,6 +463,10 @@ export default function ConversationSessionPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
       {gate}
+      <MilestoneCelebrationModal
+        milestone={newlyUnlocked[0] ?? null}
+        onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+      />
       <div className="flex items-center justify-between">
         <h1 className="font-serif text-h2 font-semibold text-foreground">
           {topicLabel || "Conversation"}

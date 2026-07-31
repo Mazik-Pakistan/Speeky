@@ -286,19 +286,30 @@ async def _send_email(to: str, subject: str, heading: str, body_html: str, text_
     msg.add_alternative(_render_template(heading, body_html), subtype="html")
     _attach_inline_logo(msg)
 
-    await aiosmtplib.send(
-        msg,
-        hostname=cfg["hostname"],
-        port=cfg["port"],
-        username=cfg["username"],
-        password=cfg["password"],
-        use_tls=cfg["use_tls"],
-        start_tls=cfg["start_tls"],
-    )
+    try:
+        await aiosmtplib.send(
+            msg,
+            hostname=cfg["hostname"],
+            port=cfg["port"],
+            username=cfg["username"],
+            password=cfg["password"],
+            use_tls=cfg["use_tls"],
+            start_tls=cfg["start_tls"],
+        )
+    except Exception as err:
+        if os.environ.get("APP_ENV") != "production":
+            print(f"[DEV EMAIL] Could not send email via SMTP ({err}). Continuing dev signup.")
+        else:
+            raise
 
 
 async def send_otp_email(to: str, code: str) -> None:
     ttl = os.environ.get("OTP_TTL_MINUTES", "10")
+
+    if os.environ.get("APP_ENV") != "production":
+        print(f"\n========================================================")
+        print(f"[DEV VERIFICATION CODE] OTP for {to}: {code}")
+        print(f"========================================================\n")
 
     body_html = f"""
     <p>You&apos;re one step away from starting your private speaking practice.</p>
@@ -320,9 +331,6 @@ async def send_otp_email(to: str, code: str) -> None:
             f"It expires in {ttl} minutes and should never be shared."
         ),
     )
-
-    if os.environ.get("APP_ENV") != "production":
-        print(f"[DEV] OTP code for {to}: {code}")
 
 
 async def send_email_change_otp(to: str, code: str) -> None:

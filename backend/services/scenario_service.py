@@ -535,6 +535,35 @@ async def end_session(session_id: str, user_id: str = Depends(require_auth)):
     )
 
 
+async def get_recent_sessions(user_id: str = Depends(require_auth)):
+    """Recent scenario session history (started or completed), most recent first —
+    powers the Learner Dashboard's "Recent Scenarios" cards with real data instead
+    of a static mock list. Reads the scenarioMeta snapshot taken at start_session so
+    the label/category shown matches what the learner actually saw, even if an admin
+    has since edited (or archived) the underlying scenario."""
+    rows = await db.scenariosession.find_many(
+        where={"userId": user_id}, order={"createdAt": "desc"}, take=6
+    )
+    items = []
+    for row in rows:
+        meta = row.scenarioMeta or await scenario_meta(row.scenarioKey)
+        meta = meta or {}
+        items.append({
+            "session_id": row.id,
+            "scenario_key": row.scenarioKey,
+            "title": meta.get("label", row.scenarioKey),
+            "category": meta.get("category", "General"),
+            "description": meta.get("intent", ""),
+            "status": row.status,
+            "met_goal": row.metGoal,
+            "confidence_score": row.confidenceScore,
+            "vocabulary_score": row.vocabularyScore,
+            "started_at": row.createdAt.isoformat(),
+            "completed_at": row.completedAt.isoformat() if row.completedAt else None,
+        })
+    return {"scenarios": items}
+
+
 async def get_session(session_id: str, user_id: str = Depends(require_auth)):
     session = await db.scenariosession.find_unique(where={"id": session_id})
     if not session or session.userId != user_id:
