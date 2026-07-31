@@ -7,3 +7,9 @@ dist/
 coverage/
 *.log
 .DS_Store
+tsconfig.tsbuildinfo
+
+# Playwright UI audit: minted QA JWT + run artifacts, never commit
+./e2e/**
+/test-results/
+/playwright-report/

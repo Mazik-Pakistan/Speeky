@@ -1,6 +1,9 @@
 import os
 import uuid
+import asyncio
+from datetime import datetime, timezone
 from io import BytesIO
+from typing import Optional
 
 import bcrypt
 from fastapi import Depends, HTTPException, Response, File, UploadFile
@@ -10,10 +13,24 @@ from PIL.Image import DecompressionBombError
 from starlette.concurrency import run_in_threadpool
 
 from lib.prisma_client import db
-from middlewares.auth_middleware import require_admin, require_auth
+from middlewares.auth_middleware import require_admin, require_auth, require_super_admin
 from prisma.enums import Role
-from prisma.types import UserUpdateInput
-from schemas.user_schemas import DeleteAccountSchema, UpdateProfileSchema, UpdateRoleSchema
+from schemas.user_schemas import (
+    ConsentStatusSchema,
+    ConsentUpdateSchema,
+    DeleteAccountSchema,
+    LearningGoalSchema,
+    LearningGoalStatusSchema,
+    RequestEmailChangeSchema,
+    AccentPreferenceSchema,
+    UpdateProfileSchema,
+    UpdateAccentPreferenceSchema,
+    UpdateRoleSchema,
+    VerifyEmailChangeSchema,
+)
+from services import otp_service
+from services.accent_calibration_service import get_user_accent_preference, update_user_accent_preference
+from utils.email_utils import send_email_change_otp
 from utils.jwt_utils import get_access_cookie_options, get_refresh_cookie_options
 
 AVATAR_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "avatars")
@@ -22,6 +39,8 @@ AVATAR_ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
 AVATAR_SIZE = 512
 AVATAR_QUALITY = 85
 AVATAR_MAX_PIXELS = 40_000_000  # 40Mpx guards decompression-bomb style images before resize work
+CURRENT_PRIVACY_POLICY_VERSION = "MVP Release Version 1.0"
+CONSENT_DB_RETRIES = 2
 
 def _serialize(user) -> dict:
     return {
@@ -30,29 +49,187 @@ def _serialize(user) -> dict:
         "name": user.name,
         "avatarUrl": user.avatarUrl,
         "role": user.role,
+        "learningGoal": user.learningGoal,
+        "learningGoalSet": user.learningGoalSet,
+        "isConsented": user.isConsented,
+        "consentVersion": user.consentVersion,
+        "consentAcceptedAt": user.consentAcceptedAt.isoformat() if user.consentAcceptedAt else None,
         "createdAt": user.createdAt.isoformat(),
     }
 
 
 # ── Self-service profile ─────────────────────────────────────────────────────
+def _consent_status(user) -> ConsentStatusSchema:
+    is_current = (
+        user.isConsented
+        and user.consentVersion == CURRENT_PRIVACY_POLICY_VERSION
+        and user.consentAcceptedAt is not None
+    )
+    return ConsentStatusSchema(
+        is_consented=is_current,
+        consent_version=user.consentVersion,
+        consent_accepted_at=user.consentAcceptedAt,
+    )
+
+
+async def _with_consent_retry(operation):
+    last_error = None
+    for attempt in range(CONSENT_DB_RETRIES + 1):
+        try:
+            return await operation()
+        except Exception as exc:
+            last_error = exc
+            if attempt >= CONSENT_DB_RETRIES:
+                raise
+            await asyncio.sleep(0.2 * (attempt + 1))
+    raise last_error
+
+
 async def get_profile(user_id: str = Depends(require_auth)):
     user = await db.user.find_unique(where={"id": user_id})
     if not user:
         return JSONResponse(status_code=404, content={"error": "User not found"})
     return {"user": _serialize(user)}
 
-async def update_profile(payload: UpdateProfileSchema, user_id: str = Depends(require_auth)):
-    data: UserUpdateInput = {}
-    if payload.name is not None:
-        data["name"] = payload.name
-    if payload.email is not None:
-        existing = await db.user.find_unique(where={"email": payload.email})
-        if existing and existing.id != user_id:
-            return JSONResponse(status_code=409, content={"error": "Email already registered"})
-        data["email"] = payload.email
 
-    user = await db.user.update(where={"id": user_id}, data=data)
+async def get_consent(user_id: str = Depends(require_auth)):
+    user = await db.user.find_unique(where={"id": user_id})
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+
+    return _consent_status(user)
+
+
+async def update_consent(payload: ConsentUpdateSchema, user_id: str = Depends(require_auth)):
+    if payload.policy_version != CURRENT_PRIVACY_POLICY_VERSION:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "The privacy policy changed while you were reviewing it.",
+                "latest_policy_version": CURRENT_PRIVACY_POLICY_VERSION,
+            },
+        )
+
+    if not payload.is_consented:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Consent is required to use Speeky."},
+        )
+
+    existing = await db.user.find_unique(where={"id": user_id})
+    if not existing:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+
+    now = datetime.now(timezone.utc)
+    async def write_consent():
+        user = await db.user.update(
+            where={"id": user_id},
+            data={
+                "isConsented": True,
+                "consentVersion": CURRENT_PRIVACY_POLICY_VERSION,
+                "consentAcceptedAt": existing.consentAcceptedAt or now,
+            },
+        )
+        return user
+
+    try:
+        user = await _with_consent_retry(write_consent)
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Could not save consent right now. Please retry in a moment."},
+        )
+
+    return {"consent": _consent_status(user)}
+
+
+async def update_profile(payload: UpdateProfileSchema, user_id: str = Depends(require_auth)):
+    user = await db.user.update(where={"id": user_id}, data={"name": payload.name})
     return {"user": _serialize(user)}
+
+
+# ── Learning goal (US-08 signup selection, US-10 later edits) ─────────────────
+# Its own route rather than a field on UpdateProfileSchema: signup's goal step and
+# the profile page's Learning Goal card both submit the goal alone, and
+# UpdateProfileSchema.name is required.
+async def get_learning_goal(user_id: str = Depends(require_auth)):
+    user = await db.user.find_unique(where={"id": user_id})
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    return LearningGoalStatusSchema(
+        learning_goal=user.learningGoal, learning_goal_set=user.learningGoalSet
+    )
+
+
+async def set_learning_goal(payload: LearningGoalSchema, user_id: str = Depends(require_auth)):
+    # learningGoalSet flips true here regardless of whether this is the pre-US-08
+    # onboarding fallback, the signup goal step, or a later profile edit — all three
+    # are "the user has now made a real choice", which is the only thing this flag means.
+    user = await db.user.update(
+        where={"id": user_id},
+        data={"learningGoal": payload.learning_goal, "learningGoalSet": True},
+    )
+    return {"user": _serialize(user)}
+
+
+# ── Email change (OTP-gated) ─────────────────────────────────────────────────
+async def request_email_change(
+    payload: RequestEmailChangeSchema, user_id: str = Depends(require_auth)
+):
+    user = await db.user.find_unique(where={"id": user_id})
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    if payload.email == user.email:
+        return JSONResponse(
+            status_code=400, content={"error": "That's already your email address"}
+        )
+
+    existing = await db.user.find_unique(where={"email": payload.email})
+    if existing:
+        return JSONResponse(status_code=409, content={"error": "Email already registered"})
+
+    code = await otp_service.create_pending_email_change(user_id, payload.email)
+    await send_email_change_otp(payload.email, code)
+    return {"message": "A verification code has been sent to your new email address."}
+
+
+async def verify_email_change(
+    payload: VerifyEmailChangeSchema, user_id: str = Depends(require_auth)
+):
+    new_email = await otp_service.verify_pending_email_change(user_id, payload.code)
+    if not new_email:
+        return JSONResponse(
+            status_code=400, content={"error": "Invalid or expired verification code"}
+        )
+
+    # Re-check: the address may have been claimed elsewhere while this code was pending
+    existing = await db.user.find_unique(where={"email": new_email})
+    if existing and existing.id != user_id:
+        return JSONResponse(status_code=409, content={"error": "Email already registered"})
+
+    user = await db.user.update(where={"id": user_id}, data={"email": new_email})
+    await otp_service.clear_pending_email_change(user_id)
+    return {"user": _serialize(user)}
+
+async def get_accent_preference(user_id: str = Depends(require_auth)):
+    pref, sub_dialect, notice = await get_user_accent_preference(user_id)
+    return AccentPreferenceSchema(
+        accent_model_preference=pref,
+        sub_dialect_preference=sub_dialect,
+        notice=notice,
+    )
+
+async def set_accent_preference(payload: UpdateAccentPreferenceSchema, user_id: str = Depends(require_auth)):
+    pref, sub_dialect, notice = await update_user_accent_preference(
+        user_id, payload.accent_model_preference, payload.sub_dialect_preference
+    )
+    return AccentPreferenceSchema(
+        accent_model_preference=pref,
+        sub_dialect_preference=sub_dialect,
+        notice=notice,
+    )
+
+
 
 def _process_avatar(contents: bytes) -> bytes:
     """
@@ -128,7 +305,7 @@ async def delete_account(
     user = await db.user.find_unique(where={"id": user_id})
     if not user:
         return JSONResponse(status_code=404, content={"error": "User not found"})
-    elif user.role == Role.ADMIN:
+    elif user.role in (Role.ADMIN, Role.SUPER_ADMIN):
         return JSONResponse(status_code=403, content={"error": "Cannot delete admin account"})
     
     valid = await run_in_threadpool(
@@ -148,20 +325,88 @@ async def delete_account(
     return response
 
 
-# ── Admin ─────────────────────────────────────────────────────────────────────
-async def list_users(_admin_id: str = Depends(require_admin)):
-    users = await db.user.find_many(order={"createdAt": "desc"})
-    return {"users": [_serialize(u) for u in users]}
+# ── Super Admin: user directory + role management ──────────────────────────────
+# PAD-US-01-style scoping, minus the full analytics dashboard (out of scope for this
+# pass) — only the account-privilege surface the user explicitly asked for: view
+# every user/admin, promote/revoke, and a safe single-Super-Admin ownership transfer.
+USERS_PAGE_SIZE_DEFAULT = 10
+USERS_PAGE_SIZE_MAX = 50
+
+
+async def list_users(
+    page: int = 1,
+    page_size: int = USERS_PAGE_SIZE_DEFAULT,
+    role: Optional[str] = None,
+    search: Optional[str] = None,
+    _super_admin_id: str = Depends(require_super_admin),
+):
+    page = max(1, page)
+    page_size = max(1, min(USERS_PAGE_SIZE_MAX, page_size))
+
+    where: dict = {}
+    if role:
+        if role not in ("USER", "ADMIN", "SUPER_ADMIN"):
+            return JSONResponse(status_code=400, content={"error": "Invalid role filter"})
+        where["role"] = role
+    if search:
+        where["OR"] = [
+            {"name": {"contains": search, "mode": "insensitive"}},
+            {"email": {"contains": search, "mode": "insensitive"}},
+        ]
+
+    total = await db.user.count(where=where)
+    users = await db.user.find_many(
+        where=where, order={"createdAt": "desc"}, skip=(page - 1) * page_size, take=page_size,
+    )
+    return {
+        "users": [_serialize(u) for u in users],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 async def update_user_role(
-    target_user_id: str, payload: UpdateRoleSchema, _admin_id: str = Depends(require_admin)
+    target_user_id: str, payload: UpdateRoleSchema, _super_admin_id: str = Depends(require_super_admin)
 ):
+    """Promote USER<->ADMIN only. SUPER_ADMIN is never a valid target role here —
+    ownership only moves via transfer_super_admin's atomic swap — and a SUPER_ADMIN
+    can't be revoked through this generic endpoint either (E-05: would zero out the
+    role with no successor already assigned; use transfer instead, which always
+    leaves exactly one Super Admin standing)."""
     user = await db.user.find_unique(where={"id": target_user_id})
     if not user:
         return JSONResponse(status_code=404, content={"error": "User not found"})
+    if user.role == Role.SUPER_ADMIN:
+        return JSONResponse(
+            status_code=409,
+            content={"error": "Use the transfer action to move Super Admin ownership, not a direct role change."},
+        )
 
     updated = await db.user.update(
         where={"id": target_user_id}, data={"role": Role(payload.role)}
     )
     return {"user": _serialize(updated)}
+
+
+async def transfer_super_admin(target_user_id: str, super_admin_id: str = Depends(require_super_admin)):
+    """Atomically hands Super Admin ownership to another account: the acting Super
+    Admin is demoted to ADMIN and the target is promoted to SUPER_ADMIN in one
+    transaction, so the invariant "exactly one Super Admin at all times" (E-05)
+    never has a gap — no intermediate state with zero or two."""
+    if target_user_id == super_admin_id:
+        return JSONResponse(status_code=400, content={"error": "You already are the Super Admin"})
+
+    target = await db.user.find_unique(where={"id": target_user_id})
+    if not target:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    if target.role == Role.SUPER_ADMIN:
+        return JSONResponse(status_code=409, content={"error": "That account already is the Super Admin"})
+
+    async with db.tx() as transaction:
+        await transaction.user.update(where={"id": super_admin_id}, data={"role": Role.ADMIN})
+        new_super_admin = await transaction.user.update(
+            where={"id": target_user_id}, data={"role": Role.SUPER_ADMIN}
+        )
+
+    return {"user": _serialize(new_super_admin)}

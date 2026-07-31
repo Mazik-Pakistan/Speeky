@@ -85,6 +85,7 @@ export function submitCoachingSession(
   });
 }
 
+
 export function sendRoleplayTurn(sessionId: string, message: string) {
   return api<RoleplayTurnResult>(`/coaching/${sessionId}/turn`, {
     method: "POST",
@@ -96,4 +97,23 @@ export function getCoachingSession(sessionId: string) {
   return api<CoachingResult & { prompt: string; submission: string | null }>(
     `/coaching/${sessionId}`
   );
+}
+
+// Raw session state — used to resume an in-progress roleplay (the ?resume= query
+// param flow), where the caller needs the actual turns, not the graded-result shape
+// getCoachingSession() above returns (only meaningful once a session is COMPLETED).
+export interface CoachingSessionState {
+  session_id: string;
+  scenario: string;
+  label: string;
+  roleplay: boolean;
+  turns: { role: "user" | "assistant"; content: string }[];
+  input_mode: "text" | "audio";
+  status: string;
+  prompt: string;
+  submission: string | null;
+}
+
+export function getCoachingSessionState(sessionId: string) {
+  return api<CoachingSessionState>(`/coaching/${sessionId}`);
 }

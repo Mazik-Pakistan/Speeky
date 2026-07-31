@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from services.conversation_service import (
+    agent_send_message,
     check_topic,
     delete_memory_fact,
     end_session,
@@ -12,6 +13,7 @@ from services.conversation_service import (
     set_memory_opt_out,
     start_session,
     text_to_speech,
+    voice_socket,
 )
 
 router = APIRouter()
@@ -24,6 +26,10 @@ router.add_api_route("/sessions", list_sessions, methods=["GET"])
 router.add_api_route("/sessions/{session_id}/messages", send_message, methods=["POST"])
 router.add_api_route("/sessions/{session_id}/end", end_session, methods=["POST"])
 router.add_api_route("/sessions/{session_id}/transcript", get_transcript, methods=["GET"])  # AIC-US-02
+
+# Voice mode: WebSocket transport straight to this backend (backend/lib/voice_ws.py)
+router.add_api_websocket_route("/sessions/{session_id}/voice-ws", voice_socket)
+router.add_api_route("/internal/sessions/{session_id}/agent-message", agent_send_message, methods=["POST"])
 
 # cross-session personalization memory
 router.add_api_route("/memory", list_memory_facts, methods=["GET"])

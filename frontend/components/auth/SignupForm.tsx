@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { toast } from "react-toastify";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -10,7 +10,12 @@ import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { resendSignupOtp, signup, verifySignupOtp } from "@/lib/auth";
 import { useAuth } from "@/contexts/AuthContext";
-import { LEARNING_GOALS, setLearningGoal, type LearningGoal } from "@/lib/goals";
+import {
+  LEARNING_GOALS,
+  saveLearningGoal,
+  type LearningGoal,
+} from "@/lib/goals";
+import { LegalModal } from "@/components/common/LegalModal";
 import {
   EMAIL_DOMAIN_ERROR,
   NAME_RULE_ERROR,
@@ -46,7 +51,8 @@ const MAX_RESENDS = 3;
 function validate(values: SignupFieldValues) {
   const errors: Partial<Record<keyof SignupFieldValues, string>> = {};
 
-  const fullName = `${values.firstName.trim()} ${values.lastName.trim()}`.trim();
+  const fullName =
+    `${values.firstName.trim()} ${values.lastName.trim()}`.trim();
   if (!values.firstName.trim()) {
     errors.firstName = "First name is required.";
   }
@@ -81,11 +87,14 @@ function validate(values: SignupFieldValues) {
 }
 
 /**
- * Three-step signup: (1) credentials, (2) mandatory learning-goal selection
- * (US-08 AC), (3) email OTP verification — the backend creates no account
- * and no session until the emailed code is verified (signup only queues a
- * pending row + sends the code). Resend is gated client-side: 60s cooldown,
- * 3 resends max per signup attempt (the backend itself has no such limit).
+ * Three-step signup: (1) credentials, (2) email OTP verification, (3) mandatory
+ * learning-goal selection (US-08 AC). The backend creates no account and no
+ * session until the emailed code is verified (signup only queues a pending row +
+ * sends the code), so the goal step MUST come after verification — there is no
+ * user row to attach it to before then. Once verified, the goal is PATCHed onto
+ * the real profile (users.learningGoal) rather than kept client-side.
+ * Resend is gated client-side: 60s cooldown, 3 resends max per signup attempt
+ * (the backend itself has no such limit).
  *
  * Google/Apple SSO (also called for in US-08) has no backend support at
  * all (no OAuth routes exist), so those buttons are shown disabled rather
@@ -94,7 +103,9 @@ function validate(values: SignupFieldValues) {
 export function SignupForm({ onSubmit }: SignupFormProps) {
   const router = useRouter();
   const { setUser } = useAuth();
-  const [step, setStep] = React.useState<"credentials" | "goal" | "otp">("credentials");
+  const [step, setStep] = React.useState<"credentials" | "otp" | "goal">(
+    "credentials",
+  );
   const [values, setValues] = React.useState<SignupFieldValues>({
     firstName: "",
     lastName: "",
@@ -110,6 +121,7 @@ export function SignupForm({ onSubmit }: SignupFormProps) {
   const [agreedToTerms, setAgreedToTerms] = React.useState(false);
   const [agreeTouched, setAgreeTouched] = React.useState(false);
   const [goal, setGoal] = React.useState<LearningGoal | null>(null);
+  const [legalType, setLegalType] = React.useState<"terms" | "privacy" | null>(null);
 
   const [otp, setOtp] = React.useState("");
   const [otpError, setOtpError] = React.useState<string | null>(null);
@@ -140,7 +152,7 @@ export function SignupForm({ onSubmit }: SignupFormProps) {
     setTouched((prev) => ({ ...prev, [field]: true }));
   }
 
-  function handleContinue(event: React.FormEvent<HTMLFormElement>) {
+  async function handleContinue(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setTouched({
       firstName: true,
@@ -156,20 +168,18 @@ export function SignupForm({ onSubmit }: SignupFormProps) {
       return;
     }
 
-    setFormError(null);
-    setStep("goal");
-  }
-
-  async function handleRequestOtp() {
-    if (!goal) return;
-
-    const fullName = `${values.firstName.trim()} ${values.lastName.trim()}`.trim();
+    const fullName =
+      `${values.firstName.trim()} ${values.lastName.trim()}`.trim();
 
     try {
       setIsSubmitting(true);
       setFormError(null);
       if (onSubmit) {
-        await onSubmit({ fullName, email: values.email.trim(), password: values.password });
+        await onSubmit({
+          fullName,
+          email: values.email.trim(),
+          password: values.password,
+        });
       } else {
         await signup({
           name: fullName,
@@ -180,14 +190,17 @@ export function SignupForm({ onSubmit }: SignupFormProps) {
         setCooldown(RESEND_COOLDOWN_SECONDS);
       }
     } catch (error) {
-      setFormError(error instanceof ApiError ? error.message : "Something went wrong. Please try again.");
+      setFormError(
+        error instanceof ApiError
+          ? error.message
+          : "Something went wrong. Please try again.",
+      );
     } finally {
       setIsSubmitting(false);
     }
   }
 
   async function handleVerifyOtp() {
-    if (!goal) return;
     if (otp.trim().length !== OTP_LENGTH) {
       setOtpError(`Enter the ${OTP_LENGTH}-character code from your email.`);
       return;
@@ -200,13 +213,40 @@ export function SignupForm({ onSubmit }: SignupFormProps) {
         email: values.email.trim(),
         code: otp.trim().toUpperCase(),
       });
-      setLearningGoal(user.id, goal);
+      // Account + session now exist. Log the user in here (rather than after the
+      // goal step) so the goal PATCH below is an authenticated call, and so a
+      // user who closes the tab mid-goal-step is still signed up.
       setUser(user);
-      router.push("/dashboard");
+      setStep("goal");
     } catch (error) {
-      setOtpError(error instanceof ApiError ? error.message : "Something went wrong. Please try again.");
+      setOtpError(
+        error instanceof ApiError
+          ? error.message
+          : "Something went wrong. Please try again.",
+      );
     } finally {
       setIsVerifying(false);
+    }
+  }
+
+  async function handleSaveGoal() {
+    if (!goal) return;
+
+    setIsSubmitting(true);
+    setFormError(null);
+    try {
+      const { user } = await saveLearningGoal(goal);
+      setUser(user);
+      toast.success(`Welcome to Speeky, ${user.name.split(" ")[0]}!`);
+      router.push("/dashboard");
+    } catch (error) {
+      setFormError(
+        error instanceof ApiError
+          ? error.message
+          : "Couldn't save your goal. Please try again.",
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -219,8 +259,13 @@ export function SignupForm({ onSubmit }: SignupFormProps) {
       await resendSignupOtp(values.email.trim());
       setResendCount((prev) => prev + 1);
       setCooldown(RESEND_COOLDOWN_SECONDS);
+      toast.success("Verification code resent.");
     } catch (error) {
-      setOtpError(error instanceof ApiError ? error.message : "Couldn't resend the code. Try again shortly.");
+      setOtpError(
+        error instanceof ApiError
+          ? error.message
+          : "Couldn't resend the code. Try again shortly.",
+      );
     } finally {
       setIsResending(false);
     }
@@ -231,7 +276,9 @@ export function SignupForm({ onSubmit }: SignupFormProps) {
     return (
       <div className="flex flex-col gap-5">
         <div>
-          <p className="text-sm font-medium text-foreground">Check your email</p>
+          <p className="text-sm font-medium text-foreground">
+            Check your email
+          </p>
           <p className="text-sm text-muted-foreground">
             We sent a {OTP_LENGTH}-character code to{" "}
             <strong className="text-foreground">{values.email.trim()}</strong>.
@@ -281,7 +328,7 @@ export function SignupForm({ onSubmit }: SignupFormProps) {
 
         <button
           type="button"
-          onClick={() => setStep("goal")}
+          onClick={() => setStep("credentials")}
           className="text-sm font-medium text-muted-foreground hover:text-foreground"
         >
           Back
@@ -295,10 +342,12 @@ export function SignupForm({ onSubmit }: SignupFormProps) {
       <div className="flex flex-col gap-5">
         <div>
           <p className="text-sm font-medium text-foreground">
-            What&apos;s your main goal?
+            Email verified — what&apos;s your main goal?
           </p>
           <p className="text-sm text-muted-foreground">
-            We&apos;ll tailor your dashboard and recommended scenarios around it.
+            We&apos;ll save this to your profile and tailor your dashboard,
+            daily challenge, and recommended scenarios around it. You can change
+            it any time from your profile.
           </p>
         </div>
 
@@ -315,142 +364,170 @@ export function SignupForm({ onSubmit }: SignupFormProps) {
                   : "border-border hover:bg-surface",
               )}
             >
-              <p className="text-sm font-semibold text-foreground">{option.label}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+              <p className="text-sm font-semibold text-foreground">
+                {option.label}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {option.description}
+              </p>
             </button>
           ))}
         </div>
 
         {formError ? <p className="text-sm text-danger">{formError}</p> : null}
 
-        <div className="flex items-center gap-3">
-          <Button
-            type="button"
-            size="lg"
-            loading={isSubmitting}
-            disabled={!goal}
-            onClick={handleRequestOtp}
-            className="flex-1"
-          >
-            Continue
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="lg"
-            disabled={isSubmitting}
-            onClick={() => setStep("credentials")}
-          >
-            Back
-          </Button>
-        </div>
+        {/* No "Back" here: the account and session already exist by this point,
+            so there is nothing to go back to. */}
+        <Button
+          type="button"
+          size="lg"
+          loading={isSubmitting}
+          disabled={!goal}
+          onClick={handleSaveGoal}
+        >
+          Finish Setup
+        </Button>
       </div>
     );
   }
 
   return (
-    <form onSubmit={handleContinue} noValidate className="flex flex-col gap-5">
-      <div className="grid grid-cols-2 gap-3">
-        <Button type="button" variant="outline" disabled className="justify-center">
-          Google (coming soon)
-        </Button>
-        <Button type="button" variant="outline" disabled className="justify-center">
-          Apple (coming soon)
-        </Button>
-      </div>
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span className="h-px flex-1 bg-border" />
-        or sign up with email
-        <span className="h-px flex-1 bg-border" />
-      </div>
+    <>
+      <form
+        onSubmit={handleContinue}
+        noValidate
+        className="flex flex-col gap-5"
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            disabled
+            className="justify-center"
+          >
+            Google (coming soon)
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled
+            className="justify-center"
+          >
+            Apple (coming soon)
+          </Button>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          or sign up with email
+          <span className="h-px flex-1 bg-border" />
+        </div>
 
-      <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4">
+          <Input
+            label="First name"
+            autoComplete="given-name"
+            value={values.firstName}
+            onChange={(event) => handleChange("firstName", event.target.value)}
+            onBlur={() => handleBlur("firstName")}
+            error={touched.firstName ? errors.firstName : undefined}
+          />
+          <Input
+            label="Last name"
+            autoComplete="family-name"
+            value={values.lastName}
+            onChange={(event) => handleChange("lastName", event.target.value)}
+            onBlur={() => handleBlur("lastName")}
+            error={touched.lastName ? errors.lastName : undefined}
+          />
+        </div>
+
         <Input
-          label="First name"
-          autoComplete="given-name"
-          value={values.firstName}
-          onChange={(event) => handleChange("firstName", event.target.value)}
-          onBlur={() => handleBlur("firstName")}
-          error={touched.firstName ? errors.firstName : undefined}
+          label="Email"
+          type="email"
+          autoComplete="email"
+          value={values.email}
+          onChange={(event) => handleChange("email", event.target.value)}
+          onBlur={() => handleBlur("email")}
+          error={touched.email ? errors.email : undefined}
+          hint={
+            touched.email && !errors.email
+              ? undefined
+              : "Gmail or Outlook addresses only."
+          }
         />
+
         <Input
-          label="Last name"
-          autoComplete="family-name"
-          value={values.lastName}
-          onChange={(event) => handleChange("lastName", event.target.value)}
-          onBlur={() => handleBlur("lastName")}
-          error={touched.lastName ? errors.lastName : undefined}
+          label="Password"
+          type="password"
+          autoComplete="new-password"
+          value={values.password}
+          onChange={(event) => handleChange("password", event.target.value)}
+          onBlur={() => handleBlur("password")}
+          error={touched.password ? errors.password : undefined}
+          hint={
+            touched.password && !errors.password
+              ? undefined
+              : "8+ characters, upper + lowercase, a digit, and a special character."
+          }
         />
-      </div>
 
-      <Input
-        label="Email"
-        type="email"
-        autoComplete="email"
-        value={values.email}
-        onChange={(event) => handleChange("email", event.target.value)}
-        onBlur={() => handleBlur("email")}
-        error={touched.email ? errors.email : undefined}
-        hint={touched.email && !errors.email ? undefined : "Gmail or Outlook addresses only."}
+        <Input
+          label="Confirm password"
+          type="password"
+          autoComplete="new-password"
+          value={values.confirmPassword}
+          onChange={(event) =>
+            handleChange("confirmPassword", event.target.value)
+          }
+          onBlur={() => handleBlur("confirmPassword")}
+          error={touched.confirmPassword ? errors.confirmPassword : undefined}
+        />
+
+        {formError ? <p className="text-sm text-danger">{formError}</p> : null}
+
+        <Button type="submit" size="lg" className="mt-2" loading={isSubmitting}>
+          Continue
+        </Button>
+
+        <Checkbox
+          checked={agreedToTerms}
+          onChange={(event) => setAgreedToTerms(event.target.checked)}
+          error={agreeError}
+          label={
+            <>
+              I agree to Speeky&apos;s{" "}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setLegalType("terms");
+                }}
+                className="font-medium text-primary hover:text-primary-hover focus:outline-none focus:underline"
+              >
+                Terms &amp; Conditions
+              </button>{" "}
+              and{" "}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setLegalType("privacy");
+                }}
+                className="font-medium text-primary hover:text-primary-hover focus:outline-none focus:underline"
+              >
+                Privacy Policy
+              </button>
+              .
+            </>
+          }
+        />
+      </form>
+
+      <LegalModal
+        open={!!legalType}
+        onClose={() => setLegalType(null)}
+        type={legalType}
       />
-
-      <Input
-        label="Password"
-        type="password"
-        autoComplete="new-password"
-        value={values.password}
-        onChange={(event) => handleChange("password", event.target.value)}
-        onBlur={() => handleBlur("password")}
-        error={touched.password ? errors.password : undefined}
-        hint={
-          touched.password && !errors.password
-            ? undefined
-            : "8+ characters, upper + lowercase, a digit, and a special character."
-        }
-      />
-
-      <Input
-        label="Confirm password"
-        type="password"
-        autoComplete="new-password"
-        value={values.confirmPassword}
-        onChange={(event) =>
-          handleChange("confirmPassword", event.target.value)
-        }
-        onBlur={() => handleBlur("confirmPassword")}
-        error={touched.confirmPassword ? errors.confirmPassword : undefined}
-      />
-
-      {formError ? <p className="text-sm text-danger">{formError}</p> : null}
-
-      <Button type="submit" size="lg" className="mt-2">
-        Continue
-      </Button>
-
-      <Checkbox
-        checked={agreedToTerms}
-        onChange={(event) => setAgreedToTerms(event.target.checked)}
-        error={agreeError}
-        label={
-          <>
-            I agree to Speeky&apos;s{" "}
-            <Link
-              href="/terms"
-              className="font-medium text-primary hover:text-primary-hover"
-            >
-              Terms &amp; Conditions
-            </Link>{" "}
-            and{" "}
-            <Link
-              href="/privacy"
-              className="font-medium text-primary hover:text-primary-hover"
-            >
-              Privacy Policy
-            </Link>
-            .
-          </>
-        }
-      />
-    </form>
+    </>
   );
 }

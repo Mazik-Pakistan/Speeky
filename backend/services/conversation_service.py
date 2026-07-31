@@ -25,18 +25,36 @@ What is deliberately NOT handled here (client/device concerns, not backend):
     session_type="conversation" and this session's id into those existing endpoints.
 """
 
+import logging
+import os
 import re
 import time
 import uuid
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
-from fastapi import Depends
+from fastapi import Depends, Header, WebSocket
 from fastapi.responses import JSONResponse, Response
 
-from lib import ai_client, grammar_checker, kv_store, llm_client, pii, prompts, session_scorer, tts_client
+from lib import (
+    ai_client,
+    explore_sessions,
+    grammar_checker,
+    kv_store,
+    llm_client,
+    pii,
+    prompts,
+    session_scorer,
+    tts_client,
+    voice_ws,
+)
 from lib.session_scorer import AudioFeatures
-from middlewares.auth_middleware import require_auth
+from lib.code_switch.code_switch_text import TextCodeSwitchDetector
+from services.code_switch_service import log_detected_word
+from middlewares.auth_middleware import require_auth, ws_require_auth
+from middlewares.error_handler import AuthError
 from prisma.enums import LearningLevel
 from schemas.conversation_schemas import (
     MemoryOptOutSchema,
@@ -292,6 +310,10 @@ async def _start_session(user_id: str, req: StartConversationSchema) -> Dict:
     elif req.topic_key not in prompts.TOPICS:
         raise InvalidSubmissionError(f"Unknown topic_key. Valid: {list(prompts.TOPICS)}")
 
+    # A fresh start supersedes any other open Explore-group session this user has
+    # running elsewhere — see lib/explore_sessions.py.
+    await explore_sessions.supersede_open_explore_sessions(user_id)
+
     level, level_source, stale_warning = await _resolve_level(user_id, req.level_override)
 
     session_id = _new_id("conv")
@@ -304,6 +326,7 @@ async def _start_session(user_id: str, req: StartConversationSchema) -> Dict:
         "show_corrections": req.show_corrections,
         "turns": [], "status": "active",
         "message_timestamps": [], "gibberish_strikes": 0, "pii_reminder_shown": False,
+        "room_name": session_id,  # LiveKit room for voice mode — session_id is already "conv_..."
         "started_at": now, "completed_at": None,
     }
 
@@ -366,7 +389,22 @@ async def _send_message(user_id: str, session_id: str, req: SendMessageSchema) -
     session["turns"].append({
         "role": "user", "content": redacted_text, "input_mode": req.input_mode,
         "correction_chip": chip_result["chip"], "created_at": now,
+        # Word-level timing from the STT agent, kept for pronunciation_coach's
+        # word-level scoring/highlighting (US-79) — the turn itself doesn't use it.
+        "duration_seconds": req.audio_features.duration_seconds if req.audio_features else 0.0,
+        "word_timings": req.audio_features.word_timings if req.audio_features else [],
     })
+
+    # PDG-US-11: if this session was started via the Daily Challenge redirect, this is
+    # what starts that challenge's 5-minute timer (first prompt only — a no-op on later
+    # turns or on sessions with no linked challenge). Best-effort: a daily-challenge
+    # bookkeeping failure must never break sending a conversation message.
+    try:
+        from services.daily_challenge_service import on_conversation_prompt
+
+        await on_conversation_prompt(user_id, session_id, now)
+    except Exception as exc:
+        logger.warning("Daily Challenge prompt-timer update failed silently: %s", exc)
 
     if session_ended:
         reply = "Let's pause here for now — thanks for practicing today."
@@ -385,10 +423,67 @@ async def _send_message(user_id: str, session_id: str, req: SendMessageSchema) -
                              "correction_chip": None, "created_at": _now()})
     await kv_store.store.update(NAMESPACE, session_id, session)
 
+    # US-152: Silently detect code-switched words and log to the personal word list.
+    # Runs after the reply is already saved — never blocks the user-facing response.
+    if not session_ended and llm_client.is_configured():
+        try:
+            detector = TextCodeSwitchDetector()
+            detection = await detector.detect(text)
+            for flagged in detection.get("flagged", []):
+                await log_detected_word(
+                    user_id=user_id,
+                    word=flagged["token"],
+                    english_equivalent=flagged["suggestion"],
+                    context_sentence=text,
+                )
+        except Exception as exc:
+            # Never let detection errors surface to the user.
+            logger.warning("US-152 code-switch detection failed silently: %s", exc)
+
     return {
         "session_id": session_id, "reply": reply, "level": session["level"],
         "correction_chip": chip_result["chip"], "flags": flags, "session_ended": session_ended,
     }
+
+
+# ── Voice mode: WebSocket transport (backend/lib/voice_ws.py) ──────────────────
+# "timed": Conversation attaches word_timings + duration_seconds to the outgoing
+# message for pronunciation scoring (US-79/74) — the only caller that needs those.
+async def voice_socket(websocket: WebSocket, session_id: str):
+    user_id = await ws_require_auth(websocket)
+    if user_id is None:
+        return  # ws_require_auth already closed the socket
+
+    gate = await _require_access(user_id)
+    if gate:
+        await websocket.close(code=4403, reason="Feature not accessible")
+        return
+
+    try:
+        await _get_session(session_id, user_id)
+    except SessionNotFoundError:
+        await websocket.close(code=4404, reason="Conversation session not found")
+        return
+
+    await websocket.accept()
+    # partial_interval_s: live-preview text streams in while the user keeps talking,
+    # instead of nothing appearing until the utterance ends.
+    await voice_ws.serve(websocket, mode="timed", partial_interval_s=1.2)
+
+
+async def _agent_send_message(session_id: str, req: SendMessageSchema, secret: Optional[str]) -> Dict:
+    """Internal-only intake for a trusted server-side caller — not a browser caller, so
+    it can't hold the user's auth cookie. Trusted via a shared secret instead, and the
+    user_id is read from the session itself, never taken from the caller."""
+    expected = os.environ.get("INTERNAL_AGENT_SECRET")
+    if not expected or secret != expected:
+        raise AuthError("Invalid internal secret")
+
+    session = await kv_store.store.get(NAMESPACE, session_id)
+    if session is None:
+        raise SessionNotFoundError(f"Conversation session {session_id} not found")
+
+    return await _send_message(session["user_id"], session_id, req)
 
 
 # ── end session: score + memory extraction ─────────────────────────────────────
@@ -402,16 +497,24 @@ async def _end_session(user_id: str, session_id: str) -> Dict:
     has_audio_turn = any(t["input_mode"] == "audio" for t in user_turns)
 
     if has_audio_turn:
-        # Hybrid-mode duration/pronunciation aren't tracked per-turn here (no raw audio
-        # signal stored between turns) — scored as an audio session using the combined
-        # transcript, matching the AUDIO pipeline's text-derived fallback path.
-        scored = session_scorer.score_audio_session(AudioFeatures(transcript=full_text))
+        per_turn = [
+            AudioFeatures(transcript=t["content"], duration_seconds=t.get("duration_seconds", 0.0),
+                          word_timings=t.get("word_timings", []))
+            for t in user_turns
+        ]
+        scored = session_scorer.score_audio_session(session_scorer.aggregate_audio_turns(per_turn))
     else:
         scored = session_scorer.score_text_session(full_text)
 
     duration = (_now() - session["started_at"]).total_seconds()
     session["status"] = "completed"
     session["completed_at"] = _now()
+    # Persisted (not just returned) so a later accent re-baseline request (US-84)
+    # can reuse this session's real scores instead of re-scoring or accepting
+    # client-supplied numbers.
+    session["fluency_score"] = scored.fluency_score
+    session["vocabulary_score"] = scored.vocabulary_score
+    session["pronunciation_score"] = scored.pronunciation_score
     await kv_store.store.update(NAMESPACE, session_id, session)
 
     new_facts = await _extract_and_store_facts(user_id, [t["content"] for t in user_turns])
@@ -428,6 +531,19 @@ async def _end_session(user_id: str, session_id: str) -> Dict:
         ))
     except Exception:
         pass  # best-effort — conversation scoring must not fail because memory logging did
+
+    # US-84/US-83: record this session's real scores as an accent-assessment drill
+    # so accent-profile staleness/dispute have real data to operate on.
+    try:
+        from services.accent_assessment_service import record_conversation_drill
+
+        await record_conversation_drill(
+            user_id, session_id,
+            {"fluency": scored.fluency_score, "vocabulary": scored.vocabulary_score,
+             "pronunciation": scored.pronunciation_score},
+        )
+    except Exception:
+        pass  # best-effort — conversation scoring must not fail because accent logging did
 
     return {
         "session_id": session_id, "status": session["status"], "duration_seconds": duration,
@@ -515,6 +631,14 @@ async def start_session(payload: StartConversationSchema, user_id: str = Depends
 
 async def send_message(session_id: str, payload: SendMessageSchema, user_id: str = Depends(require_auth)):
     return await _send_message(user_id, session_id, payload)
+
+
+async def agent_send_message(
+    session_id: str,
+    payload: SendMessageSchema,
+    x_internal_secret: Optional[str] = Header(None),
+):
+    return await _agent_send_message(session_id, payload, x_internal_secret)
 
 
 async def end_session(session_id: str, user_id: str = Depends(require_auth)):

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useParams } from "next/navigation";
+import { toast } from "react-toastify";
 import { Flag, Info, MessageSquare, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
@@ -43,15 +44,16 @@ export default function PeerReviewPage() {
     try {
       await reportComment(commentId);
       refresh();
+      toast.success("Comment reported.");
     } catch {
-      // Non-critical.
+      toast.error("Couldn't report this comment. Try again.");
     }
   }
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
       <div>
-        <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
+        <h1 className="font-serif text-h1 font-semibold text-foreground">
           Peer Review
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">

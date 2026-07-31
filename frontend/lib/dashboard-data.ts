@@ -1,15 +1,15 @@
 import {
   Briefcase,
-  Coffee,
   Compass,
-  FileText,
   Home,
-  Plane,
-  Target,
+  Map,
+  Mic,
+  Sparkles,
   TrendingUp,
   User,
-  UtensilsCrossed,
   Users,
+  Volume2,
+  Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -21,17 +21,16 @@ export interface DashboardNavLink {
 
 export const DASHBOARD_NAV_LINKS: DashboardNavLink[] = [
   { label: "Home", href: "/dashboard", icon: Home },
-  { label: "Actionable Script", href: "/dashboard/script", icon: FileText },
-  { label: "Targeted Drills", href: "/dashboard/adaptive-difficulty", icon: Target },
   { label: "Explore", href: "/dashboard/explore", icon: Compass },
+  { label: "Learning Path", href: "/dashboard/learning-path", icon: Map },
+  { label: "Pronunciation", href: "/dashboard/pronunciation", icon: Volume2 },
+  { label: "Accent", href: "/dashboard/accent-assessment", icon: Sparkles },
+  { label: "Public Speaking", href: "/dashboard/public-speaking", icon: Mic },
+  { label: "Rewrite Lab", href: "/dashboard/rewrite", icon: Wand2 },
   { label: "Progress", href: "/dashboard/progress", icon: TrendingUp },
   { label: "Profile", href: "/dashboard/profile", icon: User },
 ];
 
-export const DAILY_STREAK = {
-  days: 14,
-  message: "You're in the top 5% of learners this month. Keep the momentum going!",
-};
 
 export interface MasteryMetric {
   id: string;
@@ -109,16 +108,19 @@ export const RECENT_SCENARIOS: RecentScenario[] = [
 ];
 
 // ── Explore / "Choose Your Mission" catalog ─────────────────────────────────
-// Mirrors UI Designs/choose_your_mission/code.html. Purely presentational —
-// there is no scenario-catalog or AI-practice-session backend yet, so
-// "Start Practicing" only goes somewhere real for the one scenario wired to
-// the Meeting Prep feedback mockup (US-66); the rest are inert previews.
-
-export type ExploreCategory = "Work" | "Social" | "Travel" | "Daily Life";
+// Mirrors UI Designs/choose_your_mission/code.html. "Choose Your Mission" itself
+// is now populated from the real Scenario-Based Learning catalog (see lib/scenario.ts
+// getScenarios(), wired in app/dashboard/explore/page.tsx) — these two static
+// entries are kept because they point at other, already-shipped features
+// (Interview Coach's own card lives above in the "AI Coach" section; Meeting Prep
+// is a separate mockup feature, US-66) rather than Scenario-Based Learning.
+//
+// CM-US-05: categories are admin-managed and fetched dynamically (see
+// lib/categories.ts + lib/icon-map.ts) — no longer a hardcoded union here.
 
 export interface ExploreScenario {
   id: string;
-  category: ExploreCategory;
+  category: string;
   icon: LucideIcon;
   title: string;
   description: string;
@@ -127,14 +129,7 @@ export interface ExploreScenario {
   href?: string;
 }
 
-export const EXPLORE_CATEGORIES: ExploreCategory[] = [
-  "Work",
-  "Social",
-  "Travel",
-  "Daily Life",
-];
-
-export const EXPLORE_SCENARIOS: ExploreScenario[] = [
+export const EXPLORE_STATIC_SCENARIOS: ExploreScenario[] = [
   {
     id: "job-interview-prep",
     category: "Work",
@@ -144,6 +139,18 @@ export const EXPLORE_SCENARIOS: ExploreScenario[] = [
       "Practice answering tough behavioral questions and negotiating your offer.",
     difficulty: "High Difficulty",
     featured: true,
+    href: "/dashboard/interview-coach",
+  },
+  {
+    id: "public-speaking-coach",
+    category: "Work",
+    icon: Mic,
+    title: "Public Speaking Coach",
+    description:
+      "Practice speeches and presentations with AI feedback on pacing, tone, and delivery.",
+    difficulty: "Intermediate",
+    featured: true,
+    href: "/dashboard/public-speaking",
   },
   {
     id: "meeting-new-colleagues",
@@ -154,29 +161,5 @@ export const EXPLORE_SCENARIOS: ExploreScenario[] = [
       "Navigate small talk, agenda framing, and professional introductions.",
     difficulty: "Intermediate",
     href: "/dashboard/explore/meeting-prep",
-  },
-  {
-    id: "ordering-coffee",
-    category: "Social",
-    icon: Coffee,
-    title: "Ordering Coffee",
-    description: "Master quick interactions and custom orders at a busy cafe.",
-    difficulty: "Beginner",
-  },
-  {
-    id: "airport-check-in",
-    category: "Travel",
-    icon: Plane,
-    title: "Airport Check-in",
-    description: "Practice logistics, handling delays, and gate changes.",
-    difficulty: "Essential",
-  },
-  {
-    id: "dinner-with-friends",
-    category: "Daily Life",
-    icon: UtensilsCrossed,
-    title: "Dinner with Friends",
-    description: "Practice casual storytelling and natural conversational flow.",
-    difficulty: "Intermediate",
   },
 ];

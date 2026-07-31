@@ -257,6 +257,38 @@ def _proxy_pronunciation(speech_rate: float, filled_pauses: int, pause_count: in
     return round(min(100.0, max(0.0, score)), 2)
 
 
+def aggregate_audio_turns(turns: List[AudioFeatures]) -> AudioFeatures:
+    """Combine per-turn audio signal into one AudioFeatures for whole-session scoring.
+
+    Derives timing per turn (not by concatenating word_timings across turns) because a
+    turn boundary includes the AI's reply — gluing raw timings would count that gap as
+    user pause time.
+    """
+    audio_turns = [t for t in turns if t.duration_seconds > 0 or t.word_timings]
+    full_transcript = " ".join(t.transcript for t in turns if t.transcript)
+    if not audio_turns:
+        return AudioFeatures(transcript=full_transcript)
+
+    total_duration = sum(t.duration_seconds for t in audio_turns)
+    total_words = 0
+    total_pauses = 0
+    pause_time = 0.0
+    for t in audio_turns:
+        timing = _derive_timing(t)
+        total_words += len(t.transcript.split())
+        total_pauses += timing["pause_count"]
+        pause_time += timing["pause_count"] * timing["mean_pause_duration"]
+
+    return AudioFeatures(
+        transcript=full_transcript,
+        duration_seconds=total_duration,
+        speech_rate=(total_words / total_duration) if total_duration > 0 else 0.0,
+        pause_count=total_pauses,
+        mean_pause_duration=(pause_time / total_pauses) if total_pauses > 0 else 0.0,
+        filled_pauses=count_filled_pauses(full_transcript),
+    )
+
+
 def score_audio_session(features: AudioFeatures) -> ScoredSession:
     """Score a spoken submission (AUDIO pipeline) from agent-supplied features."""
     timing = _derive_timing(features)

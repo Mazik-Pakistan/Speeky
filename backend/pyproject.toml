@@ -21,12 +21,25 @@ dependencies = [
     "pypdf>=5.0",
     "python-docx>=1.1",
     "piper-tts>=1.3",
+    "g2p-en>=2.1.0",
+    "nltk>=3.9",
+    "langdetect>=1.0.9",
+    # Pronunciation Coach (US-95) / Accent Assessment (US-93, US-89) -- also power the
+    # voice-ws realtime pipeline (lib/voice_ws.py): faster-whisper for transcription,
+    # silero-vad for utterance segmentation -- see lib/recording_engine.py for how they
+    # fit together for the upload-based flows.
+    "faster-whisper>=1.2.1",
+    "av>=13.0",
+    "silero-vad>=5.1",
+    "praat-parselmouth>=0.4.7",
+    "numpy>=1.26",
+    "pronouncing>=0.2.0",
 ]
 
 [tool.taskipy.tasks]
 dev = "uvicorn main:app --reload"
-dev-all = "uvicorn main:app --reload --host 0.0.0.0 --port 8000"
 start = "uvicorn main:app"
+start-all = "uvicorn main:app --reload --host 0.0.0.0 --port 8000"
 
 prisma-generate = "prisma generate"
 prisma-migrate = "prisma migrate dev"
@@ -36,10 +49,11 @@ prisma-studio = "prisma studio"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [dependency-groups]
 dev = [
-    "taskipy>=1.14.1",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "taskipy>=1.2.1",
 ]

@@ -21,14 +21,14 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import Depends
+from fastapi import Depends, WebSocket
 from fastapi.responses import JSONResponse
 from prisma import Json
 
-from lib import llm_client, prompts, session_scorer
+from lib import explore_sessions, llm_client, prompts, session_scorer, voice_ws
 from lib.prisma_client import db
 from lib.session_scorer import AudioFeatures, ScoredSession
-from middlewares.auth_middleware import require_auth
+from middlewares.auth_middleware import require_auth, ws_require_auth
 from prisma.enums import CoachingInputMode, CoachingScenario, CoachingStatus
 from schemas.coaching_schemas import (
     RoleplayTurnSchema,
@@ -63,6 +63,7 @@ _SLANG = {
 _AGGRESSIVE = [
     "you didn't", "you did not do your job", "you failed", "your fault", "you never",
     "you always", "incompetent", "unacceptable", "this is ridiculous", "what is wrong with you",
+    "idiot", "loser" , "stupid"
 ]
 _OVER_PROMISE = ["i guarantee", "100%", "i promise it will never", "whatever it takes",
                  "anything you want", "we'll do everything"]
@@ -516,6 +517,10 @@ async def start_session(payload: StartCoachingSchema, user_id: str = Depends(req
     if not meta:
         return JSONResponse(status_code=400, content={"error": "Unknown scenario"})
 
+    # A fresh start supersedes any other open Explore-group session this user has
+    # running elsewhere — see lib/explore_sessions.py.
+    await explore_sessions.supersede_open_explore_sessions(user_id)
+
     input_mode = _resolve_input_mode(scenario_key, payload.input_mode)
     prompt_text = payload.prompt or (meta["prompts"][0] if meta["prompts"] else meta["label"])
 
@@ -604,6 +609,15 @@ async def submit_session(session_id: str, payload: SubmitCoachingSchema,
 
     result = build_result(scenario_key, input_mode, grader, scored, rule_flags)
 
+    # CSC-US-01: drop proper-noun false positives (E-01) from the code_switch flags and
+    # log the genuine code-switched words into the learner's practice list (TC-003). Done
+    # before the flags are persisted/returned so "Lahore" is never shown as a violation.
+    from services import code_switch_service
+
+    result["flags"] = await code_switch_service.track_from_flags(
+        user_id, result["flags"], submission
+    )
+
     status = CoachingStatus.COMPLETED
     if any(f.get("type") == "aggressive_tone" for f in result["flags"]) and scenario_key == "client_communication":
         status = CoachingStatus.ENDED_EARLY  # WEC-US-10 E-01 de-escalation cut-off
@@ -637,6 +651,26 @@ async def submit_session(session_id: str, payload: SubmitCoachingSchema,
     result["session_id"] = session_id
     result["status"] = status.value
     return result
+
+
+# ── Voice mode: WebSocket transport ──────────────────
+async def voice_socket(websocket: WebSocket, session_id: str):
+    user_id = await ws_require_auth(websocket)
+    if user_id is None:
+        return  # ws_require_auth already closed the socket
+
+    gate = await _require_access(user_id)
+    if gate:
+        await websocket.close(code=4403, reason="Feature not accessible")
+        return
+
+    session = await db.coachingsession.find_unique(where={"id": session_id})
+    if not session or session.userId != user_id:
+        await websocket.close(code=4404, reason="Coaching session not found")
+        return
+
+    await websocket.accept()
+    await voice_ws.serve(websocket, mode="transcript")
 
 
 async def roleplay_turn(session_id: str, payload: RoleplayTurnSchema,
@@ -714,9 +748,14 @@ async def get_session(session_id: str, user_id: str = Depends(require_auth)):
     session = await db.coachingsession.find_unique(where={"id": session_id})
     if not session or session.userId != user_id:
         return JSONResponse(status_code=404, content={"error": "Coaching session not found"})
+    scenario_key = SCENARIO_ENUM_TO_KEY[session.scenario]
+    meta = scenario_meta(scenario_key)
     return {
         "session_id": session.id,
-        "scenario": SCENARIO_ENUM_TO_KEY[session.scenario],
+        "scenario": scenario_key,
+        "label": meta["label"] if meta else scenario_key,
+        "roleplay": meta["roleplay"] if meta else False,
+        "turns": session.turns,  # roleplay chat history — used to resume mid-conversation
         "input_mode": "audio" if session.inputMode == CoachingInputMode.AUDIO else "text",
         "status": session.status,
         "prompt": session.promptText,

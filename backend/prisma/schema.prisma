@@ -8,9 +8,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// SUPER_ADMIN: exactly one account holds this at any time (enforced in
+// user_service.transfer_super_admin's atomic swap, never a plain role PATCH).
 enum Role {
   USER
   ADMIN
+  SUPER_ADMIN
 }
 
 enum AssessmentStatus {
@@ -37,11 +40,11 @@ enum PromptKind {
 // Workplace English Coach scenarios (WEC-US-08 .. WEC-US-12). Keys mirror
 // lib/prompts.WORKPLACE_SCENARIOS.
 enum CoachingScenario {
-  EMAIL_WRITING          // WEC-US-09 (text)
-  CLIENT_COMMUNICATION   // WEC-US-10 (audio roleplay)
-  MEETING_COMMUNICATION  // WEC-US-11 (audio roleplay)
-  PRESENTATION_PREP      // WEC-US-12 (audio)
-  GENERAL_WORKPLACE      // WEC-US-08 (text or audio)
+  EMAIL_WRITING // (text)
+  CLIENT_COMMUNICATION // (audio roleplay)
+  MEETING_COMMUNICATION // (audio roleplay)
+  PRESENTATION_PREP // (audio)
+  GENERAL_WORKPLACE // (text or audio)
 }
 
 enum CoachingInputMode {
@@ -52,28 +55,330 @@ enum CoachingInputMode {
 enum CoachingStatus {
   IN_PROGRESS
   COMPLETED
-  ENDED_EARLY   // e.g. WEC-US-10 E-01 de-escalation cut-off
+  ENDED_EARLY // e.g. WEC-US-10 E-01 de-escalation cut-off
 }
 
+// Accent Assessment (US-93). REJECTED_* means the reading wasn't scored at all — see
+// lib/recording_engine.RejectionReason for the reason-code vocabulary these mirror.
+enum AccentAssessmentStatus {
+  COMPLETED
+  REJECTED_NO_SPEECH
+  REJECTED_TOO_QUIET
+  REJECTED_TOO_NOISY
+  REJECTED_INCOMPLETE
+  REJECTED_MULTIPLE_VOICES
+  REJECTED_DISTORTION
+}
+
+// Public Speaking Coach speech types (PSC-US-01, PSC-US-03, PSC-US-04, PSC-US-05, PSC-US-06, PSC-US-07)
+// Using String instead of enum for flexibility
+// Values: business_pitch, casual_event, motivational, classroom, ted_talk
+
+// Public Speaking Coach input modes
+// Using String instead of enum for flexibility
+// Values: audio, text
+
+// Public Speaking Coach session status
+// Using String instead of enum for flexibility
+// Values: in_progress, completed, qa_phase
+
 model User {
-  id                   String                @id @default(cuid())
-  email                String                @unique
-  password             String
-  name                 String
-  avatarUrl            String                @default("user.webp")
-  role                 Role                  @default(USER)
-  assessmentStatus     AssessmentStatus      @default(UNASSESSED)
-  learningLevel        LearningLevel?
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  passwordResetTokens  PasswordResetToken[]
-  refreshTokens        RefreshToken[]
-  baselineAssessments  BaselineAssessment[]
-  reassessmentRequests ReassessmentRequest[]
-  promptLogs           PromptLog[]
-  coachingSessions     CoachingSession[]
+  id                     String                   @id @default(cuid())
+  email                  String                   @unique
+  password               String
+  name                   String
+  avatarUrl              String                   @default("user.webp")
+  role                   Role                     @default(USER)
+  assessmentStatus       AssessmentStatus         @default(UNASSESSED)
+  learningLevel          LearningLevel?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  passwordResetTokens    PasswordResetToken[]
+  refreshTokens          RefreshToken[]
+  baselineAssessments    BaselineAssessment[]
+  reassessmentRequests   ReassessmentRequest[]
+  promptLogs             PromptLog[]
+  coachingSessions       CoachingSession[]
+  scenarioSessions       ScenarioSession[]
+  accentAssessments      AccentAssessment[]
+  pronunciationAttempts  PronunciationAttempt[]
+  accentProfiles         AccentProfile[]
+  vocabularyProgress     VocabularyWordProgress[]
+  publicSpeakingSessions PublicSpeakingSession[]
+  // US-80/US-90/ACC-US-09: Live Speech Verification & Local Accent Calibration (Sub-Dialects)
+  livenessFlags          LivenessFlag[]
+  accentModelPreference  String                   @default("generic_global")
+  subDialectPreference   String?
+  livenessFlagCount      Int                      @default(0)
+  isAccentSuspended      Boolean                  @default(false)
+  codeSwitchWords        CodeSwitchWord[]
+  // PSA-US-05/08: Rewrite vocabulary mastery + spoken script-practice history.
+  rewriteVocab           RewriteVocabWord[]
+  scriptPracticeSessions ScriptPracticeSession[]
+  scriptPracticeHistory  ScriptPracticeHistory[]
+
+  // PDG-US-15: lifetime cumulative practice time (seconds) credited via
+  // practice_time_service pings, and the milestone-hour thresholds already
+  // celebrated (so a repeat crossing doesn't re-trigger the modal).
+  lifetimePracticeSeconds Float @default(0)
+  unlockedMilestoneHours  Int[] @default([])
+
+  // PDG-US-11: Daily Challenge streak. lastChallengeDate is the LOCAL calendar date
+  // (YYYY-MM-DD, from the session's start time) of the last qualifying completion — stored
+  // as a string so day-boundary math is timezone-honest without a stored offset. streakBadges
+  // holds the day-milestones already awarded (7, 30) so a repeat crossing doesn't re-award.
+  currentStreak     Int     @default(0)
+  longestStreak     Int     @default(0)
+  lastChallengeDate String?
+  streakBadges      Int[]   @default([])
+
+  // US-08/US-10: learning goal chosen right after email verification and editable
+  // from the profile page. String (not an enum) to match how the other
+  // preference columns above are stored — allowed values live in
+  // schemas.user_schemas.LEARNING_GOALS. Defaults instead of being nullable so
+  // goal-selection abandonment (E-03) still lands on a usable profile.
+  learningGoal String @default("improve_english")
+  // Pre-US-08 accounts never went through the goal step, so learningGoal above sits at
+  // its placeholder default and can't be told apart from a real "improve_english"
+  // choice. This flag is the real signal: false = never chosen, forces the blocking
+  // onboarding prompt on next login (Frontend LearningGoalGate). Defaults false so the
+  // migration backfills every existing row as "needs the prompt"; set_learning_goal
+  // flips it true the first time a user (new or backfilled) actually saves a choice.
+  learningGoalSet Boolean @default(false)
+
+  // PRIV-US-02: required consent gate for the current policy version.
+  isConsented       Boolean   @default(false)
+  consentVersion    String?
+  consentAcceptedAt DateTime?
 
   @@map("users")
+}
+
+model CodeSwitchWord {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word        String // the code-switched (non-English) word, lowercased
+  suggestion  String // English equivalent surfaced to the learner
+  count       Int      @default(1) // times the learner has used this word
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@unique([userId, word])
+  @@index([userId, lastSeenAt])
+  @@map("code_switch_words")
+}
+
+// Scenario-Based Learning session --> String (not an enum, unlike CoachingScenario) because admins can add custom
+// scenarios at runtime without a migration — built-ins live in
+// lib/prompts.SBL_SCENARIOS, custom ones in the CustomScenario table, keyed
+// "custom:<id>". targetVocab is snapshotted at session start so a later admin
+// edit to a custom scenario doesn't retroactively change grading.
+model ScenarioSession {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scenarioKey      String
+  status           String   @default("in_progress") // in_progress | completed | ended_early
+  turns            Json     @default("[]") // [{role, content}]
+  targetVocab      String[]
+  // full scenario_meta snapshot taken at start_session, so a live
+  // in_progress session keeps using its opening persona/prompt/rules even if an
+  // admin edits (or rolls back) the underlying CustomScenario mid-conversation.
+  // Null on rows created before this field existed — send_turn/_finalize_session
+  // fall back to a live scenario_meta() lookup in that case.
+  scenarioMeta     Json?
+  vocabUsed        String[] @default([])
+  silenceStreak    Int      @default(0) // consecutive silent/empty turns — 3 in a row auto-closes
+  aggressionStreak Int      @default(0) // consecutive aggressive/cursing turns — 2 in a row ends the scenario
+
+  politenessScore Float?
+  vocabularyScore Float?
+  confidenceScore Float?
+  metGoal         Boolean? // only meaningful for goal_type "negotiation" scenarios
+
+  flags        Json      @default("[]")
+  summary      String?
+  tips         String[]  @default([]) // 2-3 concrete next-time tips (rich feedback)
+  originalLine String? // learner's weakest turn, verbatim — paired with polishedLine below
+  polishedLine String? // that turn rewritten stronger ("Post-Session Actionable Script")
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+
+  @@index([userId])
+  @@map("scenario_sessions")
+}
+
+// PDG-US-12: per-word usage tracking that feeds the Vocabulary Growth
+// Drill-down's Mastered (useCount >= 3) / Learning (1-2) lists. Incremented
+// from scenario_service.end_session's existing vocab-coverage grading — no
+// separate grading pass. needsReview flags a Mastered word that was targeted
+// again in a later session but not used (E-03 de-ranking).
+model VocabularyWordProgress {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word        String
+  useCount    Int      @default(0)
+  status      String   @default("learning") // learning | mastered
+  needsReview Boolean  @default(false)
+  lastUsedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, word])
+  @@index([userId, status])
+  @@map("vocabulary_word_progress")
+}
+
+// PSA-US-08 (US-160): advanced vocabulary a rewrite introduced, and whether the
+// learner later uses it naturally. Deliberately a SEPARATE table from
+// VocabularyWordProgress (PDG-US-12) so injected-but-unused words never pollute
+// that feature's Mastered/Learning drill-down. Mastery mirrors the same
+// useCount >= 3 threshold. status: introduced (0 uses) | practicing (1-2) | mastered (3+).
+// Usage is detected by scanning the learner's own existing practice sessions
+// (scenario/coaching) read-only — no writes to other features' code.
+model RewriteVocabWord {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word           String
+  useCount       Int       @default(0)
+  status         String    @default("introduced") // introduced | practicing | mastered
+  needsReview    Boolean   @default(false) // E-02: introduced but still unused -> recommend again
+  introducedFrom String? // short context blurb from the rewrite it came from
+  introducedAt   DateTime  @default(now())
+  lastUsedAt     DateTime?
+
+  @@unique([userId, word])
+  @@index([userId, status])
+  @@map("rewrite_vocab_words")
+}
+
+// PSA-US-05 (US-157): Script Practice Confidence Score. The learner reads a
+// rewrite/script aloud twice — a cold baseline, then again after practicing —
+// and we store both AI-measured confidence scores plus the gain. Confidence
+// comes from the SAME existing audio pipeline (session_scorer.score_audio_session
+// + confidence_engine), so both reads are scored on one yardstick. Isolated
+// table — no writes to any other feature.
+model ScriptPracticeSession {
+  id                 String    @id @default(cuid())
+  userId             String
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scriptText         String
+  context            String?
+  status             String    @default("awaiting_baseline") // awaiting_baseline | practicing | completed
+  baselineConfidence Float?
+  baselineTranscript String?
+  baselineDuration   Float?
+  afterConfidence    Float?
+  afterTranscript    String?
+  afterDuration      Float?
+  confidenceGain     Float?
+  createdAt          DateTime  @default(now())
+  completedAt        DateTime?
+
+  @@index([userId, status])
+  @@map("script_practice_sessions")
+}
+
+// PSA-US-05 (US-157) history: one append-only row per successful Final Read
+// evaluation, so re-recording the final read preserves every prior result
+// (the live ScriptPracticeSession only holds the current baseline/after state).
+// Paginated server-side by (userId, createdAt) — never loaded whole.
+model ScriptPracticeHistory {
+  id                 String   @id @default(cuid())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId          String?
+  scriptText         String
+  context            String?
+  baselineConfidence Float
+  afterConfidence    Float
+  confidenceGain     Float
+  baselineMetrics    Json     @default("{}") // {confidence, fluency, vocabulary, pronunciation}
+  afterMetrics       Json     @default("{}")
+  feedback           String?
+  createdAt          DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("script_practice_history")
+}
+
+// Admin-authored Scenario-Based Learning scenarios. Merged with the
+// built-in lib/prompts.SBL_SCENARIOS at read time. Publishing is just a DB write —
+// no app update needed, per the story's acceptance criteria.
+//
+// CM-US-02/06/07: qualityScore+confidenceScore come from ONE combined LLM call
+// (content_scoring_service.evaluate_template — quality and confidence are judged
+// off the same artifact, so one prompt covers both instead of two round-trips).
+// readinessScore is a deterministic checklist that also requires those two scores
+// to exist and clear a minimum bar. All three are advisory (shown to the admin,
+// never block saving) — there's no separate draft/publish state in this app.
+model CustomScenario {
+  id            String    @id @default(cuid())
+  title         String    @unique
+  category      String // validated against Category.name at the service layer (not DB FK — built-ins reuse the same strings without a row)
+  persona       String
+  intent        String    @default("") // short blurb shown on the learner's pre-scenario screen
+  systemPrompt  String
+  openingLine   String?
+  targetVocab   String[]
+  goalType      String    @default("roleplay") // roleplay | negotiation
+  safetyMode    Boolean   @default(false) // breaks character on a medical-emergency phrase
+  corporateTone Boolean   @default(true)
+  difficulty    String    @default("intermediate") // beginner | intermediate | advanced (CM-US-07)
+  status        String    @default("ACTIVE") // ACTIVE | ARCHIVED — delete = archive first (CM-US-04 E-03)
+  archivedAt    DateTime? // set on archive, cleared on restore — grace window before auto-purge, see _purge_idle_archives
+  version       Int       @default(1) // bumped on every edit + every rollback
+  sandboxTested Boolean   @default(false) // set from the admin's "Test this scenario" pass (CM-US-01 acceptance)
+
+  qualityScore       Int?
+  qualityFeedback    Json? // {breakdown: {...5 dims}, recommendations: [...]}
+  confidenceScore    Int?
+  confidenceFeedback Json? // {explanation, warnings: [...]}
+  scoredAt           DateTime?
+  readinessScore     Int?
+  readinessChecklist Json? // {ready, checks: {...}, missing: [...]}
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions CustomScenarioVersion[]
+
+  @@map("custom_scenarios")
+}
+
+// CM-US-04: one snapshot per prior version, written just before every edit/rollback
+// applies — so "Rollback" always has something to restore to, and rolling back is
+// itself non-destructive (the pre-rollback state gets snapshotted too).
+model CustomScenarioVersion {
+  id         String         @id @default(cuid())
+  scenarioId String
+  scenario   CustomScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  version    Int
+  snapshot   Json // full field snapshot at that version (see scenario_service._snapshot_fields)
+  createdAt  DateTime       @default(now())
+
+  @@index([scenarioId, version])
+  @@map("custom_scenario_versions")
+}
+
+// CM-US-05: category taxonomy. Not a DB FK on CustomScenario.category — built-in
+// SBL_SCENARIOS (lib/prompts.py) reuse these same name strings without a row of
+// their own, so membership is checked at the service layer instead. `protected`
+// categories are the 4 seeded at migration time that built-ins depend on — they
+// can be renamed/re-iconed but never deleted.
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  icon      String   @default("folder") // key into frontend's curated lucide icon map
+  order     Int      @default(0)
+  protected Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("categories")
 }
 
 // Workplace English Coach session (WEC-US-08 .. WEC-US-12).
@@ -81,16 +386,16 @@ model User {
 // several turns held in `turns`). Scores are confidence-first: professionalTone is the
 // headline metric, independent of grammar.
 model CoachingSession {
-  id                 String            @id @default(cuid())
-  userId             String
-  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scenario           CoachingScenario
-  inputMode          CoachingInputMode
-  status             CoachingStatus    @default(IN_PROGRESS)
-  promptText         String                                     // scenario brief shown to user
-  submission         String?                                    // final text / transcript graded
-  turns              Json              @default("[]")            // roleplay dialogue [{role,content}]
-  audioFeatures      Json?                                      // AUDIO pipeline signal snapshot
+  id            String            @id @default(cuid())
+  userId        String
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scenario      CoachingScenario
+  inputMode     CoachingInputMode
+  status        CoachingStatus    @default(IN_PROGRESS)
+  promptText    String // scenario brief shown to user
+  submission    String? // final text / transcript graded
+  turns         Json              @default("[]") // roleplay dialogue [{role,content}]
+  audioFeatures Json? // AUDIO pipeline signal snapshot
 
   // Scores (0-100). pronunciationScore stays null for the TEXT pipeline.
   professionalTone   Float?
@@ -101,11 +406,11 @@ model CoachingSession {
   pronunciationScore Float?
   confidenceScore    Float?
 
-  feedback           Json?                                      // grader summary + polished version
-  flags              Json              @default("[]")           // exception-handling flags raised
-  metObjective       Boolean?
-  createdAt          DateTime          @default(now())
-  completedAt        DateTime?
+  feedback     Json? // grader summary + polished version
+  flags        Json      @default("[]") // exception-handling flags raised
+  metObjective Boolean?
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
 
   @@index([userId])
   @@map("coaching_sessions")
@@ -127,10 +432,91 @@ model BaselineAssessment {
   flagReason         String?
   startedAt          DateTime       @default(now())
   completedAt        DateTime?
+  // BAS-US-01 E-02: set when _complete_assessment's scoring step throws after all
+  // responses are already saved — completedAt stays null so the row still reads as
+  // "in progress" everywhere else, but get_results_summary uses this flag to retry
+  // scoring instead of returning a flat "not completed" 400 forever.
+  scoringFailed      Boolean        @default(false)
+  // PDG-US-10 E-03: distinct from isFlagged/flagReason (integrity checks on the
+  // responses themselves) — records when progress_dashboard_service drops an
+  // out-of-range (>100 or <0) score from the visual aggregate, for review.
+  outlierFlags       Json           @default("[]")
 
   // Every gating/reassessment/trend query filters userId then sorts or filters on completedAt
   @@index([userId, completedAt])
   @@map("baseline_assessments")
+}
+
+// Pronunciation Coach (US-95). One row per (userId, sentenceId) — a retry UPDATES this
+// row (score replaced, never appended), per the story's "unlimited retries, score
+// updates each time" requirement. sentenceId keys into data/pronunciation_sentences.json,
+// not a DB foreign key (the sentence bank is static content, not user data).
+model PronunciationAttempt {
+  id                      String   @id @default(cuid())
+  userId                  String
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sentenceId              String
+  targetText              String
+  transcript              String
+  wordResults             Json // [{word, target_index, status, confidence}]
+  overallScore            Float
+  accentProfileTag        String? // US-90 Local Accent Calibration hook
+  attemptCount            Int      @default(1)
+  backgroundVoiceDetected Boolean  @default(false)
+  disfluencyDetected      Boolean  @default(false)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([userId, sentenceId])
+  @@index([userId])
+  @@map("pronunciation_attempts")
+}
+
+// Accent Assessment (US-93). One row per passage-reading attempt, history kept (like
+// BaselineAssessment) rather than overwritten, so a future re-calibration story has
+// something to compare against. REJECTED_* rows carry no scores — never a false baseline.
+model AccentAssessment {
+  id                 String                 @id @default(cuid())
+  userId             String
+  user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  passageId          String
+  monthIndex         Int
+  status             AccentAssessmentStatus
+  wordStressScore    Float
+  rejectionReason    String?
+  transcript         String?
+  pronunciationScore Float?
+  stressScore        Float?
+  rhythmScore        Float?
+  intonationScore    Float?
+  clarityScore       Float?
+  weakPoints         Json                   @default("[]")
+  createdAt          DateTime               @default(now())
+  completedAt        DateTime?
+
+  accentProfiles AccentProfile[]
+
+  @@index([userId, completedAt])
+  @@map("accent_assessments")
+}
+
+model AccentProfile {
+  id                 String           @id @default(cuid())
+  userId             String
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceAssessmentId String
+  sourceAssessment   AccentAssessment @relation(fields: [sourceAssessmentId], references: [id], onDelete: Cascade)
+  pronunciationScore Float
+  stressScore        Float
+  rhythmScore        Float
+  intonationScore    Float
+  clarityScore       Float
+  weakPoints         Json // [{issue, detail}]
+  exercises          Json             @default("[]")
+  createdAt          DateTime         @default(now())
+
+  @@index([userId, createdAt])
+  @@map("accent_profiles")
 }
 
 model ReassessmentRequest {
@@ -219,4 +605,59 @@ model SignupOtp {
   createdAt DateTime @default(now())
 
   @@map("signup_otps")
+}
+
+// Holds a pending email change until its emailed OTP (sent to the NEW address)
+// is verified — the user's real email isn't touched until then. Keyed by
+// userId (one pending change per account); re-requesting just overwrites it.
+model EmailChangeOtp {
+  userId    String   @id
+  newEmail  String
+  codeHash  String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("email_change_otps")
+}
+
+// Public Speaking Coach session (PSC-US-01, PSC-US-03, PSC-US-04, PSC-US-05, PSC-US-06, PSC-US-07, PSC-US-11, PSC-US-12, PSC-US-14)
+model PublicSpeakingSession {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  speechType     String // business_pitch, casual_event, motivational, classroom, ted_talk
+  inputMode      String // audio, text
+  status         String    @default("in_progress") // in_progress, completed, qa_phase
+  topic          String?
+  transcript     String?
+  scorecard      Json?
+  aiQuestion     String? // AI-generated Q&A question (PSC-US-12)
+  userQaResponse String? // User's Q&A response
+  qaScore        Json? // Q&A performance evaluation
+  audioFeatures  Json? // AUDIO pipeline signal snapshot (word_timings etc.) — PSC-US-08
+  outlierFlags   Json      @default("[]") // PDG-US-10 E-03: out-of-range scorecard scores dropped from dashboard aggregates
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@index([userId, completedAt])
+  @@map("public_speaking_sessions")
+}
+
+// US-80: Live Speech Verification (ACC-US-01). One row per flag raised against a user's
+// submission. Repeated flags (3+) trigger temporary suspension (isAccentSuspended on User).
+// appealed/appealPassed track the E-02 false-positive appeal workflow.
+model LivenessFlag {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  passageId    String?
+  sentenceId   String?
+  promptToken  String?
+  reason       String
+  appealed     Boolean  @default(false)
+  appealPassed Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("liveness_flags")
 }
