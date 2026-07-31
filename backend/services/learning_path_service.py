@@ -70,6 +70,7 @@ DEFAULT_PATHS = [
                 "passing_score": 60.0,
                 "content": "Introductory greetings and small talk.",
                 "content_version": 1,
+                "target_session_type": "coaching_meeting_communication",
             },
             {
                 "module_id": "mod_b2",
@@ -79,6 +80,7 @@ DEFAULT_PATHS = [
                 "passing_score": 60.0,
                 "content": "Drafting basic professional emails.",
                 "content_version": 1,
+                "target_session_type": "coaching_email_writing",
             },
             {
                 "module_id": "mod_b3",
@@ -88,6 +90,7 @@ DEFAULT_PATHS = [
                 "passing_score": 60.0,
                 "content": "Answering business calls confidently.",
                 "content_version": 1,
+                "target_session_type": "coaching_client_communication",
             },
         ],
     },
@@ -112,6 +115,7 @@ DEFAULT_PATHS = [
                 "passing_score": 65.0,
                 "content": "Expressing opinions clearly in team meetings.",
                 "content_version": 1,
+                "target_session_type": "coaching_meeting_communication",
             },
             {
                 "module_id": "mod_i2",
@@ -121,6 +125,7 @@ DEFAULT_PATHS = [
                 "passing_score": 65.0,
                 "content": "Delivering concise project progress updates.",
                 "content_version": 1,
+                "target_session_type": "coaching_client_communication",
             },
             {
                 "module_id": "mod_i3",
@@ -130,6 +135,7 @@ DEFAULT_PATHS = [
                 "passing_score": 65.0,
                 "content": "Addressing client concerns diplomatically.",
                 "content_version": 1,
+                "target_session_type": "coaching_client_communication",
             },
         ],
     },
@@ -154,6 +160,7 @@ DEFAULT_PATHS = [
                 "passing_score": 70.0,
                 "content": "Structuring persuasive executive decks.",
                 "content_version": 1,
+                "target_session_type": "coaching_presentation_prep",
             },
             {
                 "module_id": "mod_a2",
@@ -163,6 +170,7 @@ DEFAULT_PATHS = [
                 "passing_score": 70.0,
                 "content": "Navigating tough commercial terms.",
                 "content_version": 1,
+                "target_session_type": "coaching_client_communication",
             },
             {
                 "module_id": "mod_a3",
@@ -172,6 +180,7 @@ DEFAULT_PATHS = [
                 "passing_score": 70.0,
                 "content": "De-escalating high-severity workplace issues.",
                 "content_version": 1,
+                "target_session_type": "coaching_general_workplace",
             },
         ],
     },
@@ -185,6 +194,10 @@ async def ensure_default_paths_seeded():
         existing = await kv_store.store.get(PATHS_NS, pid)
         if not existing:
             await kv_store.store.create(PATHS_NS, pid, pdef)
+        else:
+            # Sync catalog definitions with updated target_session_type
+            await kv_store.store.update(PATHS_NS, pid, pdef)
+
 
 
 async def get_path_definition(path_id: str) -> Optional[Dict]:

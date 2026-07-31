@@ -40,6 +40,7 @@ import {
   checkPathCompletion,
   getCertification,
   getModuleSessionHref,
+  getModuleSessionLabel,
   type RecommendationResponse,
   type LearningPath,
   type LPModule,
@@ -600,7 +601,7 @@ function PathTab() {
                     {isAccessible && !isCompleted && (
                       <p className="text-xs text-primary/70 mt-0.5 flex items-center gap-1">
                         <ChevronRight className="h-3 w-3" />
-                        Launches Workplace English Coach practice session
+                        {getModuleSessionLabel(mod)}
                       </p>
                     )}
                   </div>
@@ -1000,14 +1001,127 @@ function MilestonesTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // PIECE 8 — Path Completion & Certification tab
 // ═══════════════════════════════════════════════════════════════════════════════
+function drawCertificateCanvas(cert: PathSummaryResponse, userName: string): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1600;
+  canvas.height = 1131;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+
+  // Background gradient
+  const bgGrad = ctx.createLinearGradient(0, 0, 1600, 1131);
+  bgGrad.addColorStop(0, "#0f172a");
+  bgGrad.addColorStop(0.5, "#1e1b4b");
+  bgGrad.addColorStop(1, "#0f172a");
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, 1600, 1131);
+
+  // Outer Gold Border
+  ctx.strokeStyle = "#f59e0b";
+  ctx.lineWidth = 12;
+  ctx.strokeRect(36, 36, 1528, 1059);
+
+  // Inner Gold Border
+  ctx.strokeStyle = "rgba(245, 158, 11, 0.4)";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(52, 52, 1496, 1027);
+
+  // Header - SPEEKY ACADEMY
+  ctx.fillStyle = "#fbbf24";
+  ctx.font = "bold 32px Georgia, serif";
+  ctx.textAlign = "center";
+  ctx.fillText("S P E E K Y   A C A D E M Y", 800, 150);
+
+  // Title
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 56px Georgia, serif";
+  ctx.fillText("CERTIFICATE OF COMPLETION", 800, 240);
+
+  ctx.fillStyle = "#94a3b8";
+  ctx.font = "24px sans-serif";
+  ctx.fillText("THIS IS PROUDLY PRESENTED TO", 800, 320);
+
+  // Learner Name
+  ctx.fillStyle = "#38bdf8";
+  ctx.font = "bold 60px Georgia, serif";
+  ctx.fillText(userName, 800, 410);
+
+  // Line
+  ctx.strokeStyle = "#38bdf8";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(500, 440);
+  ctx.lineTo(1100, 440);
+  ctx.stroke();
+
+  // Completion statement
+  ctx.fillStyle = "#cbd5e1";
+  ctx.font = "24px sans-serif";
+  ctx.fillText("for successfully completing the learning path", 800, 500);
+
+  // Path Title
+  ctx.fillStyle = "#f59e0b";
+  ctx.font = "bold 42px Georgia, serif";
+  ctx.fillText(cert.path_title, 800, 570);
+
+  // Metrics Box
+  ctx.fillStyle = "rgba(30, 41, 59, 0.8)";
+  ctx.strokeStyle = "rgba(245, 158, 11, 0.3)";
+  ctx.lineWidth = 2;
+  ctx.fillRect(300, 640, 1000, 180);
+  ctx.strokeRect(300, 640, 1000, 180);
+
+  // Metric 1
+  ctx.fillStyle = "#94a3b8";
+  ctx.font = "18px sans-serif";
+  ctx.fillText("PRACTICE TIME", 450, 690);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 32px Georgia, serif";
+  ctx.fillText(fmtSeconds(cert.total_practice_time_seconds), 450, 750);
+
+  // Metric 2
+  ctx.fillStyle = "#94a3b8";
+  ctx.font = "18px sans-serif";
+  ctx.fillText("CONFIDENCE SCORE", 800, 690);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 32px Georgia, serif";
+  ctx.fillText(`${cert.average_confidence_score.toFixed(1)} / 100`, 800, 750);
+
+  // Metric 3
+  ctx.fillStyle = "#94a3b8";
+  ctx.font = "18px sans-serif";
+  ctx.fillText("VOCABULARY MASTERED", 1150, 690);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 32px Georgia, serif";
+  ctx.fillText(`${cert.total_vocabulary_mastered} Words`, 1150, 750);
+
+  // Footer
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#64748b";
+  ctx.font = "18px monospace";
+  ctx.fillText(`Certificate ID: ${cert.certificate_id}`, 100, 980);
+
+  const issueDate = cert.completed_at ? new Date(cert.completed_at).toLocaleDateString() : new Date().toLocaleDateString();
+  ctx.textAlign = "right";
+  ctx.fillText(`Issued On: ${issueDate}`, 1500, 980);
+
+  // Verified Seal
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#f59e0b";
+  ctx.font = "bold 20px Georgia, serif";
+  ctx.fillText("★ OFFICIAL SPEEKY VERIFIED CERTIFICATE ★", 800, 980);
+
+  return canvas;
+}
+
 function CompletionTab() {
+  const { user } = useAuth();
   const [pathId, setPathId] = React.useState("beginner-path");
   const [check, setCheck] = React.useState<PathCompletionCheckResponse | null>(null);
   const [cert, setCert] = React.useState<PathSummaryResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [certLoading, setCertLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [copied, setCopied] = React.useState(false);
 
   async function handleCheck() {
     setLoading(true);
@@ -1040,32 +1154,42 @@ function CompletionTab() {
     }
   }
 
-  function handleCopyLink() {
+  function handleDownloadImage() {
     if (!cert) return;
-    navigator.clipboard.writeText(cert.shareable_card_data.certificate_url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+    const userName = user?.name || user?.email || "Speeky Learner";
+    const canvas = drawCertificateCanvas(cert, userName);
+    const dataUrl = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `speeky-certificate-${cert.certificate_id}.png`;
+    a.click();
   }
 
-  function handleSaveText() {
+  function handleDownloadPDF() {
     if (!cert) return;
-    const content = [
-      `Certificate: ${cert.shareable_card_data.title}`,
-      `Level: ${cert.shareable_card_data.level}`,
-      `Practice Time: ${fmtSeconds(cert.total_practice_time_seconds)}`,
-      `Avg Confidence: ${cert.average_confidence_score.toFixed(1)}/100`,
-      `Vocabulary Mastered: ${cert.total_vocabulary_mastered} words`,
-      `Certificate URL: ${cert.shareable_card_data.certificate_url}`,
-      `Certificate ID: ${cert.certificate_id}`,
-    ].join("\n");
-    const blob = new Blob([content], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `speeky-certificate-${cert.certificate_id}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const userName = user?.name || user?.email || "Speeky Learner";
+    const canvas = drawCertificateCanvas(cert, userName);
+    const dataUrl = canvas.toDataURL("image/png");
+
+    const printWin = window.open("", "_blank");
+    if (!printWin) return;
+    printWin.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Speeky Certificate - ${cert.certificate_id}</title>
+          <style>
+            @page { size: landscape; margin: 0; }
+            body { margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; background: #0f172a; }
+            img { max-width: 100%; max-height: 100vh; object-fit: contain; }
+          </style>
+        </head>
+        <body>
+          <img src="${dataUrl}" onload="window.print(); window.close();" />
+        </body>
+      </html>
+    `);
+    printWin.document.close();
   }
 
   return (
@@ -1182,24 +1306,25 @@ function CompletionTab() {
                 </p>
               </div>
 
-              {/* Share actions */}
+              {/* Download actions */}
               <div className="flex flex-wrap gap-2 justify-center">
-                <Button size="sm" variant="outline" onClick={handleCopyLink}>
-                  <Share2 className="h-3.5 w-3.5" />
-                  {copied ? "Link Copied!" : "Copy Share Link"}
-                </Button>
-                <Button size="sm" variant="outline" onClick={handleSaveText}>
+                <Button size="sm" onClick={handleDownloadImage}>
                   <Download className="h-3.5 w-3.5" />
-                  Save as Text
+                  Download Image (PNG)
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleDownloadPDF}>
+                  <Award className="h-3.5 w-3.5" />
+                  Download PDF Certificate
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Share your achievement on LinkedIn or with your team. Use the link or save the text summary — no platform share required.
+                Official verified certificate generated by Speeky Academy.
               </p>
             </div>
           </div>
         </div>
       )}
+
 
       {check?.is_complete && !cert && (
         <div className="flex justify-center">

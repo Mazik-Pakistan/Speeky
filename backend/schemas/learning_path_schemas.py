@@ -73,6 +73,7 @@ class ModuleSchema(BaseModel):
     passing_score: float = 60.0
     content: Optional[str] = ""
     content_version: int = 1
+    target_session_type: Optional[str] = "coaching_general_workplace"
 
 
 class AdminPathCreateRequest(BaseModel):

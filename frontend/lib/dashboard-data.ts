@@ -1,12 +1,10 @@
 import {
   Briefcase,
   Compass,
-  FileText,
   Home,
   Map,
   Mic,
   Sparkles,
-  Target,
   TrendingUp,
   User,
   Users,
@@ -23,8 +21,6 @@ export interface DashboardNavLink {
 
 export const DASHBOARD_NAV_LINKS: DashboardNavLink[] = [
   { label: "Home", href: "/dashboard", icon: Home },
-  { label: "Actionable Script", href: "/dashboard/script", icon: FileText },
-  { label: "Targeted Drills", href: "/dashboard/adaptive-difficulty", icon: Target },
   { label: "Explore", href: "/dashboard/explore", icon: Compass },
   { label: "Learning Path", href: "/dashboard/learning-path", icon: Map },
   { label: "Pronunciation", href: "/dashboard/pronunciation", icon: Volume2 },
@@ -34,6 +30,7 @@ export const DASHBOARD_NAV_LINKS: DashboardNavLink[] = [
   { label: "Progress", href: "/dashboard/progress", icon: TrendingUp },
   { label: "Profile", href: "/dashboard/profile", icon: User },
 ];
+
 
 export interface MasteryMetric {
   id: string;

@@ -10,7 +10,9 @@ export interface LPModule {
   passing_score: number;
   content: string;
   content_version: number;
+  target_session_type?: string;
 }
+
 
 export interface LearningPath {
   path_id: string;
@@ -285,41 +287,61 @@ export function getCertification(path_id: string): Promise<PathSummaryResponse> 
 export function getModuleSessionHref(pathId: string, module: LPModule): string {
   const id = module.module_id.toLowerCase();
   const title = module.title.toLowerCase();
+  const target = module.target_session_type?.toLowerCase();
   const passingScore = module.passing_score ?? 60;
 
   let baseRoute = "/dashboard/coaching/general_workplace";
 
-  if (id.includes("email") || title.includes("email")) {
-    baseRoute = "/dashboard/coaching/email_writing";
-  } else if (
-    id.includes("meeting") ||
-    title.includes("meeting") ||
-    title.includes("greetings") ||
-    title.includes("contribution")
-  ) {
-    baseRoute = "/dashboard/coaching/meeting_communication";
-  } else if (
-    id.includes("presentation") ||
-    title.includes("presentation") ||
-    title.includes("boardroom")
-  ) {
-    baseRoute = "/dashboard/coaching/presentation_prep";
-  } else if (
-    id.includes("client") ||
-    title.includes("client") ||
-    title.includes("phone") ||
-    title.includes("update")
-  ) {
-    baseRoute = "/dashboard/coaching/client_communication";
-  } else if (
-    id.includes("interview") ||
-    title.includes("interview") ||
-    title.includes("objection") ||
-    title.includes("negotiation")
-  ) {
-    baseRoute = "/dashboard/interview-coach";
-  } else if (id.includes("script") || title.includes("script")) {
-    baseRoute = "/dashboard/script";
+  if (target) {
+    if (target === "coaching_email_writing" || target === "email_writing") {
+      baseRoute = "/dashboard/coaching/email_writing";
+    } else if (target === "coaching_meeting_communication" || target === "meeting_communication") {
+      baseRoute = "/dashboard/coaching/meeting_communication";
+    } else if (target === "coaching_presentation_prep" || target === "presentation_prep") {
+      baseRoute = "/dashboard/coaching/presentation_prep";
+    } else if (target === "coaching_client_communication" || target === "client_communication") {
+      baseRoute = "/dashboard/coaching/client_communication";
+    } else if (target === "coaching_general_workplace" || target === "general_workplace") {
+      baseRoute = "/dashboard/coaching/general_workplace";
+    } else if (target === "interview_coach" || target === "interview") {
+      baseRoute = "/dashboard/interview-coach";
+    } else if (target === "script_practice" || target === "script") {
+      baseRoute = "/dashboard/script";
+    }
+  } else {
+    // Fallback keyword-based routing
+    if (id.includes("email") || title.includes("email")) {
+      baseRoute = "/dashboard/coaching/email_writing";
+    } else if (
+      id.includes("meeting") ||
+      title.includes("meeting") ||
+      title.includes("greetings") ||
+      title.includes("contribution")
+    ) {
+      baseRoute = "/dashboard/coaching/meeting_communication";
+    } else if (
+      id.includes("presentation") ||
+      title.includes("presentation") ||
+      title.includes("boardroom")
+    ) {
+      baseRoute = "/dashboard/coaching/presentation_prep";
+    } else if (
+      id.includes("client") ||
+      title.includes("client") ||
+      title.includes("phone") ||
+      title.includes("update") ||
+      title.includes("negotiation") ||
+      title.includes("objection")
+    ) {
+      baseRoute = "/dashboard/coaching/client_communication";
+    } else if (
+      id.includes("interview") ||
+      title.includes("interview")
+    ) {
+      baseRoute = "/dashboard/interview-coach";
+    } else if (id.includes("script") || title.includes("script")) {
+      baseRoute = "/dashboard/script";
+    }
   }
 
   return `${baseRoute}?lp_path_id=${encodeURIComponent(
@@ -328,4 +350,31 @@ export function getModuleSessionHref(pathId: string, module: LPModule): string {
     module.module_id
   )}&lp_passing_score=${passingScore}`;
 }
+
+export function getModuleSessionLabel(module: LPModule): string {
+  const href = getModuleSessionHref("dummy", module);
+  if (href.includes("/coaching/email_writing")) {
+    return "Launches Workplace English Coach — Email Writing";
+  }
+  if (href.includes("/coaching/meeting_communication")) {
+    return "Launches Workplace English Coach — Meeting Communication";
+  }
+  if (href.includes("/coaching/presentation_prep")) {
+    return "Launches Workplace English Coach — Presentation Prep";
+  }
+  if (href.includes("/coaching/client_communication")) {
+    return "Launches Workplace English Coach — Client Communication";
+  }
+  if (href.includes("/coaching/general_workplace")) {
+    return "Launches Workplace English Coach — General Workplace";
+  }
+  if (href.includes("/interview-coach")) {
+    return "Launches Interview Coach practice session";
+  }
+  if (href.includes("/script")) {
+    return "Launches Script & Speech Practice session";
+  }
+  return "Launches Workplace English Coach practice session";
+}
+
 
