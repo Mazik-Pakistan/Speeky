@@ -24,13 +24,13 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import Depends
+from fastapi import Depends, WebSocket
 from fastapi.responses import JSONResponse
 from prisma import Json
 
-from lib import explore_sessions, livekit_tokens, llm_client, prompts
+from lib import explore_sessions, llm_client, prompts, voice_ws
 from lib.prisma_client import db
-from middlewares.auth_middleware import require_admin, require_auth
+from middlewares.auth_middleware import require_admin, require_auth, ws_require_auth
 from schemas.scenario_schemas import (
     CustomScenarioSchema,
     ScenarioPreviewSchema,
@@ -315,19 +315,27 @@ async def get_scenarios(user_id: str = Depends(require_auth)):
     return {"scenarios": await list_scenarios()}
 
 
-# ── Voice mode: LiveKit room token (mirrors conversation_service._voice_token) ─
-async def voice_token(session_id: str, user_id: str = Depends(require_auth)):
+# ── Voice mode: WebSocket transport straight to this backend (backend/lib/voice_ws.py).
+# "transcript" mode: Scenario only ever needs the plain text back, no word-timings/prosody.
+async def voice_socket(websocket: WebSocket, session_id: str):
+    user_id = await ws_require_auth(websocket)
+    if user_id is None:
+        return  # ws_require_auth already closed the socket
+
     gate = await _require_access(user_id)
     if gate:
-        return gate
+        await websocket.close(code=4403, reason="Feature not accessible")
+        return
+
     session = await db.scenariosession.find_unique(where={"id": session_id})
     if not session or session.userId != user_id:
-        return JSONResponse(status_code=404, content={"error": "Scenario session not found"})
-    if not livekit_tokens.is_configured():
-        return JSONResponse(status_code=503, content={
-            "error": "Voice mode unavailable. Use text mode instead.",
-        })
-    return livekit_tokens.mint_room_token(session_id, identity=user_id)
+        await websocket.close(code=4404, reason="Scenario session not found")
+        return
+
+    await websocket.accept()
+    # partial_interval_s: live-preview text streams in while the user keeps talking,
+    # instead of nothing appearing until the utterance ends.
+    await voice_ws.serve(websocket, mode="transcript", partial_interval_s=1.2)
 
 
 async def get_scenario_detail(key: str, user_id: str = Depends(require_auth)):
@@ -524,6 +532,35 @@ async def end_session(session_id: str, user_id: str = Depends(require_auth)):
     return await _finalize_session(
         session_id, user_id, meta, session.targetVocab, list(session.turns), final_status, list(session.flags)
     )
+
+
+async def get_recent_sessions(user_id: str = Depends(require_auth)):
+    """Recent scenario session history (started or completed), most recent first —
+    powers the Learner Dashboard's "Recent Scenarios" cards with real data instead
+    of a static mock list. Reads the scenarioMeta snapshot taken at start_session so
+    the label/category shown matches what the learner actually saw, even if an admin
+    has since edited (or archived) the underlying scenario."""
+    rows = await db.scenariosession.find_many(
+        where={"userId": user_id}, order={"createdAt": "desc"}, take=6
+    )
+    items = []
+    for row in rows:
+        meta = row.scenarioMeta or await scenario_meta(row.scenarioKey)
+        meta = meta or {}
+        items.append({
+            "session_id": row.id,
+            "scenario_key": row.scenarioKey,
+            "title": meta.get("label", row.scenarioKey),
+            "category": meta.get("category", "General"),
+            "description": meta.get("intent", ""),
+            "status": row.status,
+            "met_goal": row.metGoal,
+            "confidence_score": row.confidenceScore,
+            "vocabulary_score": row.vocabularyScore,
+            "started_at": row.createdAt.isoformat(),
+            "completed_at": row.completedAt.isoformat() if row.completedAt else None,
+        })
+    return {"scenarios": items}
 
 
 async def get_session(session_id: str, user_id: str = Depends(require_auth)):

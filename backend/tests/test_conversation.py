@@ -10,7 +10,7 @@ so this suite monkeypatches db access where a session needs to exist already.
 
 import pytest
 
-from lib import grammar_checker, kv_store, livekit_tokens, llm_client, pii, prompts, tts_client
+from lib import grammar_checker, kv_store, llm_client, pii, prompts, tts_client
 from middlewares.error_handler import AuthError
 from schemas.coaching_schemas import AudioFeaturesSchema
 from services import conversation_service as cvs
@@ -278,22 +278,47 @@ def test_tts_not_configured_when_model_missing(monkeypatch):
     assert tts_client.is_configured() is False
 
 
-# ── AIC-US-16: voice mode (LiveKit token + agent transcript intake) ────────────────
-def test_voice_token_not_configured_by_default(monkeypatch):
-    monkeypatch.delenv("LIVEKIT_URL", raising=False)
-    monkeypatch.delenv("LIVEKIT_API_KEY", raising=False)
-    monkeypatch.delenv("LIVEKIT_API_SECRET", raising=False)
-    assert livekit_tokens.is_configured() is False
+# ── AIC-US-16: voice mode ─────────────────────────────────────────────────────
+# The LiveKit room-token pair that used to live here was removed with the
+# standalone voice_agent: voice now runs in-process over a WebSocket
+# (lib/voice_ws.py). These replace them, keeping the same intent — the voice
+# transport exists and is not reachable without a session.
+def test_voice_websocket_route_is_registered():
+    from main import app
+
+    # This FastAPI version wraps included routers in _IncludedRouter rather than
+    # flattening them into app.routes, so the real routes hang off original_router.
+    def ws_paths(routes):
+        found = []
+        for r in routes:
+            sub = getattr(r, "routes", None) or getattr(
+                getattr(r, "original_router", None), "routes", None
+            )
+            if sub:
+                found += ws_paths(sub)
+            elif type(r).__name__ == "APIWebSocketRoute":
+                found.append(r.path)
+        return found
+
+    assert any(p.endswith("/voice-ws") for p in ws_paths(app.routes))
 
 
-async def test_voice_token_mints_token_for_session_room(monkeypatch):
-    monkeypatch.setenv("LIVEKIT_URL", "wss://example.livekit.cloud")
-    monkeypatch.setenv("LIVEKIT_API_KEY", "fake-key")
-    monkeypatch.setenv("LIVEKIT_API_SECRET", "fake-secret")
-    session = await cvs._start_session("user-14", cvs.StartConversationSchema(topic_key="daily_life"))
-    result = await cvs._voice_token("user-14", session["session_id"])
-    assert result["room"] == session["session_id"]
-    assert result["token"]
+async def test_voice_socket_rejects_unauthenticated_handshake():
+    """ws_require_auth closes with 4401 and voice_socket returns before accepting,
+    so an anonymous client never reaches the audio pipeline."""
+    closed = {}
+
+    class FakeWebSocket:
+        cookies: dict = {}
+
+        async def close(self, code=None, reason=None):
+            closed["code"] = code
+
+        async def accept(self):
+            raise AssertionError("must not accept an unauthenticated socket")
+
+    await cvs.voice_socket(FakeWebSocket(), "some-session-id")
+    assert closed["code"] == 4401
 
 
 async def test_agent_send_message_rejects_wrong_secret(monkeypatch):

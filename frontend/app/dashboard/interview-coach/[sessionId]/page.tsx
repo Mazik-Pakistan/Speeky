@@ -16,17 +16,18 @@ import { Button } from "@/components/ui/button";
 import { AiCoachAvatar } from "@/components/common/AiCoachAvatar";
 import { UserChatAvatar } from "@/components/common/UserChatAvatar";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
+import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { Modal } from "@/components/ui/modal";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { useAutoScroll } from "@/lib/useAutoScroll";
-import { useLiveKitVoice } from "@/lib/useLiveKitVoice";
+import { usePracticeTimePing } from "@/lib/usePracticeTimePing";
+import { buildVoiceWsUrl, useVoiceSocket } from "@/lib/useVoiceSocket";
 import {
   endInterviewSession,
   getInterviewCoachSession,
-  getInterviewCoachVoiceToken,
   pauseInterviewSession,
   resumeInterviewSession,
   shareInterviewReview,
@@ -79,10 +80,10 @@ export default function InterviewCoachSessionPage() {
     answerRef.current = answer;
   }, [answer]);
 
-  // Voice mode: same LiveKit mic-in pattern as Conversation/Scenarios/Coaching —
+  // Voice mode: same WebSocket mic-in pattern as Conversation/Scenarios/Coaching —
   // transcript fills the answer input for the user to review/edit, never auto-sent.
-  const fetchVoiceToken = React.useCallback(
-    () => getInterviewCoachVoiceToken(sessionId),
+  const getWsUrl = React.useCallback(
+    () => buildVoiceWsUrl(`/interview-coach/sessions/${sessionId}/voice-ws`),
     [sessionId],
   );
   const onTranscript = React.useCallback((text: string) => {
@@ -97,13 +98,22 @@ export default function InterviewCoachSessionPage() {
     error: voiceError,
     startVoice,
     stopVoice,
-  } = useLiveKitVoice(fetchVoiceToken, onTranscript);
+  } = useVoiceSocket(getWsUrl, onTranscript);
   const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
     featureName: "Interview Coach",
   });
   React.useEffect(() => {
     if (voiceError) setError(voiceError);
   }, [voiceError]);
+
+  // PDG-US-15: heartbeat pings while this interview is the active practice
+  // session (not paused, not finished), crediting lifetime practice time and
+  // surfacing any milestone that unlocks mid-session.
+  const { newlyUnlocked, dismissMilestone } = usePracticeTimePing(
+    "interview_coach",
+    sessionId,
+    status === "active" && !feedback,
+  );
 
   // Rehydrate from sessionStorage — the fast path when this tab is the one that
   // started the session. If that's empty (fresh navigation, e.g. the Explore
@@ -290,6 +300,10 @@ export default function InterviewCoachSessionPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
       {gate}
+      <MilestoneCelebrationModal
+        milestone={newlyUnlocked[0] ?? null}
+        onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+      />
       <div className="flex items-center justify-between">
         <h1 className="font-serif text-h2 font-semibold capitalize text-foreground">
           {mode.replace("_", " ")} Interview

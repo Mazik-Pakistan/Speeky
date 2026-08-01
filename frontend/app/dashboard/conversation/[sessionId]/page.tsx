@@ -15,16 +15,17 @@ import { Button } from "@/components/ui/button";
 import { AiCoachAvatar } from "@/components/common/AiCoachAvatar";
 import { UserChatAvatar } from "@/components/common/UserChatAvatar";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
+import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import {
   endConversationSession,
   getConversationTranscript,
-  getConversationVoiceToken,
   sendConversationMessage,
   type ConversationTurn,
   type EndConversationResult,
 } from "@/lib/conversation";
+import { usePracticeTimePing } from "@/lib/usePracticeTimePing";
 import {
   scoreConversationTurn,
   type SentenceScoreResult,
@@ -35,10 +36,11 @@ import { ScoreDisputeButton } from "@/components/dashboard/ScoreDisputeButton";
 import { playText, stopCurrent } from "@/lib/tts";
 import { useAutoScroll } from "@/lib/useAutoScroll";
 import {
-  useLiveKitVoice,
+  buildVoiceWsUrl,
+  useVoiceSocket,
   type AudioFeatures,
   type VoiceFeatures,
-} from "@/lib/useLiveKitVoice";
+} from "@/lib/useVoiceSocket";
 
 const TIER_CLASSES: Record<string, string> = {
   green: "bg-success/15 text-success",
@@ -145,11 +147,10 @@ export default function ConversationSessionPage() {
   const lastAutoPlayed = React.useRef(-1);
   const audioModeWasOn = React.useRef(false);
 
-  // voice_agent transcribes speech and sends it back over the LiveKit data channel
-  // (topic "voice_transcript") instead of auto-sending — fills the input box so the
-  // user can review/edit before hitting Send.
-  const fetchVoiceToken = React.useCallback(
-    () => getConversationVoiceToken(params.sessionId),
+  // Backend transcribes speech over a WebSocket (backend/lib/voice_ws.py) instead of
+  // auto-sending — fills the input box so the user can review/edit before hitting Send.
+  const getWsUrl = React.useCallback(
+    () => buildVoiceWsUrl(`/conversation/sessions/${params.sessionId}/voice-ws`),
     [params.sessionId],
   );
   // Stores the latest audio features from the voice agent so handleSend can
@@ -174,6 +175,10 @@ export default function ConversationSessionPage() {
     },
     [],
   );
+  // Live-preview text while the user keeps talking — read-only, never touches the
+  // editable message field (the user may be mid-edit on a previous utterance). Clears
+  // itself once the real transcript lands and gets appended into `message` above.
+  const [livePreview, setLivePreview] = React.useState("");
   const {
     isVoiceActive,
     isConnectingVoice,
@@ -183,10 +188,19 @@ export default function ConversationSessionPage() {
     startVoice,
     stopVoice,
     getLastAudioFeatures,
-  } = useLiveKitVoice(fetchVoiceToken, onTranscript);
+  } = useVoiceSocket(getWsUrl, onTranscript, setLivePreview);
   const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
     featureName: "AI Conversation",
   });
+
+  // PDG-US-15: heartbeat pings while this conversation is the active practice
+  // session, crediting lifetime practice time and surfacing any milestone
+  // that unlocks mid-session.
+  const { newlyUnlocked, dismissMilestone } = usePracticeTimePing(
+    "conversation",
+    params.sessionId,
+    !summary,
+  );
 
   React.useEffect(() => {
     getConversationTranscript(params.sessionId)
@@ -368,6 +382,10 @@ export default function ConversationSessionPage() {
   if (summary) {
     return (
       <div className="mx-auto flex max-w-xl flex-col gap-6">
+        <MilestoneCelebrationModal
+          milestone={newlyUnlocked[0] ?? null}
+          onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+        />
         <div className="animate-fade-up rounded-2xl border border-border bg-gradient-to-br from-primary to-primary-hover p-8 text-center text-primary-foreground shadow-sm">
           <CheckCircle2 className="mx-auto h-6 w-6" aria-hidden="true" />
           <h1 className="mt-3 font-serif text-h2 font-semibold">
@@ -445,6 +463,10 @@ export default function ConversationSessionPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
       {gate}
+      <MilestoneCelebrationModal
+        milestone={newlyUnlocked[0] ?? null}
+        onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+      />
       <div className="flex items-center justify-between">
         <h1 className="font-serif text-h2 font-semibold text-foreground">
           {topicLabel || "Conversation"}
@@ -608,6 +630,11 @@ export default function ConversationSessionPage() {
             className="text-sm text-muted-foreground"
           >
             {voiceStatus}
+          </p>
+        ) : null}
+        {livePreview ? (
+          <p role="status" aria-live="polite" className="text-sm italic text-muted-foreground">
+            {livePreview}
           </p>
         ) : null}
       </div>

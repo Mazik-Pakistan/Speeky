@@ -25,10 +25,11 @@ from services.scenario_service import (
     end_session,
     get_scenario_detail,
     get_scenarios,
+    get_recent_sessions,
     get_session,
     send_turn,
     start_session,
-    voice_token,
+    voice_socket,
 )
 
 router = APIRouter()
@@ -36,6 +37,8 @@ router = APIRouter()
 # Scenario-Based Learning
 router.add_api_route("/", get_scenarios, methods=["GET"])
 router.add_api_route("/start", start_session, methods=["POST"])
+# Registered before "/{key}" so "recent" doesn't get swallowed by the catch-all path param.
+router.add_api_route("/recent", get_recent_sessions, methods=["GET"])
 
 # Admin: custom scenario CRUD registered before "/{key}" so doesn't get swallowed by the catch-all path param.
 router.add_api_route("/admin/preview", admin_preview_custom, methods=["POST"])
@@ -68,7 +71,7 @@ router.add_api_route("/admin/custom/{scenario_id}/deployment-confidence", admin_
 router.add_api_route("/admin/custom/{scenario_id}/deployments", admin_deployment_history, methods=["GET"])
 
 router.add_api_route("/{session_id}/turn", send_turn, methods=["POST"])
-router.add_api_route("/{session_id}/voice-token", voice_token, methods=["POST"])
+router.add_api_websocket_route("/{session_id}/voice-ws", voice_socket)
 router.add_api_route("/{session_id}/end", end_session, methods=["POST"])
 # US-193/US-196 input: a learner rates their own finished session.
 router.add_api_route("/sessions/{session_id}/rating", rate_session, methods=["POST"])

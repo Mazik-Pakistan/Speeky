@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
+import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { FillerWordsScorecardSection } from "@/components/dashboard/public-speaking/FillerWordsScorecardSection";
@@ -21,10 +22,10 @@ import {
   startPublicSpeakingSession,
   submitPublicSpeakingTurn,
   submitPublicSpeakingQa,
-  getPublicSpeakingVoiceToken,
   type SpeechType,
 } from "@/lib/publicSpeaking";
-import { useLiveKitVoice, type VoiceFeatures } from "@/lib/useLiveKitVoice";
+import { buildVoiceWsUrl, useVoiceSocket, type VoiceFeatures } from "@/lib/useVoiceSocket";
+import { usePracticeTimePing } from "@/lib/usePracticeTimePing";
 
 const SPEECH_TYPE_CONFIG: Record<string, { label: string; description: string; ideal_wpm: string }> = {
   business_pitch: {
@@ -82,10 +83,10 @@ export default function PublicSpeakingSessionPage() {
     avg_db: undefined as number | undefined,
     pitch_range_semitones: 0,
   });
-  const fetchVoiceToken = React.useCallback(() => {
+  const getWsUrl = React.useCallback(() => {
     const id = sessionIdRef.current;
-    if (!id) return Promise.reject(new Error("No active session"));
-    return getPublicSpeakingVoiceToken(id);
+    if (!id) return null;
+    return buildVoiceWsUrl(`/public-speaking/${id}/voice-ws`);
   }, []);
   const {
     isVoiceActive,
@@ -95,7 +96,7 @@ export default function PublicSpeakingSessionPage() {
     error: voiceError,
     startVoice,
     stopVoice,
-  } = useLiveKitVoice(fetchVoiceToken, (text, features?: VoiceFeatures) => {
+  } = useVoiceSocket(getWsUrl, (text, features?: VoiceFeatures) => {
     setTextContent((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
     if (features) {
       const acc = featuresRef.current;
@@ -110,6 +111,17 @@ export default function PublicSpeakingSessionPage() {
   const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
     featureName: "Public Speaking Practice",
   });
+
+  // PDG-US-15: heartbeat pings while this speech is the active practice
+  // session, crediting lifetime practice time and surfacing any milestone
+  // that unlocks mid-session. "Active" until scored, and — if a follow-up
+  // Q&A got triggered — until that's answered too.
+  const isSessionDone = scorecard !== null && (qaQuestion === null || qaScore !== null);
+  const { newlyUnlocked, dismissMilestone } = usePracticeTimePing(
+    "public_speaking",
+    sessionId,
+    sessionId !== null && !isSessionDone,
+  );
 
   const handleStartVoice = async () => {
     if (isVoiceActive) return;
@@ -204,6 +216,10 @@ export default function PublicSpeakingSessionPage() {
   return (
     <div className="flex flex-col gap-6">
       {gate}
+      <MilestoneCelebrationModal
+        milestone={newlyUnlocked[0] ?? null}
+        onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+      />
       <div className="flex items-center gap-4">
         <Button
           variant="ghost"
