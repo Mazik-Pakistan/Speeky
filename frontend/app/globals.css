@@ -56,9 +56,14 @@
     --accent-foreground: 0 0% 100%;
     /* #FFFFFF */
 
-    --success: 142 72% 29%;
+    /* #147B3F — `text-success` on `bg-success/10` measured 4.43:1 at 29%. */
+    --success: 142 72% 28%;
     /* #15803D */
-    --warning: 32 92% 37%;
+    /* #A25907 — the binding constraint is a Badge's own tint, not the page
+       background: `text-warning` on `bg-warning/10` measured 4.07:1 at the
+       original 37%, still 4.41:1 at 34%. 33% clears AA (4.62:1) on the tint and
+       comfortably on plain surfaces. */
+    --warning: 32 92% 33%;
     /* #B45309 */
     --danger: 0 74% 42%;
     /* #BB1F1F — darkened so white text clears AA on the filled danger button. */

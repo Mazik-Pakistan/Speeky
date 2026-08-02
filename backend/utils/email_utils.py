@@ -1,3 +1,4 @@
+import logging
 import os
 from email.message import EmailMessage
 from html import escape
@@ -6,6 +7,8 @@ from pathlib import Path
 
 import aiosmtplib
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 
 INLINE_LOGO_CID = "speeky-logo"
@@ -60,8 +63,12 @@ def _attach_inline_logo(msg: EmailMessage) -> None:
             cid=f"<{INLINE_LOGO_CID}>",
         )
     except Exception:
-        # Logo rendering should never block transactional email delivery.
-        pass
+        # Logo rendering must never block transactional email delivery, so this
+        # stays non-fatal — but it is logged rather than swallowed silently. A
+        # bare `pass` hid every cause (missing Pillow, unreadable PNG, a message
+        # assembled without add_alternative) behind an email that simply arrived
+        # without its logo, with nothing to diagnose from.
+        logger.warning("Inline email logo could not be attached", exc_info=True)
 
 
 def _render_template(heading: str, body_html: str) -> str:
@@ -307,9 +314,9 @@ async def send_otp_email(to: str, code: str) -> None:
     ttl = os.environ.get("OTP_TTL_MINUTES", "10")
 
     if os.environ.get("APP_ENV") != "production":
-        print(f"\n========================================================")
+        print("\n========================================================")
         print(f"[DEV VERIFICATION CODE] OTP for {to}: {code}")
-        print(f"========================================================\n")
+        print("========================================================\n")
 
     body_html = f"""
     <p>You&apos;re one step away from starting your private speaking practice.</p>
@@ -365,18 +372,24 @@ async def send_email_change_otp(to: str, code: str) -> None:
 async def send_password_reset_email(to: str, reset_url: str) -> None:
     ttl = os.environ.get("RESET_TOKEN_TTL_MINUTES", "15")
 
+    # Defence in depth: reset_url is server-built, but its origin half comes from
+    # the CLIENT_ORIGIN env var, so it is escaped before entering markup — the same
+    # treatment _render_template already gives logo_src. A well-formed URL is
+    # unchanged by this; a second query param would correctly become &amp;.
+    safe_reset_url = escape(reset_url, quote=True)
+
     body_html = f"""
     <p>Hello,</p>
     <p>We received a request to reset the password associated with your Speeky AI account. To proceed with resetting your password, please click the button below.</p>
     <div class="button-container">
-        <a href="{reset_url}" class="button">Reset My Password</a>
+        <a href="{safe_reset_url}" class="button">Reset My Password</a>
     </div>
     <div class="security-notice">
         <p><strong>Note:</strong> This link is only valid for the next <strong>{ttl} minutes</strong> for your security.</p>
     </div>
     <div class="link-fallback">
         <p>If you're having trouble clicking the password reset button, copy and paste the URL below into your web browser:</p>
-        <a href="{reset_url}" style="color: #1a3673;">{reset_url}</a>
+        <a href="{safe_reset_url}" style="color: #1a3673;">{safe_reset_url}</a>
     </div>
     """
 

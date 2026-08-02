@@ -13,6 +13,7 @@ docker-compose.yml
 .dockerignore
 *.docx
 voice_agent/models/
+.ruff_cache/
 
 !.env.example
 !uploads/avatars/

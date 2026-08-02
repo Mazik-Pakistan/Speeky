@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { SessionRating } from "@/components/dashboard/SessionRating";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
@@ -522,6 +523,9 @@ export default function ScenarioSessionPage() {
           {result.summary}
         </p>
       </div>
+
+      {/* US-193 "Learner satisfaction" / US-196 "user feedback" input. */}
+      <SessionRating sessionId={result.session_id} />
 
       <div
         className="animate-fade-up rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm"
