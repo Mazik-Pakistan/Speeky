@@ -20,6 +20,8 @@ const ROLE_FILTERS = [
   { value: "SUPER_ADMIN", label: "Super Admin" },
 ];
 
+// "brand" is the Badge tone for the primary brand colour — an earlier revision of
+// this file called it "primary", which is not a tone the component accepts.
 const ROLE_TONE: Record<string, "brand" | "neutral" | "warning"> = {
   SUPER_ADMIN: "warning",
   ADMIN: "brand",

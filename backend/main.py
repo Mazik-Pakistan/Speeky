@@ -25,6 +25,7 @@ from middlewares.error_handler import (
     AuthError,
     app_error_handler,
     auth_error_handler,
+    reject_null_bytes,
     unhandled_exception_handler,
     validation_error_handler,
 )
@@ -46,8 +47,8 @@ from routers.notification_routes import router as notification_router
 from routers.overuse_routes import router as overuse_router
 from routers.practice_time_routes import router as practice_time_router
 from routers.progress_dashboard_routes import router as progress_dashboard_router
-from routers.accent_progress_routes import router as accent_progress_router
 from routers.resume_jd_routes import router as resume_jd_router
+from routers.content_intelligence_routes import router as content_intelligence_router
 from routers.scenario_routes import router as scenario_router
 from routers.session_memory_routes import router as session_memory_router
 from routers.vocabulary_progress_routes import router as vocabulary_progress_router
@@ -75,6 +76,7 @@ app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
 
 
+app.middleware("http")(reject_null_bytes)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -110,6 +112,7 @@ app.include_router(interview_coach_router, prefix="/api/interview-coach")
 app.include_router(session_memory_router, prefix="/api/session-memory")
 app.include_router(resume_jd_router, prefix="/api/resume-jd-intake")
 app.include_router(scenario_router, prefix="/api/scenarios")
+app.include_router(content_intelligence_router, prefix="/api/content-intelligence")
 app.include_router(progress_dashboard_router, prefix="/api/progress-dashboard")
 app.include_router(accent_progress_router, prefix="/api/accent-progress")
 app.include_router(pronunciation_coach_router, prefix="/api/pronunciation-coach")

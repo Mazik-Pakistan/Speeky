@@ -15,7 +15,6 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import Depends, WebSocket
-from fastapi.responses import JSONResponse
 
 from lib import ai_client, explore_sessions, kv_store, voice_ws
 from middlewares.auth_middleware import require_auth, ws_require_auth

@@ -22,7 +22,7 @@ from typing import Awaitable, Callable, List, Optional
 
 import numpy as np
 import torch
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 from silero_vad import VADIterator, load_silero_vad
 
 from lib import audio_io, prosody_engine, stt_engine, vad_engine

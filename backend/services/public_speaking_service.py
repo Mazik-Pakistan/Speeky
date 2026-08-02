@@ -22,18 +22,16 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import Depends, WebSocket
+from fastapi import WebSocket
 from prisma import Json
-from lib import llm_client, prompts, prosody_engine, recording_engine, session_scorer, voice_ws
+from lib import llm_client, recording_engine, session_scorer, voice_ws
 from lib.audio_io import AudioDecodeError
 from lib.prisma_client import db
-from lib.session_scorer import AudioFeatures, ScoredSession
+from lib.session_scorer import AudioFeatures
 from lib.speech_config import load_speech_config
-from middlewares.auth_middleware import require_auth, ws_require_auth
+from middlewares.auth_middleware import ws_require_auth
 from utils.feature_errors import InvalidSubmissionError, SessionNotFoundError
 from schemas.public_speaking_schemas import (
-    PublicSpeakingScorecard,
-    PublicSpeakingSession,
     StartPublicSpeakingSchema,
     PublicSpeakingTurnSchema,
     QAResponseSchema,
