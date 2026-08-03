@@ -649,7 +649,7 @@ function RevenueTab({ days }: { days: number }) {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-border bg-surface-elevated">
+      <div className="overflow-x-auto rounded-2xl border border-border bg-surface-elevated">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-border bg-surface text-xs uppercase tracking-wide text-muted-foreground">
             <tr>

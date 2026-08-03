@@ -467,7 +467,7 @@ export default function ConversationSessionPage() {
         milestone={newlyUnlocked[0] ?? null}
         onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
       />
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-h2 font-semibold text-foreground">
           {topicLabel || "Conversation"}
         </h1>
@@ -576,7 +576,7 @@ export default function ConversationSessionPage() {
 
         {error ? <p className="text-sm text-danger">{error}</p> : null}
 
-        <div className="flex items-center gap-2 border-t border-border pt-4">
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
           <input
             type="text"
             value={message}
@@ -588,7 +588,7 @@ export default function ConversationSessionPage() {
               }
             }}
             placeholder="Type a message..."
-            className="h-11 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
+            className="h-11 min-w-0 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
           />
           <Button
             size="md"

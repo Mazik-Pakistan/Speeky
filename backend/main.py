@@ -78,12 +78,16 @@ app.state.limiter = limiter
 
 app.middleware("http")(reject_null_bytes)
 app.add_middleware(SlowAPIMiddleware)
+client_origins = [
+    origin.strip()
+    for origin in os.environ.get("CLIENT_ORIGIN", "http://localhost:3000").split(",")
+]
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=[os.environ.get("CLIENT_ORIGIN", "http://localhost:3000")],
-    allow_origins=["*"],
+    allow_origins=client_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST","PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.add_exception_handler(AppError, app_error_handler)

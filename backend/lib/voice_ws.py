@@ -248,6 +248,86 @@ class VoiceSession:
             await self._finalize()
 
 
+# Generous cap on how much audio a live-preview session will keep transcribing against —
+# not a product limit (the caller's own upload endpoint enforces the real one via
+# speech_config.max_recording_seconds), just a memory/cost backstop against a forgotten-
+# open recording. Comfortably above any real Pronunciation Coach sentence or Accent
+# Assessment passage read.
+MAX_PREVIEW_SECONDS = 180
+
+
+class LivePreviewSession:
+    """Continuous live-preview transcription with no VAD segmentation — for reading a
+    known target sentence/passage aloud (Pronunciation Coach, Accent Assessment), where
+    natural mid-passage pauses must NOT be treated as end-of-speech the way a
+    push-to-talk VoiceSession's utterance boundaries would. Buffers the whole recording
+    and periodically streams a cheap partial transcript; never sends a "final" — the
+    authoritative, per-word-classified result always comes from the caller's existing
+    MediaRecorder-blob upload endpoint, completely unchanged. The frontend does its own
+    lightweight positional word-compare against text it already has (the target
+    sentence/passage) to decide live colors — this class only supplies growing text."""
+
+    def __init__(self, on_message: Callable[[dict], Awaitable[None]], partial_interval_s: float = 1.2):
+        self._on_message = on_message
+        self._partial_interval_s = partial_interval_s
+        self._buffer: List[np.ndarray] = []
+        self._total_samples = 0
+        self._samples_since_partial = 0
+        self._partial_in_flight = False
+        self._closed = False
+
+    async def push(self, chunk: bytes) -> None:
+        if self._closed or self._total_samples >= MAX_PREVIEW_SECONDS * SAMPLE_RATE:
+            return
+        samples = np.frombuffer(chunk, dtype=np.int16)
+        self._buffer.append(samples)
+        self._total_samples += len(samples)
+        self._samples_since_partial += len(samples)
+
+        if self._partial_in_flight or self._samples_since_partial < self._partial_interval_s * SAMPLE_RATE:
+            return
+        self._samples_since_partial = 0
+        waveform = np.concatenate(self._buffer).astype(np.float32) / 32768.0
+        self._partial_in_flight = True
+        asyncio.create_task(self._run_partial(waveform))
+
+    async def _run_partial(self, waveform: np.ndarray) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            body = await loop.run_in_executor(_executor, _transcribe_partial, waveform)
+        except Exception:
+            logger.exception("Live-preview transcription failed")
+            return
+        finally:
+            self._partial_in_flight = False
+        if self._closed or not body["text"]:
+            return
+        try:
+            await self._on_message({"type": "partial", "text": body["text"]})
+        except Exception:
+            logger.warning("Live-preview message send failed", exc_info=True)
+
+    async def close(self) -> None:
+        self._closed = True
+
+
+async def serve_preview(websocket: WebSocket, partial_interval_s: float = 1.2) -> None:
+    """Like serve(), but for a continuous LivePreviewSession — no VAD, no "stop" flush
+    semantics needed, since there's no authoritative transcript on this channel to lose:
+    the real result always comes from the caller's separate upload endpoint."""
+    session = LivePreviewSession(on_message=websocket.send_json, partial_interval_s=partial_interval_s)
+    try:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                return
+            data = message.get("bytes")
+            if data is not None:
+                await session.push(data)
+    finally:
+        await session.close()
+
+
 async def serve(websocket: WebSocket, mode: str, partial_interval_s: Optional[float] = None) -> None:
     """Owns the receive loop + resilient teardown for one already-accept()ed voice-ws
     connection — shared by every voice-enabled route (scenario/coaching/interview-coach/

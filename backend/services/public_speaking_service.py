@@ -314,7 +314,11 @@ async def voice_socket(websocket: WebSocket, session_id: str):
         return
 
     await websocket.accept()
-    await voice_ws.serve(websocket, mode="full")
+    # partial_interval_s: live-preview text streams in while the user keeps talking —
+    # the frontend splices it directly into the editable textarea (see
+    # app/dashboard/public-speaking/[speechType]/page.tsx), unlike the Explore group's
+    # separate preview line.
+    await voice_ws.serve(websocket, mode="full", partial_interval_s=1.2)
 
 
 async def get_session(session_id: str, user_id: str) -> Dict:
