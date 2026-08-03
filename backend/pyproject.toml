@@ -34,6 +34,8 @@ dependencies = [
     "praat-parselmouth>=0.4.7",
     "numpy>=1.26",
     "pronouncing>=0.2.0",
+    "torch", # Need to do explicit for torch-cpu.
+    "torchaudio",
 ]
 
 [tool.taskipy.tasks]
@@ -41,10 +43,14 @@ dev = "uvicorn main:app --reload"
 start = "uvicorn main:app"
 start-all = "uvicorn main:app --reload --host 0.0.0.0 --port 8000"
 
-prisma-generate = "prisma generate"
-prisma-migrate = "prisma migrate dev"
-prisma-pull = "prisma db pull"
-prisma-studio = "prisma studio"
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchaudio = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true  # To avoid side effects (like other projects also resolved from this index)
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

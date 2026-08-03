@@ -94,6 +94,10 @@ export default function CoachingSessionPage() {
   const onTranscript = React.useCallback((text: string) => {
     setChatInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
   }, []);
+  // Live-preview text while the user keeps talking — read-only, never touches
+  // chatInput (which the user may be mid-edit on from a previous utterance). Clears
+  // itself once the real transcript lands and gets appended above.
+  const [livePreview, setLivePreview] = React.useState("");
   const {
     isVoiceActive,
     isConnectingVoice,
@@ -102,7 +106,7 @@ export default function CoachingSessionPage() {
     error: voiceError,
     startVoice,
     stopVoice,
-  } = useVoiceSocket(getWsUrl, onTranscript);
+  } = useVoiceSocket(getWsUrl, onTranscript, setLivePreview);
   const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
     featureName: "Coaching Session",
   });
@@ -427,7 +431,7 @@ export default function CoachingSessionPage() {
           milestone={newlyUnlocked[0] ?? null}
           onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
         />
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h1 className="font-serif text-h2 font-semibold text-foreground">
             {step.session.label}
           </h1>
@@ -490,7 +494,7 @@ export default function CoachingSessionPage() {
               Feedback&quot; to see your results.
             </p>
           ) : (
-            <div className="flex items-center gap-2 border-t border-border pt-4">
+            <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
               <input
                 type="text"
                 value={chatInput}
@@ -502,7 +506,7 @@ export default function CoachingSessionPage() {
                   }
                 }}
                 placeholder="Type your response..."
-                className="h-11 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
+                className="h-11 min-w-0 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
               />
               <Button
                 size="md"
@@ -543,6 +547,11 @@ export default function CoachingSessionPage() {
               className="text-sm text-muted-foreground"
             >
               {liveVoiceStatus}
+            </p>
+          ) : null}
+          {livePreview ? (
+            <p role="status" aria-live="polite" className="text-sm italic text-muted-foreground">
+              {livePreview}
             </p>
           ) : null}
           {error ? <p className="text-sm text-danger">{error}</p> : null}

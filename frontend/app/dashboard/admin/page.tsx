@@ -88,7 +88,7 @@ export default function AdminHubPage() {
   });
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex animate-fade-up flex-col gap-8">
       <div>
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
           Admin Hub
