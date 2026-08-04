@@ -6,9 +6,13 @@
     "dev-all": "npm run dev -- --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
-    "lint": "next lint"
+    "lint": "next lint",
+    "fetch:mediapipe": "node scripts/fetch-mediapipe-assets.mjs",
+    "postinstall": "node scripts/fetch-mediapipe-assets.mjs",
+    "test:unit": "tsc -p tsconfig.test.json && node --test \"test-build/**/*.test.js\""
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
     "@tailwindcss/postcss": "^4.3.3",
     "clsx": "^2.1.0",
     "lucide-react": "^0.383.0",

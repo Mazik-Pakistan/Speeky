@@ -1,0 +1,29 @@
+{
+  // Unit tests for the pure vision maths. Node's ESM loader demands explicit file extensions,
+  // but Next requires extensionless imports in source — so rather than contort the source, the
+  // pure modules are compiled to CommonJS in a scratch dir and run there with `node --test`.
+  //
+  // Only dependency-free modules are listed. Anything touching React, the DOM or MediaPipe
+  // (useVideoAnalysis, mediapipeLoader, frameScheduler) is deliberately excluded: those need a
+  // browser, and that is what the Playwright harness is for.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "test-build",
+    "incremental": false,
+    "types": ["node"]
+  },
+  "include": [
+    "lib/vision/types.ts",
+    "lib/vision/normalize.ts",
+    "lib/vision/headPose.ts",
+    "lib/vision/gaze.ts",
+    "lib/vision/aggregator.ts",
+    "lib/vision/smoothing.ts",
+    "lib/vision/metrics/posture.ts",
+    "lib/vision/metrics/hands.ts",
+    "lib/vision/**/*.test.ts"
+  ]
+}

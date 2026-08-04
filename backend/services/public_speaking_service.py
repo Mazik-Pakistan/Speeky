@@ -1,7 +1,14 @@
 """
 Public Speaking Coach Service — PSC-US-01, PSC-US-03, PSC-US-04, PSC-US-05, PSC-US-06, PSC-US-07, PSC-US-11, PSC-US-12, PSC-US-14
 
-Audio/text-based public speaking analysis. Ignores video-specific requirements (eye contact, physical presence).
+Audio/text/video-based public speaking analysis.
+
+Physical presence (eye contact, posture, gesture, expression) is measured when the user opts
+into the camera. MediaPipe runs entirely in the browser; this service only ever sees the
+aggregated `video_features` payload, exactly as it only ever sees derived `audio_features`
+rather than raw audio. Scored by lib/video_scorer.py, which is deliberately additive — see
+`_generate_scorecard` for why `overall_score` must not absorb it.
+
 Focuses on:
 - Speech structure analysis (business pitch, classroom, TED-style)
 - Speaking pace analytics (WPM calculation)
@@ -11,6 +18,7 @@ Focuses on:
 - Audience Q&A simulation
 - Motivational speech evaluation
 - Casual event speech feedback
+- Physical delivery analysis when the camera is on (PSC video)
 """
 
 import base64
@@ -19,12 +27,13 @@ import logging
 import re
 import uuid
 from dataclasses import asdict
+from itertools import zip_longest
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from fastapi import WebSocket
 from prisma import Json
-from lib import llm_client, recording_engine, session_scorer, voice_ws
+from lib import llm_client, recording_engine, session_scorer, video_scorer, voice_ws
 from lib.audio_io import AudioDecodeError
 from lib.prisma_client import db
 from lib.session_scorer import AudioFeatures
@@ -68,6 +77,9 @@ SPEECH_TYPES = {
         "ideal_wpm_range": (130, 150),
         "check_transitions": True,
         "track_filler_words": True,
+        # A teacher who locks onto one spot is a problem, so this is the one format where a
+        # HIGHER gaze-shift rate scores better. See video_scorer._presence_weights.
+        "reward_gaze_scan": True,
     },
     "ted_talk": {
         "label": "TED-Style Talk",
@@ -199,16 +211,22 @@ async def submit_turn(
         audio_features = None
         analysis = None
 
+    # Keep the None-vs-missing distinction inside the blob: a metric that was measured as
+    # unavailable is meaningful to the scorer and to the results UI. Only the COLUMN has to be
+    # omitted when there's no video at all (see below).
+    video_features = turn.video_features.model_dump() if turn.video_features else None
+
     scorecard = await _generate_scorecard(
         speech_type=str(session.speechType),
         text_content=text_content,
         audio_features=audio_features,
         analysis=analysis,
         speech_config=speech_config,
+        video_features=video_features,
     )
-    
-    # Update session — audioFeatures is optional (Json?). Skip the key entirely when
-    # there's no audio instead of sending None, which prisma-client-py can't serialize.
+
+    # Update session — audioFeatures/videoFeatures are optional (Json?). Skip the key entirely
+    # when there's no audio/video instead of sending None, which prisma-client-py can't serialize.
     update_data = {
         "transcript": text_content,
         "status": "completed" if turn.is_final else "in_progress",
@@ -217,6 +235,8 @@ async def submit_turn(
     }
     if audio_features:
         update_data["audioFeatures"] = Json(asdict(audio_features))
+    if video_features:
+        update_data["videoFeatures"] = Json(video_features)
 
     await db.publicspeakingsession.update(
         where={"id": session_id},
@@ -412,6 +432,7 @@ async def _generate_scorecard(
     audio_features: Optional[AudioFeatures],
     analysis: Optional["recording_engine.RecordingAnalysis"],
     speech_config: Dict,
+    video_features: Optional[Dict] = None,
 ) -> Dict:
     if audio_features:
         scored = session_scorer.score_audio_session(audio_features)
@@ -457,9 +478,29 @@ async def _generate_scorecard(
         speech_config=speech_config,
     )
 
+    # Video is scored AFTER the summary and deliberately never reaches _calculate_overall_scores.
+    # Blending it into overall_score would make a user's pre-camera and post-camera sessions
+    # incomparable on the progress dashboard, and would make the same number mean different
+    # things for camera and non-camera users on one chart. It contributes to the qualitative
+    # surface (flags, highlights, tips) — which is where the value actually is — plus its own
+    # visual_presence tile. If a blended headline is ever wanted, add a separate key and a
+    # scoring_version marker; do not overload this one.
+    scored_video = video_scorer.score_video_session(video_features, speech_config)
+    if video_features:
+        flags = flags + scored_video.issues
+        highlights = highlights + scored_video.highlights
+
+        # Interleave rather than append: video tips appended after the audio list would sit
+        # below the existing [:5] cap and either overflow it (12 tips is not a shortlist) or be
+        # cut entirely. Alternating keeps both modalities represented in the top few.
+        video_tips = [i["suggestion"] for i in scored_video.issues if i.get("suggestion")]
+        actionable_tips = _interleave(actionable_tips, video_tips)[:6]
+
+        summary = _append_presence_sentence(summary, scored_video)
+
     return {
         "speech_type": str(speech_type),
-        "input_mode": "audio" if audio_features else "text",
+        "input_mode": _resolve_input_mode(audio_features, video_features),
         "overall_score": scores["overall"],
         "confidence": scores["confidence"],
         "pacing": scores["pacing"],
@@ -479,7 +520,27 @@ async def _generate_scorecard(
         "summary": summary,
         "actionable_tips": actionable_tips,
         "delivery": scored.delivery if audio_features else None,
+        "visual_presence": scored_video.visual_presence,
+        "video": scored_video.to_dict() if video_features else None,
+        # Echoed straight back for the results sparklines. Not scored from — the aggregates
+        # above are the scoring inputs; this is the evidence a reader can look at.
+        "video_timeline": (video_features or {}).get("timeline") if video_features else None,
     }
+
+
+def _resolve_input_mode(
+    audio_features: Optional[AudioFeatures],
+    video_features: Optional[Dict],
+) -> str:
+    """Derived, not stored — the session row records what the user selected at start, but the
+    scorecard should describe what actually arrived.
+
+    "audio_video" rather than "video": the camera is always an add-on to voice, never a mode of
+    its own, so there is no video-only value to return.
+    """
+    if video_features:
+        return "audio_video"
+    return "audio" if audio_features else "text"
 
 
 def _calculate_wpm(text: str, audio_features: Optional[AudioFeatures]) -> Dict:
@@ -840,6 +901,46 @@ def _generate_feedback_summary(
         tips.append("For casual events: prioritize warmth and authenticity over formal structure.")
     
     return summary, tips[:5]
+
+
+def _interleave(primary: List[str], secondary: List[str]) -> List[str]:
+    """Alternate two lists, keeping order within each and dropping duplicates.
+
+    Used so a camera session's tips do not simply queue up behind the voice ones and fall off
+    the end of the shortlist.
+    """
+    out: List[str] = []
+    seen = set()
+    for pair in zip_longest(primary, secondary):
+        for item in pair:
+            if item and item not in seen:
+                seen.add(item)
+                out.append(item)
+    return out
+
+
+def _append_presence_sentence(summary: str, scored: "video_scorer.ScoredVideo") -> str:
+    """Add one plain sentence about physical delivery to the (deterministic) summary.
+
+    Public Speaking has no LLM grader — this template summary IS the narrative the user reads —
+    so without this the video work would only ever surface as flags and tiles.
+
+    Says nothing when the measurement is not trustworthy enough to state as fact, which is the
+    same bar prompts.build_video_presence_note applies before letting numbers reach an LLM.
+    """
+    if scored.rejection is not None or scored.visual_presence is None:
+        return summary
+    if scored.confidence_weight < 0.5:
+        return summary
+
+    presence = scored.visual_presence
+    if presence >= 80:
+        note = "Your physical presence was strong — you came across as composed and engaged."
+    elif presence >= 60:
+        note = "Your physical presence was solid, with room to sharpen how you carry yourself."
+    else:
+        note = "Your physical presence held you back; the delivery notes below say where."
+    return f"{summary} {note}"
 
 
 def _is_nonsense_content(text: str) -> bool:

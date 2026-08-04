@@ -495,6 +495,60 @@ def build_workplace_feedback_prompt(
     )
 
 
+def build_video_presence_note(
+    video: Optional[Dict],
+    confidence_weight: float = 0.0,
+) -> str:
+    """Physical-delivery metrics for camera sessions — the video sibling of `delivery_note`.
+
+    Returns "" whenever the measurement should not reach the model at all. That bar is set
+    deliberately high: handed "eye contact 12%", an LLM will coach the user about it confidently
+    and specifically no matter how the number is hedged in surrounding text. A hedge in the
+    prompt does not survive into the output, so anything we would need to hedge is withheld.
+
+    Withheld when:
+      - there is no video, or the session was not scorable (`status != "ok"`);
+      - `confidence_weight < 0.5`, which covers every uncalibrated session, every heavily
+        degraded one, and anything under ~30s;
+      - the individual metric is None (never printed as "None").
+
+    Used by the Interview Coach's LLM grader. Public Speaking has no LLM grader — its narrative
+    is the deterministic `_generate_feedback_summary` — so this is not called on that path.
+    """
+    if not video or confidence_weight < 0.5:
+        return ""
+
+    detail = video.get("detail") or {}
+    if detail.get("status") != "ok":
+        return ""
+
+    parts: List[str] = []
+
+    def add(value, template: str):
+        if value is not None:
+            parts.append(template.format(value))
+
+    add(video.get("eye_contact"), "eye contact {:.0f}/100")
+    add(video.get("posture"), "posture {:.0f}/100")
+    add(video.get("gestures"), "gesture use {:.0f}/100")
+    add(video.get("expression"), "facial expressiveness {:.0f}/100")
+
+    if not parts:
+        return ""
+
+    note = "\nPhysical delivery (measured in-browser from the user's camera): " + ", ".join(parts) + "."
+
+    # An uncalibrated baseline means the gaze figure carries an unmodelled camera offset. It is
+    # still directionally useful, but the exact number must not be quoted back at the user.
+    if not detail.get("calibrated"):
+        note += " Gaze was not calibrated, so treat eye contact as approximate and do not quote the exact figure."
+
+    # Without this the model reliably invents specifics — "your gestures were open and
+    # welcoming" — that nothing in the data supports.
+    note += " Weave this into your feedback on presence. Do not invent visual details beyond these numbers.\n"
+    return note
+
+
 # Lightweight language check (WEC-US-10 E-04 / education rule): is the text English?
 WORKPLACE_LANGUAGE_CHECK_PROMPT = """Is the following message written mainly in English?
 Reply with EXACTLY one word: YES or NO.

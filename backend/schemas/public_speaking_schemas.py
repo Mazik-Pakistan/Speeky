@@ -3,13 +3,19 @@
 from pydantic import BaseModel, Field
 
 from schemas.limits import MAX_SHORT_TEXT_CHARS, MAX_SUBMISSION_CHARS
+from schemas.video_features_schema import VideoFeaturesSchema
 from typing import Optional, List, Dict, Literal
 
 
 class StartPublicSpeakingSchema(BaseModel):
     """Request to start a public speaking session"""
     speech_type: Literal["business_pitch", "casual_event", "motivational", "classroom", "ted_talk"]
-    input_mode: Literal["audio", "text"] = Field(default="audio", description="Audio or text input")
+    # "audio_video" is audio PLUS an opted-in camera — there is no video-only mode, because
+    # physical delivery is only ever scored alongside a spoken turn. Stored as a plain String
+    # column, so widening this Literal needs no migration.
+    input_mode: Literal["audio", "text", "audio_video"] = Field(
+        default="audio", description="Audio, text, or audio with camera-based delivery analysis"
+    )
     topic: Optional[str] = Field(None, max_length=MAX_SHORT_TEXT_CHARS, description="Optional topic/prompt for the speech")
 
 
@@ -29,6 +35,14 @@ class PublicSpeakingTurnSchema(BaseModel):
         None,
         description="Full-mode features from voice_ws.py: word_timings, avg_db, "
         "pitch_range_semitones, duration_seconds. Enables real tone/clarity scoring.",
+    )
+    # Typed, unlike audio_features above — a malformed video payload should 422 at the boundary
+    # rather than reach video_scorer as an arbitrary dict. See schemas/video_features_schema.py
+    # for why every metric inside is nullable.
+    video_features: Optional[VideoFeaturesSchema] = Field(
+        None,
+        description="Aggregated physical-delivery metrics computed by MediaPipe in the browser "
+        "(frontend/lib/vision/). No video, frames, or per-frame landmarks are ever uploaded.",
     )
     is_final: bool = Field(default=False, description="Whether this is the final submission")
 
@@ -80,6 +94,22 @@ class PublicSpeakingScorecard(BaseModel):
     
     # Audio delivery metrics
     delivery: Optional[Dict] = Field(None, description="Audio quality metrics")
+
+    # Physical delivery (camera sessions only). Deliberately NOT folded into overall_score —
+    # see _generate_scorecard for why. None whenever the camera was off.
+    visual_presence: Optional[float] = Field(
+        None, ge=0, le=100, description="Composite physical-presence score, camera sessions only"
+    )
+    video_timeline: Optional[Dict] = Field(
+        None,
+        description="Per-second channels echoed back for the results sparklines. Stored, not scored.",
+    )
+    video: Optional[Dict] = Field(
+        None,
+        description="video_scorer.ScoredVideo.to_dict(): eye_contact/posture/gestures/expression/"
+        "stillness sub-scores, confidence_weight, rejection reason, and detail. Sub-scores are "
+        "null when that family was unmeasurable.",
+    )
 
 
 class PublicSpeakingSession(BaseModel):

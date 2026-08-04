@@ -10,22 +10,27 @@ import {
   Mic,
   Send,
   AlertCircle,
+  Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
+import { useCameraReadinessGate } from "@/components/common/CameraReadinessGate";
 import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { FillerWordsScorecardSection } from "@/components/dashboard/public-speaking/FillerWordsScorecardSection";
+import { DeliverySparkline } from "@/components/dashboard/public-speaking/DeliverySparkline";
 import { ApiError } from "@/lib/api";
 import {
   startPublicSpeakingSession,
   submitPublicSpeakingTurn,
   submitPublicSpeakingQa,
+  type PublicSpeakingScorecard,
   type SpeechType,
 } from "@/lib/publicSpeaking";
 import { buildVoiceWsUrl, useVoiceSocket, type VoiceFeatures } from "@/lib/useVoiceSocket";
 import { usePracticeTimePing } from "@/lib/usePracticeTimePing";
+import { useVideoAnalysis } from "@/lib/vision/useVideoAnalysis";
 
 const SPEECH_TYPE_CONFIG: Record<string, { label: string; description: string; ideal_wpm: string }> = {
   business_pitch: {
@@ -62,6 +67,10 @@ export default function PublicSpeakingSessionPage() {
   const config = SPEECH_TYPE_CONFIG[speechType] || SPEECH_TYPE_CONFIG.business_pitch;
 
   const [inputMode, setInputMode] = React.useState<"audio" | "text">("audio");
+  // Opt-in, off by default, and only meaningful alongside voice. Enabling it routes Start
+  // Session through the camera gate, which is what produces the gaze calibration; skip that and
+  // the payload reports itself as uncalibrated and the results tile withholds its numbers.
+  const [cameraEnabled, setCameraEnabled] = React.useState(false);
   const [textContent, setTextContent] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [sessionId, setSessionId] = React.useState<string | null>(null);
@@ -149,9 +158,26 @@ export default function PublicSpeakingSessionPage() {
     },
     onPartial,
   );
-  const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
+  const { gate: voiceGate, runWithVoiceReadiness } = useVoiceReadinessGate({
     featureName: "Public Speaking Practice",
   });
+  const {
+    gate: cameraGate,
+    runWithCameraReadiness,
+    calibration,
+  } = useCameraReadinessGate({ featureName: "delivery analysis" });
+
+  const {
+    isVideoActive,
+    isStartingVideo,
+    videoStatus,
+    error: videoError,
+    loadProgress,
+    startVideo,
+    stopVideo,
+    videoRef,
+    getVideoFeatures,
+  } = useVideoAnalysis({ calibration: calibration ?? undefined });
 
   // PDG-US-15: heartbeat pings while this speech is the active practice
   // session, crediting lifetime practice time and surfacing any milestone
@@ -169,11 +195,15 @@ export default function PublicSpeakingSessionPage() {
     voiceStartedAt.current = performance.now();
     committedTextRef.current = textContent;
     splicedPartialRef.current = null;
+    // Camera first: if it fails we still want the speech recorded. useVideoAnalysis swallows
+    // its own failures into `videoError`, so this never blocks the voice path.
+    if (cameraEnabled) await startVideo();
     await startVoice();
   };
 
   const handleStopVoice = async () => {
     await stopVoice();
+    if (isVideoActive) await stopVideo();
     if (voiceStartedAt.current != null) {
       voiceDurationRef.current += (performance.now() - voiceStartedAt.current) / 1000;
       voiceStartedAt.current = null;
@@ -186,7 +216,7 @@ export default function PublicSpeakingSessionPage() {
     try {
       const data = await startPublicSpeakingSession({
         speech_type: speechType as SpeechType,
-        input_mode: inputMode,
+        input_mode: inputMode === "audio" && cameraEnabled ? "audio_video" : inputMode,
       });
       setSessionId(data.session_id);
     } catch (err) {
@@ -212,6 +242,9 @@ export default function PublicSpeakingSessionPage() {
     setError(null);
     try {
       const f = featuresRef.current;
+      // Consume-once, exactly like the audio features above. stopVideo() has already run via
+      // handleStopVoice, so the aggregate is built and the camera is released by now.
+      const video = getVideoFeatures();
       const data = await submitPublicSpeakingTurn(sessionId, {
         text_content: content,
         duration_seconds:
@@ -226,6 +259,7 @@ export default function PublicSpeakingSessionPage() {
               duration_seconds: f.duration_seconds,
             }
           : undefined,
+        video_features: video ?? undefined,
         is_final: true,
       });
       setScorecard(data.scorecard);
@@ -258,7 +292,8 @@ export default function PublicSpeakingSessionPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      {gate}
+      {voiceGate}
+      {cameraGate}
       <MilestoneCelebrationModal
         milestone={newlyUnlocked[0] ?? null}
         onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
@@ -330,6 +365,41 @@ export default function PublicSpeakingSessionPage() {
             </button>
           </div>
 
+          {/* Camera is an add-on to Voice, never a mode of its own — physical delivery is only
+              meaningful alongside a spoken turn. Off by default; the consent line stays visible
+              rather than hiding behind a modal, because it is the whole basis for trusting this. */}
+          <label
+            className={cn(
+              "flex cursor-pointer gap-3 rounded-xl border-2 p-4 transition-all",
+              inputMode !== "audio" && "cursor-not-allowed opacity-50",
+              cameraEnabled && inputMode === "audio"
+                ? "border-primary bg-primary/5"
+                : "border-border",
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={cameraEnabled && inputMode === "audio"}
+              disabled={inputMode !== "audio"}
+              onChange={(e) => setCameraEnabled(e.target.checked)}
+              className="mt-1 h-4 w-4 shrink-0 accent-[var(--color-primary)]"
+            />
+            <div className="flex flex-col gap-1">
+              <span className="flex items-center gap-2 font-medium text-foreground">
+                <Video className="h-4 w-4 text-primary" />
+                Also analyse my body language
+                <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
+                  Beta
+                </span>
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {inputMode === "audio"
+                  ? "Your camera feed never leaves this device. We analyse it in your browser and only send a summary — no video, no images, and no frame data are uploaded or stored."
+                  : "Available with Voice input."}
+              </span>
+            </div>
+          </label>
+
           <div className="rounded-lg bg-muted/50 p-4">
             <div className="flex items-center gap-2 text-sm">
               <Clock className="h-4 w-4 text-muted-foreground" />
@@ -339,9 +409,17 @@ export default function PublicSpeakingSessionPage() {
 
           <Button
           onClick={
-            inputMode === "audio"
-              ? () => void runWithVoiceReadiness(handleStartSession)
-              : handleStartSession
+            inputMode !== "audio"
+              ? handleStartSession
+              : cameraEnabled
+                // Voice first (required modality), camera second (optional add-on). The camera
+                // gate is only invoked when the user opted in — prompting for a webcam during a
+                // voice-only session would be an unpleasant surprise.
+                ? () =>
+                    void runWithVoiceReadiness(() =>
+                      runWithCameraReadiness(handleStartSession),
+                    )
+                : () => void runWithVoiceReadiness(handleStartSession)
           }
             disabled={isSubmitting}
             className="w-full"
@@ -362,6 +440,30 @@ export default function PublicSpeakingSessionPage() {
 
           {inputMode === "audio" ? (
             <div className="flex flex-col gap-4">
+              {/* Mounted whenever the camera is opted in, not only while active — the hook needs
+                  the element to exist before startVideo() can attach the stream. Mirrored for
+                  comfort; the frames fed to MediaPipe are NOT mirrored. */}
+              {cameraEnabled ? (
+                <div className="relative self-center overflow-hidden rounded-xl border border-border bg-black">
+                  <video
+                    ref={videoRef}
+                    muted
+                    playsInline
+                    className="h-[180px] w-[240px] -scale-x-100 object-cover"
+                  />
+                  {!isVideoActive ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/70 px-4 text-center text-xs text-white">
+                      {isStartingVideo
+                        ? `${videoStatus}${loadProgress !== null ? ` ${Math.round(loadProgress * 100)}%` : ""}`
+                        : "Camera starts when you begin recording"}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {videoError ? (
+                <p className="text-center text-sm text-warning">{videoError}</p>
+              ) : null}
+
               <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border p-6">
                 <button
                   onClick={isVoiceActive ? handleStopVoice : () => void runWithVoiceReadiness(handleStartVoice)}
@@ -515,6 +617,10 @@ export default function PublicSpeakingSessionPage() {
             </div>
           </div>
 
+          {scorecard.video ? (
+            <VideoPresenceSection video={scorecard.video} timeline={scorecard.video_timeline} />
+          ) : null}
+
           {sessionId && <FillerWordsScorecardSection sessionId={sessionId} />}
 
 
@@ -553,6 +659,138 @@ export default function PublicSpeakingSessionPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Reason copy for a session the vision pipeline could not measure. Deliberately explains the
+ *  capture problem rather than showing a low number — "8% eye contact" reads as a judgement,
+ *  and users act on it even when the real answer is "the room was too dark". */
+const VIDEO_REJECTION_COPY: Record<string, string> = {
+  no_face_detected: "We couldn't see your face, so there's no delivery feedback this time.",
+  face_coverage_too_low:
+    "Your face was out of frame for much of the session, so delivery wasn't measured.",
+  too_dark: "The room was too dark to analyse your delivery.",
+  too_short: "The session was too short to measure delivery reliably.",
+  framing_unusable: "The camera framing made delivery impossible to measure.",
+  device_too_slow: "Your device couldn't keep up with the analysis, so delivery wasn't measured.",
+  camera_stopped_early: "The camera stopped partway through, so delivery is incomplete.",
+};
+
+function VideoPresenceSection({
+  video,
+  timeline,
+}: {
+  video: NonNullable<PublicSpeakingScorecard["video"]>;
+  timeline: PublicSpeakingScorecard["video_timeline"];
+}) {
+  if (video.rejection) {
+    return (
+      <div className="rounded-lg border border-border bg-muted/30 p-4">
+        <div className="flex items-start gap-3">
+          <Video className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+          <div>
+            <div className="font-medium text-foreground">Delivery not measured</div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {VIDEO_REJECTION_COPY[video.rejection] ?? VIDEO_REJECTION_COPY.no_face_detected}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Until gaze calibration ships (phase 2), the camera's position relative to the user's neutral
+  // head pose is unknown, so every derived figure carries a large unmodelled bias — the backend
+  // reports that as a very low confidence_weight. Showing "Eye Contact 62" off the back of that
+  // is precisely the confident-wrong-number failure this feature is designed to avoid, so below
+  // this threshold we confirm the capture worked and show nothing numeric.
+  if (video.confidence_weight < 0.35) {
+    return (
+      <div className="rounded-lg border border-border bg-muted/30 p-4">
+        <div className="flex items-start gap-3">
+          <Video className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <div className="font-medium text-foreground">Delivery captured</div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              We analysed your body language on your device, but we can&apos;t score it accurately
+              yet — that needs a quick camera calibration step, which is coming soon. Nothing was
+              uploaded.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const subScores: { label: string; value: number | null }[] = [
+    { label: "Eye Contact", value: video.eye_contact },
+    { label: "Posture", value: video.posture },
+    { label: "Gestures", value: video.gestures },
+    { label: "Expression", value: video.expression },
+  ];
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Video className="h-5 w-5 text-primary" />
+          <span className="font-medium text-foreground">Physical Delivery</span>
+        </div>
+        {video.visual_presence !== null ? (
+          <span className="text-2xl font-bold text-foreground">
+            {Math.round(video.visual_presence)}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        {subScores.map(({ label, value }) => (
+          <div key={label} className="rounded-lg bg-surface-elevated p-3 text-center">
+            {/* An em dash, never a 0 — null means we couldn't measure it, and the two must not
+                look the same to a reader. */}
+            <div className="text-xl font-semibold text-foreground">
+              {value === null ? "—" : Math.round(value)}
+            </div>
+            <div className="text-xs text-muted-foreground">{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {timeline && timeline.length > 1 ? (
+        <div className="mt-5 flex flex-col gap-4">
+          {/* Only channels that were actually measured render — DeliverySparkline returns null
+              when a channel has fewer than two real values, so a session without the pose model
+              simply shows fewer charts rather than an empty axis. */}
+          <DeliverySparkline
+            label="Eye contact over time"
+            values={timeline.eye_contact}
+            binSeconds={timeline.bin_seconds}
+          />
+          <DeliverySparkline
+            label="Posture over time"
+            values={timeline.posture.map((v) => (v === null ? null : v / 100))}
+            binSeconds={timeline.bin_seconds}
+            className="stroke-success"
+          />
+          <DeliverySparkline
+            label="Gesture activity"
+            values={timeline.gesture_activity}
+            binSeconds={timeline.bin_seconds}
+            className="stroke-warning"
+            format={(mean) => `${mean.toFixed(2)} avg`}
+          />
+        </div>
+      ) : null}
+
+      {/* Phase 1 ships without gaze calibration, so the eye-contact figure is provisional and
+          says so. Removing this line requires the phase 2 calibration flow to exist. */}
+      {video.confidence_weight < 0.7 ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          These delivery numbers are provisional — camera position varies between setups, so
+          treat them as a rough guide rather than an exact measurement.
+        </p>
+      ) : null}
     </div>
   );
 }

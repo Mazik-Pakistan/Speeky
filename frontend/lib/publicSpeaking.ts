@@ -1,9 +1,14 @@
 import { api } from "./api";
+import type { ScoredVideo, VideoFeatures, VideoTimeline } from "./vision/types";
 
 // Public Speaking Coach — PSC-US-01/03/04/05/06/07/11/12/14.
 // Backend routes live under /public-speaking (see backend/main.py include_router
 // prefix "/api/public-speaking"); api() prepends the backend origin + /api and
 // sends the auth cookie, so these must NOT be called with a bare relative fetch.
+
+/** "audio_video" is voice PLUS an opted-in camera. There is no video-only mode: physical
+ *  delivery is only ever scored alongside a spoken turn. */
+export type PublicSpeakingInputMode = "audio" | "text" | "audio_video";
 
 export type SpeechType =
   | "business_pitch"
@@ -16,7 +21,7 @@ export interface StartPublicSpeakingResult {
   session_id: string;
   speech_type: string;
   label: string;
-  input_mode: "audio" | "text";
+  input_mode: PublicSpeakingInputMode;
   structure_elements: string[];
   ideal_wpm_range: [number, number];
   topic: string | null;
@@ -41,6 +46,13 @@ export interface PublicSpeakingScorecard {
   summary: string;
   actionable_tips: string[];
   delivery: Record<string, unknown> | null;
+  /** Camera sessions only. Deliberately NOT folded into overall_score — see
+   *  backend/services/public_speaking_service.py::_generate_scorecard. */
+  visual_presence: number | null;
+  video: ScoredVideo | null;
+  /** Per-second channels for the results sparklines. Echoed back from the submitted payload —
+   *  the backend stores it but does not score from it. */
+  video_timeline: VideoTimeline | null;
 }
 
 export interface SubmitTurnResult {
@@ -64,7 +76,7 @@ export interface SubmitQaResult {
 
 export function startPublicSpeakingSession(body: {
   speech_type: SpeechType;
-  input_mode: "audio" | "text";
+  input_mode: PublicSpeakingInputMode;
   topic?: string | null;
 }): Promise<StartPublicSpeakingResult> {
   return api("/public-speaking/start", {
@@ -85,6 +97,9 @@ export function submitPublicSpeakingTurn(
       pitch_range_semitones?: number;
       duration_seconds?: number;
     };
+    /** Aggregated delivery metrics from the browser vision pipeline. No video, frames, or
+     *  per-frame landmarks are ever uploaded. */
+    video_features?: VideoFeatures | null;
     is_final: boolean;
   }
 ): Promise<SubmitTurnResult> {
