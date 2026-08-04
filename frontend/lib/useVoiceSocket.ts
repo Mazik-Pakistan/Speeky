@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { API_URL } from "./api";
+import { clearVoiceReady } from "./voiceReadiness";
 
 const SAMPLE_RATE = 16000; // must match backend/lib/voice_ws.py's SAMPLE_RATE
 
@@ -160,7 +161,15 @@ export function useVoiceSocket(
         setVoiceStatus("Voice disconnected.");
       };
 
-      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let micStream: MediaStream;
+      try {
+
+        // 1st time prompts only else prev-suggestion used.
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (err) {
+        clearVoiceReady(); // mic actually failed mid-session — don't trust the cached "ready" state
+        throw err;
+      }
       micStreamRef.current = micStream;
 
       const audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });

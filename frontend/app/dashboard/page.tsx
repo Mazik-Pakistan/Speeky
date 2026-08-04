@@ -10,7 +10,6 @@ import {
   Mic,
   Minus,
   Plane,
-  Plus,
   Sparkles,
   Target,
   TrendingDown,
@@ -209,10 +208,6 @@ export default function DashboardPage() {
           </h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground">{subtitle}</p>
         </div>
-        <Button type="button" size="md">
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          Start New Session
-        </Button>
       </div>
 
       <DailyChallengeCard />
@@ -401,14 +396,6 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
-
-      <button
-        type="button"
-        aria-label="Start voice session"
-        className="fixed bottom-8 right-8 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-all duration-200 hover:scale-110 hover:bg-primary-hover hover:shadow-lg active:scale-95"
-      >
-        <Mic className="h-5 w-5" aria-hidden="true" />
-      </button>
     </div>
   );
 }

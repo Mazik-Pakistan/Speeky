@@ -151,12 +151,17 @@ export default function ScenarioSessionPage() {
               setStep({
                 name: "chat",
                 session: {
-                  session_id: state.session_id, scenario_key: state.scenario_key,
-                  label: detail.label, persona: detail.persona, intent: detail.intent,
-                  target_vocab: detail.target_vocab, opening_message: "",
+                  session_id: state.session_id,
+                  scenario_key: state.scenario_key,
+                  label: detail.label,
+                  persona: detail.persona,
+                  intent: detail.intent,
+                  target_vocab: detail.target_vocab,
+                  opening_message: "",
                 },
                 turns: state.turns.map((t) => ({
-                  role: t.role === "user" ? "user" : "assistant", content: t.content,
+                  role: t.role === "user" ? "user" : "assistant",
+                  content: t.content,
                 })),
               });
               return;
@@ -329,7 +334,10 @@ export default function ScenarioSessionPage() {
         </div>
         {greeting ? (
           <div className="flex items-start gap-2.5 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
-            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            <Sparkles
+              className="mt-0.5 h-4 w-4 shrink-0 text-primary"
+              aria-hidden="true"
+            />
             {greeting}
           </div>
         ) : null}
@@ -370,7 +378,9 @@ export default function ScenarioSessionPage() {
         {gate}
         <MilestoneCelebrationModal
           milestone={newlyUnlocked[0] ?? null}
-          onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+          onClose={() =>
+            newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)
+          }
         />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h1 className="font-serif text-h2 font-semibold text-foreground">
@@ -423,7 +433,9 @@ export default function ScenarioSessionPage() {
                     : "flex max-w-[86%] items-start gap-2"
                 }
               >
-                {turn.role === "assistant" ? <AiCoachAvatar className="mt-5" /> : null}
+                {turn.role === "assistant" ? (
+                  <AiCoachAvatar className="mt-5" />
+                ) : null}
                 <div className="min-w-0 flex-1">
                   <span
                     className={cn(
@@ -443,12 +455,14 @@ export default function ScenarioSessionPage() {
                     {turn.content}
                   </div>
                 </div>
-                {turn.role === "user" ? <UserChatAvatar className="mt-5" /> : null}
+                {turn.role === "user" ? (
+                  <UserChatAvatar className="mt-5" />
+                ) : null}
               </div>
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+          <div className="flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-center">
             <input
               type="text"
               value={chatInput}
@@ -460,46 +474,56 @@ export default function ScenarioSessionPage() {
                 }
               }}
               placeholder="Type your response..."
-              className="h-11 min-w-0 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
+              className="h-11 min-w-0 sm:flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
             />
-            <Button
-              size="md"
-              loading={isSubmitting}
-              disabled={!chatInput.trim()}
-              onClick={handleSendChat}
-            >
-              Send
-            </Button>
-            {isVoiceActive ? (
+            <div className="flex justify-between">
               <Button
                 size="md"
-                variant="outline"
-                className="voice-listening-button"
-                loading={isStoppingVoice}
-                onClick={() => void stopVoice()}
+                loading={isSubmitting}
+                disabled={!chatInput.trim()}
+                onClick={handleSendChat}
               >
-                <MicOff className="h-4 w-4" aria-hidden="true" />
-                Stop Voice
+                Send
               </Button>
-            ) : (
-              <Button
-                size="md"
-                variant="outline"
-                loading={isConnectingVoice}
-                onClick={() => void runWithVoiceReadiness(startVoice)}
-              >
-                <Mic className="h-4 w-4" aria-hidden="true" />
-                Start Voice
-              </Button>
-            )}
+              {isVoiceActive ? (
+                <Button
+                  size="md"
+                  variant="outline"
+                  className="voice-listening-button"
+                  loading={isStoppingVoice}
+                  onClick={() => void stopVoice()}
+                >
+                  <MicOff className="h-4 w-4" aria-hidden="true" />
+                  Stop Voice
+                </Button>
+              ) : (
+                <Button
+                  size="md"
+                  variant="outline"
+                  loading={isConnectingVoice}
+                  onClick={() => void runWithVoiceReadiness(startVoice)}
+                >
+                  <Mic className="h-4 w-4" aria-hidden="true" />
+                  Start Voice
+                </Button>
+              )}
+            </div>
           </div>
           {voiceStatus ? (
-            <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+            <p
+              role="status"
+              aria-live="polite"
+              className="text-sm text-muted-foreground"
+            >
               {voiceStatus}
             </p>
           ) : null}
           {livePreview ? (
-            <p role="status" aria-live="polite" className="text-sm italic text-muted-foreground">
+            <p
+              role="status"
+              aria-live="polite"
+              className="text-sm italic text-muted-foreground"
+            >
               {livePreview}
             </p>
           ) : null}
@@ -608,12 +632,20 @@ export default function ScenarioSessionPage() {
             Tips for Next Time
           </h2>
           <ul className="mt-3 flex flex-col gap-2">
-            {(result.tips.length > 0 ? result.tips : [result.suggestion]).map((tip, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
-                {tip}
-              </li>
-            ))}
+            {(result.tips.length > 0 ? result.tips : [result.suggestion]).map(
+              (tip, i) => (
+                <li
+                  key={i}
+                  className="flex items-start gap-2 text-sm text-muted-foreground"
+                >
+                  <span
+                    className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
+                    aria-hidden="true"
+                  />
+                  {tip}
+                </li>
+              ),
+            )}
           </ul>
         </div>
       ) : null}
