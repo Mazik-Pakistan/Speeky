@@ -150,7 +150,8 @@ export default function ConversationSessionPage() {
   // Backend transcribes speech over a WebSocket (backend/lib/voice_ws.py) instead of
   // auto-sending — fills the input box so the user can review/edit before hitting Send.
   const getWsUrl = React.useCallback(
-    () => buildVoiceWsUrl(`/conversation/sessions/${params.sessionId}/voice-ws`),
+    () =>
+      buildVoiceWsUrl(`/conversation/sessions/${params.sessionId}/voice-ws`),
     [params.sessionId],
   );
   // Stores the latest audio features from the voice agent so handleSend can
@@ -273,7 +274,10 @@ export default function ConversationSessionPage() {
     let cancelled = false;
     async function poll() {
       try {
-        const res = await getChallengeConversationStatus(params.sessionId, localDate());
+        const res = await getChallengeConversationStatus(
+          params.sessionId,
+          localDate(),
+        );
         if (cancelled) return;
         if (res.status === "qualified") {
           setChallengeDone(true);
@@ -384,7 +388,9 @@ export default function ConversationSessionPage() {
       <div className="mx-auto flex max-w-xl flex-col gap-6">
         <MilestoneCelebrationModal
           milestone={newlyUnlocked[0] ?? null}
-          onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+          onClose={() =>
+            newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)
+          }
         />
         <div className="animate-fade-up rounded-2xl border border-border bg-gradient-to-br from-primary to-primary-hover p-8 text-center text-primary-foreground shadow-sm">
           <CheckCircle2 className="mx-auto h-6 w-6" aria-hidden="true" />
@@ -465,7 +471,9 @@ export default function ConversationSessionPage() {
       {gate}
       <MilestoneCelebrationModal
         milestone={newlyUnlocked[0] ?? null}
-        onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+        onClose={() =>
+          newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)
+        }
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-h2 font-semibold text-foreground">
@@ -519,7 +527,9 @@ export default function ConversationSessionPage() {
                   : "flex max-w-[86%] items-start gap-2"
               }
             >
-              {turn.role === "assistant" ? <AiCoachAvatar className="mt-5" /> : null}
+              {turn.role === "assistant" ? (
+                <AiCoachAvatar className="mt-5" />
+              ) : null}
               <div className="min-w-0 flex-1">
                 <span
                   className={cn(
@@ -569,14 +579,16 @@ export default function ConversationSessionPage() {
                   />
                 ) : null}
               </div>
-              {turn.role === "user" ? <UserChatAvatar className="mt-5" /> : null}
+              {turn.role === "user" ? (
+                <UserChatAvatar className="mt-5" />
+              ) : null}
             </div>
           ))}
         </div>
 
         {error ? <p className="text-sm text-danger">{error}</p> : null}
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+        <div className="flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-center">
           <input
             type="text"
             value={message}
@@ -588,39 +600,41 @@ export default function ConversationSessionPage() {
               }
             }}
             placeholder="Type a message..."
-            className="h-11 min-w-0 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
+            className="h-11 min-w-0 sm:flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
           />
-          <Button
-            size="md"
-            loading={isSending}
-            disabled={!message.trim()}
-            onClick={() => void handleSend()}
-          >
-            Send
-          </Button>
+          <div className="flex justify-between">
+            <Button
+              size="md"
+              loading={isSending}
+              disabled={!message.trim()}
+              onClick={() => void handleSend()}
+            >
+              Send
+            </Button>
 
-          {isVoiceActive ? (
-            <Button
-              size="md"
-              variant="outline"
-              className="voice-listening-button"
-              loading={isStoppingVoice}
-              onClick={() => void handleStopVoice()}
-            >
-              <MicOff className="h-4 w-4" aria-hidden="true" />
-              Stop Voice
-            </Button>
-          ) : (
-            <Button
-              size="md"
-              variant="outline"
-              loading={isConnectingVoice}
-              onClick={() => void runWithVoiceReadiness(handleStartVoice)}
-            >
-              <Mic className="h-4 w-4" aria-hidden="true" />
-              Start Voice
-            </Button>
-          )}
+            {isVoiceActive ? (
+              <Button
+                size="md"
+                variant="outline"
+                className="voice-listening-button"
+                loading={isStoppingVoice}
+                onClick={() => void handleStopVoice()}
+              >
+                <MicOff className="h-4 w-4" aria-hidden="true" />
+                Stop Voice
+              </Button>
+            ) : (
+              <Button
+                size="md"
+                variant="outline"
+                loading={isConnectingVoice}
+                onClick={() => void runWithVoiceReadiness(handleStartVoice)}
+              >
+                <Mic className="h-4 w-4" aria-hidden="true" />
+                Start Voice
+              </Button>
+            )}
+          </div>
         </div>
 
         {voiceStatus ? (
@@ -633,7 +647,11 @@ export default function ConversationSessionPage() {
           </p>
         ) : null}
         {livePreview ? (
-          <p role="status" aria-live="polite" className="text-sm italic text-muted-foreground">
+          <p
+            role="status"
+            aria-live="polite"
+            className="text-sm italic text-muted-foreground"
+          >
             {livePreview}
           </p>
         ) : null}

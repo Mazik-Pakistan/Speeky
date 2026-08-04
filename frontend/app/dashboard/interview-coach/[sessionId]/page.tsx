@@ -305,7 +305,9 @@ export default function InterviewCoachSessionPage() {
       {gate}
       <MilestoneCelebrationModal
         milestone={newlyUnlocked[0] ?? null}
-        onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+        onClose={() =>
+          newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)
+        }
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-h2 font-semibold capitalize text-foreground">
@@ -382,7 +384,7 @@ export default function InterviewCoachSessionPage() {
             Session paused — click Resume to continue.
           </p>
         ) : (
-          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+          <div className="flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-center">
             <input
               type="text"
               value={answer}
@@ -399,38 +401,40 @@ export default function InterviewCoachSessionPage() {
                 }
               }}
               placeholder="Type your answer..."
-              className="h-11 min-w-0 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
+              className="h-11 min-w-0 sm:flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
             />
-            <Button
-              size="md"
-              loading={isSubmitting}
-              disabled={!answer.trim()}
-              onClick={handleSubmitAnswer}
-            >
-              Send
-            </Button>
-            {isVoiceActive ? (
+            <div className="flex justify-between">
               <Button
                 size="md"
-                variant="outline"
-                className="voice-listening-button"
-                loading={isStoppingVoice}
-                onClick={() => void stopVoice()}
+                loading={isSubmitting}
+                disabled={!answer.trim()}
+                onClick={handleSubmitAnswer}
               >
-                <MicOff className="h-4 w-4" aria-hidden="true" />
-                Stop Voice
+                Send
               </Button>
-            ) : (
-              <Button
-                size="md"
-                variant="outline"
-                loading={isConnectingVoice}
-                onClick={() => void runWithVoiceReadiness(startVoice)}
-              >
-                <Mic className="h-4 w-4" aria-hidden="true" />
-                Start Voice
-              </Button>
-            )}
+              {isVoiceActive ? (
+                <Button
+                  size="md"
+                  variant="outline"
+                  className="voice-listening-button"
+                  loading={isStoppingVoice}
+                  onClick={() => void stopVoice()}
+                >
+                  <MicOff className="h-4 w-4" aria-hidden="true" />
+                  Stop Voice
+                </Button>
+              ) : (
+                <Button
+                  size="md"
+                  variant="outline"
+                  loading={isConnectingVoice}
+                  onClick={() => void runWithVoiceReadiness(startVoice)}
+                >
+                  <Mic className="h-4 w-4" aria-hidden="true" />
+                  Start Voice
+                </Button>
+              )}
+            </div>
           </div>
         )}
         {voiceStatus ? (
@@ -443,7 +447,11 @@ export default function InterviewCoachSessionPage() {
           </p>
         ) : null}
         {livePreview ? (
-          <p role="status" aria-live="polite" className="text-sm italic text-muted-foreground">
+          <p
+            role="status"
+            aria-live="polite"
+            className="text-sm italic text-muted-foreground"
+          >
             {livePreview}
           </p>
         ) : null}

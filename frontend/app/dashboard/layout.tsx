@@ -13,7 +13,6 @@ import { StreakNavIcon } from "@/components/dashboard/StreakNavIcon";
 import { LearningGoalGate } from "@/components/dashboard/LearningGoalGate";
 import { ConsentGate } from "@/components/dashboard/ConsentGate";
 import { VoiceStatusWidget } from "@/components/common/VoiceStatusWidget";
-import { PageTransition } from "@/components/common/PageTransition";
 import { useAuth } from "@/contexts/AuthContext";
 import { AssessmentProvider } from "@/contexts/AssessmentContext";
 import { ActiveSessionsProvider } from "@/contexts/ActiveSessionsContext";
@@ -98,7 +97,11 @@ export default function DashboardLayout({
             <PendingNotificationsBanner />
             <OveruseNudgeBanner />
             <StreakWarningBanner />
-            <PageTransition>{children}</PageTransition>
+
+            {/* Page Transition */}
+            <div key={pathname} className="animate-[fade-up_300ms_cubic-bezier(0.22,1,0.36,1)]">
+              {children}
+            </div>
           </main>
         </div>
       </div>
