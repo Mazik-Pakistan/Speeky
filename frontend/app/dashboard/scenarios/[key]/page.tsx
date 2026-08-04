@@ -517,7 +517,9 @@ export default function ScenarioSessionPage() {
       <div className="animate-fade-up rounded-2xl border border-border bg-gradient-to-br from-primary to-primary-hover p-8 text-center text-primary-foreground shadow-sm">
         <Sparkles className="mx-auto h-6 w-6" aria-hidden="true" />
         <h1 className="mt-3 font-serif text-h2 font-semibold">
-          {Math.round(result.scores.politeness ?? 0)}/100 Politeness
+          {result.scores.politeness !== null
+            ? `${Math.round(result.scores.politeness)}/100 Politeness`
+            : "Not scored"}
         </h1>
         <p className="mt-2 text-sm text-primary-foreground/85">
           {result.summary}

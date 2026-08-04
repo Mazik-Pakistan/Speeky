@@ -520,6 +520,12 @@ model BaselineAssessment {
   // "in progress" everywhere else, but get_results_summary uses this flag to retry
   // scoring instead of returning a flat "not completed" 400 forever.
   scoringFailed      Boolean        @default(false)
+  // Whether the numbers on this row are a real grade. "scored" = graded normally;
+  // "unavailable" = the relevance grader could not run, so confidenceScore is null and
+  // the UI must show "not yet graded" rather than a number. Rows written before scoring
+  // integrity was fixed keep the "scored" default even though they were graded under the
+  // old inflated logic — this column distinguishes ungraded from graded, not old from new.
+  scoringStatus      String         @default("scored")
   // PDG-US-10 E-03: distinct from isFlagged/flagReason (integrity checks on the
   // responses themselves) — records when progress_dashboard_service drops an
   // out-of-range (>100 or <0) score from the visual aggregate, for review.

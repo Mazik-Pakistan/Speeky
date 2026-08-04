@@ -445,6 +445,12 @@ Also identify positive highlights to reinforce (use ONLY these kinds):
 - "expected_vocab": correct client-service / professional vocabulary the user used well.
 - "transition": presentation/meeting transition phrasing (e.g. "Moving on to the next slide").
 
+{anchors}
+
+These bands apply to professional_tone, clarity and effectiveness alike. A submission
+that ignores the scenario's objective cannot score above 30 on effectiveness no matter
+how polished its wording is.
+
 Respond ONLY with a JSON object, no prose, in exactly this shape:
 {{
   "professional_tone": <0-100 integer>,
@@ -492,6 +498,130 @@ def build_workplace_feedback_prompt(
         submission=submission,
         input_mode=mode_label,
         delivery_note=delivery_note,
+        anchors=RELEVANCE_SCALE_ANCHORS,
+    )
+
+
+# --- Answer relevance / substance judging ---------------------------------
+# Used by lib/relevance.py, which every scored module routes through so an answer is
+# graded on whether it actually addressed the prompt — not on fluency alone.
+#
+# The anchor block below exists because an unanchored "<0-100 integer>" instruction
+# (see WORKPLACE_FEEDBACK_PROMPT above) reliably pulls an LLM toward 70-85 for almost
+# any input, including gibberish. Naming what each band *means*, and stating the
+# below-10 rule explicitly, is what makes a nonsense answer score like a nonsense answer.
+RELEVANCE_SCALE_ANCHORS = """Score bands — use the whole range, these are not suggestions:
+  0-10   : empty, unintelligible, or entirely unrelated to the question.
+  11-30  : acknowledges the topic but answers nothing that was actually asked.
+  31-50  : partially addresses the question; mostly generic filler.
+  51-70  : addresses the question with some specifics.
+  71-85  : directly and completely addresses the question with concrete detail.
+  86-100 : addresses the question with specific, well-structured, compelling detail.
+
+Hard rules:
+- If the answer is nonsense, random characters, or repeated words, score below 10.
+- If the answer is about a different subject than the question, score below 10 no
+  matter how fluent or well-formed it is.
+- If the answer is a bare non-answer ("nothing", "I don't know", "n/a"), score below 10.
+- Never award partial credit for fluency, politeness, or length alone."""
+
+ANSWER_RELEVANCE_PROMPT = """You are a strict assessment grader. Judge ONE answer against the
+question it was given. You are NOT a coach here — do not be encouraging, do not give the
+benefit of the doubt.
+
+Question asked:
+\"\"\"
+{question}
+\"\"\"
+{context_note}
+The person's answer:
+\"\"\"
+{answer}
+\"\"\"
+
+Judge two things independently:
+- relevance: did this answer address THIS question?
+- substance: is there real, specific content here, regardless of topic?
+
+{anchors}
+
+Respond ONLY with a JSON object, no prose, in exactly this shape:
+{{
+  "on_topic": <true|false>,
+  "relevance": <0-100 integer>,
+  "substance": <0-100 integer>,
+  "reason": "<one short sentence, max 20 words, naming the deciding factor>"
+}}
+"""
+
+INTERVIEW_ANSWER_GRADING_PROMPT = """You are a strict interview assessor grading a candidate's
+answers. You are NOT a coach here — do not be encouraging, do not give the benefit of the doubt.
+
+Interview context: {context}
+
+Transcript ({answer_count} answered questions, numbered in order):
+\"\"\"
+{transcript}
+\"\"\"
+
+Grade EVERY answer separately. For each, judge:
+- relevance: did the answer address the question that was actually asked?
+- structure: is it organised (e.g. situation - action - result), or a shapeless ramble?
+- specificity: concrete examples, numbers, named outcomes — or vague generalities?
+- substance: is there real content at all, regardless of topic?
+
+{anchors}
+
+The same bands apply to structure and specificity. An answer with no discernible structure
+scores below 10 on structure; an answer with no concrete detail scores below 10 on specificity.
+
+Respond ONLY with a JSON object, no prose, in exactly this shape:
+{{
+  "answers": [
+    {{
+      "index": <0-based position of the answer in the transcript>,
+      "relevance": <0-100 integer>,
+      "structure": <0-100 integer>,
+      "specificity": <0-100 integer>,
+      "substance": <0-100 integer>,
+      "reason": "<one short sentence, max 20 words>"
+    }}
+  ]
+}}
+Return exactly {answer_count} entries, one per answered question, in order.
+"""
+
+
+def build_answer_relevance_prompt(
+    question: str,
+    answer: str,
+    context: Optional[str] = None,
+) -> str:
+    """Grade a single answer against the question it was asked.
+
+    context: optional scenario framing (e.g. "baseline English assessment, fluency
+    question") so the judge knows what kind of answer is expected.
+    """
+    context_note = f"\nContext for the question: {context}\n" if context else ""
+    return ANSWER_RELEVANCE_PROMPT.format(
+        question=question,
+        answer=answer,
+        context_note=context_note,
+        anchors=RELEVANCE_SCALE_ANCHORS,
+    )
+
+
+def build_interview_answer_grading_prompt(
+    transcript: str,
+    answer_count: int,
+    context: str,
+) -> str:
+    """Grade a whole interview transcript in one call — one request per session, not per turn."""
+    return INTERVIEW_ANSWER_GRADING_PROMPT.format(
+        transcript=transcript,
+        answer_count=answer_count,
+        context=context,
+        anchors=RELEVANCE_SCALE_ANCHORS,
     )
 
 

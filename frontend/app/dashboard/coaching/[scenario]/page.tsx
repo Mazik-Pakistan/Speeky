@@ -568,9 +568,16 @@ export default function CoachingSessionPage() {
       <div className="animate-fade-up rounded-2xl border border-border bg-gradient-to-br from-primary to-primary-hover p-8 text-center text-primary-foreground shadow-sm">
         <Sparkles className="mx-auto h-6 w-6" aria-hidden="true" />
         <h1 className="mt-3 font-serif text-h2 font-semibold">
-          {Math.round(result.scores.professional_tone ?? 0)}/100 Professional
-          Tone
+          {result.scores.professional_tone !== null
+            ? `${Math.round(result.scores.professional_tone)}/100 Professional Tone`
+            : "Not scored"}
         </h1>
+        {result.scoring_status === "unavailable" && (
+          <p className="mt-2 text-sm text-primary-foreground/85">
+            Scoring is temporarily unavailable — your submission is saved. The
+            feedback below still applies.
+          </p>
+        )}
         <p className="mt-2 text-sm text-primary-foreground/85">
           {result.summary}
         </p>

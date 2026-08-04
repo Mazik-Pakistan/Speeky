@@ -31,6 +31,14 @@ export interface StartPublicSpeakingResult {
 export interface PublicSpeakingScorecard {
   speech_type: string;
   input_mode: string;
+  /** Always "scored" here: delivery is measured from the audio and is real with or
+   *  without the LLM. A failed topic check shows up as `topic_relevance: null`, not as an
+   *  ungraded scorecard. */
+  scoring_status: "scored";
+  /** How well the transcript matched the session's chosen topic, 0-100. Null when the
+   *  session had no topic or the judge could not run, in which case delivery scores stand
+   *  on their own. Otherwise it scales overall_score. */
+  topic_relevance: number | null;
   overall_score: number;
   confidence: number;
   pacing: number | null;

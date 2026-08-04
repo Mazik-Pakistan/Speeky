@@ -33,6 +33,31 @@ backend/lib/video_scorer.py   (re-applies every coverage gate; trusts nothing)
   v  visual_presence + sub-scores + flags/tips + summary sentence
 ```
 
+### The video pipeline does NOT use a WebSocket
+
+Worth stating outright, because the code deliberately *reads* like the audio pipeline and the
+resemblance misleads. The two are transport-opposites:
+
+| | Audio | Video |
+|---|---|---|
+| Transport | WebSocket (`/public-speaking/{id}/voice-ws`), streaming | **One HTTP POST at the end** |
+| Network during the session | continuous 16kHz PCM up, transcripts down | **none** |
+| Where inference runs | backend (SileroVAD + faster-whisper) | browser (MediaPipe WASM) |
+| Volume | ~32 KB/s continuous | ~11–30 KB, once |
+
+Audio needs the socket because the transcription models are server-side and it is realtime.
+Video has no such need, and streaming frames would break the privacy property the design rests
+on for no benefit.
+
+What *is* mirrored is only the contract shape (`audio_features` ↔ `video_features`) and the
+hook's API surface — `useVideoAnalysis` matches `useVoiceSocket`'s state names, start/stop, and
+consume-once getter on purpose.
+
+**In devtools, for the video path:** no WS connection (its absence is not a bug); a burst of
+`/mediapipe/*.wasm` + `.task` fetches on first camera start, then HTTP-cached `immutable`; and
+exactly one `POST /public-speaking/{id}/turn`. **Zero image or video content-type requests,
+ever** — if you see one, that is a real bug.
+
 ### Three invariants — breaking any of these produces confident, wrong coaching
 
 1. **`null` ≠ `0`.** `null` means "not measured". A speaker gesturing below the laptop lid has

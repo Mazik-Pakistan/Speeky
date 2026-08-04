@@ -33,7 +33,7 @@ from typing import Dict, List, Optional, Tuple
 
 from fastapi import WebSocket
 from prisma import Json
-from lib import llm_client, recording_engine, session_scorer, video_scorer, voice_ws
+from lib import llm_client, prompts, recording_engine, relevance, session_scorer, video_scorer, voice_ws
 from lib.audio_io import AudioDecodeError
 from lib.prisma_client import db
 from lib.session_scorer import AudioFeatures
@@ -223,6 +223,7 @@ async def submit_turn(
         analysis=analysis,
         speech_config=speech_config,
         video_features=video_features,
+        topic=session.topic,
     )
 
     # Update session — audioFeatures/videoFeatures are optional (Json?). Skip the key entirely
@@ -433,11 +434,21 @@ async def _generate_scorecard(
     analysis: Optional["recording_engine.RecordingAnalysis"],
     speech_config: Dict,
     video_features: Optional[Dict] = None,
+    topic: Optional[str] = None,
 ) -> Dict:
     if audio_features:
-        scored = session_scorer.score_audio_session(audio_features)
+        scored = session_scorer.score_audio_session(audio_features, strict=True)
     else:
-        scored = session_scorer.score_text_session(text_content)
+        scored = session_scorer.score_text_session(text_content, strict=True)
+
+    # PublicSpeakingSession.topic was stored and echoed but never compared with what the
+    # speaker actually said, so a transcript containing "problem", "solution" and "in
+    # conclusion" scored 100 on structure regardless of subject.
+    judgement = await relevance.assess(
+        topic, text_content,
+        context=f"a {speech_type} practice speech on the topic the speaker chose",
+    ) if topic else None
+    topic_relevance = judgement.relevance if judgement else None
 
     wpm_metrics = _calculate_wpm(text_content, audio_features)
     filler_analysis = _analyze_filler_words(text_content, audio_features)
@@ -454,6 +465,7 @@ async def _generate_scorecard(
         clarity_analysis=clarity_analysis,
         scored=scored,
         speech_config=speech_config,
+        topic_relevance=topic_relevance,
     )
 
     flags = _generate_flags(
@@ -501,6 +513,13 @@ async def _generate_scorecard(
     return {
         "speech_type": str(speech_type),
         "input_mode": _resolve_input_mode(audio_features, video_features),
+        # Delivery (pace, clarity, tone, structure) is measured from the audio itself and
+        # is a real score with or without the LLM, so this stays "scored" — unlike the
+        # baseline assessment, where the LLM judgement IS the score. When the topic judge
+        # could not run, `topic_relevance` is null and overall_score is simply unscaled;
+        # that is the honest, narrower claim.
+        "scoring_status": relevance.STATUS_SCORED,
+        "topic_relevance": topic_relevance,
         "overall_score": scores["overall"],
         "confidence": scores["confidence"],
         "pacing": scores["pacing"],
@@ -735,6 +754,7 @@ def _calculate_overall_scores(
     clarity_analysis: Dict,
     scored: "session_scorer.ScoredSession",
     speech_config: Dict,
+    topic_relevance: Optional[float] = None,
 ) -> Dict:
     fluency = scored.fluency_score
 
@@ -762,33 +782,45 @@ def _calculate_overall_scores(
     if clarity_score is None:
         clarity_score = fluency
 
+    # The filler term pays out for the ABSENCE of filler words, so a speaker who said
+    # nothing at all collected its full weight: with every other component at 0, an empty
+    # submission scored `0.15 * (100 - 0)` = 15/100. Nothing was said, so nothing was said
+    # fluently — the term only applies once there are words to be disfluent in.
+    filler_component = (100 - filler_penalty) if wpm_metrics.get("word_count", 0) > 0 else 0.0
+
     if speech_config.get("prioritize_energy"):
-        overall = (0.35 * tone_score + 0.25 * structure_score + 
-                   0.2 * pacing_score + 0.1 * clarity_score + 
-                   0.1 * (100 - filler_penalty))
+        overall = (0.35 * tone_score + 0.25 * structure_score +
+                   0.2 * pacing_score + 0.1 * clarity_score +
+                   0.1 * filler_component)
     elif speech_config.get("prioritize_storytelling"):
-        overall = (0.3 * structure_score + 0.25 * tone_score + 
-                   0.2 * pacing_score + 0.15 * clarity_score + 
-                   0.1 * (100 - filler_penalty))
+        overall = (0.3 * structure_score + 0.25 * tone_score +
+                   0.2 * pacing_score + 0.15 * clarity_score +
+                   0.1 * filler_component)
     elif speech_config.get("prioritize_structure"):
-        overall = (0.35 * structure_score + 0.2 * pacing_score + 
-                   0.2 * tone_score + 0.15 * clarity_score + 
-                   0.1 * (100 - filler_penalty))
+        overall = (0.35 * structure_score + 0.2 * pacing_score +
+                   0.2 * tone_score + 0.15 * clarity_score +
+                   0.1 * filler_component)
     elif speech_config.get("disable_corporate_tone"):
-        overall = (0.3 * tone_score + 0.2 * structure_score + 
-                   0.2 * pacing_score + 0.2 * clarity_score + 
-                   0.1 * (100 - filler_penalty))
+        overall = (0.3 * tone_score + 0.2 * structure_score +
+                   0.2 * pacing_score + 0.2 * clarity_score +
+                   0.1 * filler_component)
     else:
-        overall = (0.25 * structure_score + 0.25 * pacing_score + 
-                   0.2 * tone_score + 0.15 * clarity_score + 
-                   0.15 * (100 - filler_penalty))
-    
+        overall = (0.25 * structure_score + 0.25 * pacing_score +
+                   0.2 * tone_score + 0.15 * clarity_score +
+                   0.15 * filler_component)
+
+    # Did the speech address the topic the user chose? `topic_relevance` is None when the
+    # session had no topic or the judge could not run, in which case delivery scores stand
+    # on their own rather than being silently zeroed.
+    if topic_relevance is not None:
+        overall *= relevance.relevance_multiplier(topic_relevance)
+
     audience_engagement = (tone_score + structure_score) / 2
-    
+
     confidence = overall
     if clarity_analysis["issues"]:
         confidence -= 10
-    
+
     return {
         "overall": round(max(0.0, min(100.0, overall)), 1),
         "confidence": round(max(0.0, min(100.0, confidence)), 1),
@@ -993,18 +1025,27 @@ async def _evaluate_qa_response(
     if len(user_response.strip()) < 10:
         return {
             "composure": 30.0,
-            "relevance": 20.0,
+            "relevance": 0.0,
+            "scoring_status": relevance.STATUS_SCORED,
             "feedback": "You froze when asked the question. Practice buying time with phrases like 'That's a great question, let me think about that...'",
         }
-    
-    aggressive_indicators = ["wrong", "stupid", "ridiculous", "don't agree", "incorrect"]
-    if any(indicator in user_response.lower() for indicator in aggressive_indicators):
+
+    # A fluent answer to a different question is the exact failure the gate exists for.
+    gate = relevance.evaluate_substance(user_response, ai_question)
+    if gate.rejected:
         return {
-            "composure": 40.0,
-            "relevance": 60.0,
-            "feedback": "Your response sounded defensive. Accept audience questions gracefully, even if you disagree.",
+            "composure": 20.0,
+            "relevance": 0.0,
+            "scoring_status": relevance.STATUS_SCORED,
+            "feedback": "That wasn't an answer to the question. Take a breath and respond to what was actually asked.",
         }
-    
+
+    # Defensiveness caps COMPOSURE, but it no longer short-circuits the whole evaluation
+    # with a hardcoded relevance of 60 — whether the answer addressed the question is a
+    # separate matter from how gracefully it was delivered.
+    aggressive_indicators = ["wrong", "stupid", "ridiculous", "don't agree", "incorrect"]
+    is_defensive = any(i in user_response.lower() for i in aggressive_indicators)
+
     if llm_client.is_configured():
         prompt = f"""Evaluate this Q&A response:
 
@@ -1016,30 +1057,41 @@ Rate the response on:
 1. Composure (0-100): Did the speaker remain calm and professional?
 2. Relevance (0-100): Did the response directly address the question?
 
+{prompts.RELEVANCE_SCALE_ANCHORS}
+
 Provide a brief, constructive feedback tip.
 
 Return JSON with keys: composure, relevance, feedback"""
-        
+
         try:
             result = await llm_client.chat_json(
                 [{"role": "user", "content": prompt}],
-                temperature=0.3,
+                temperature=0.0,
                 max_tokens=200,
             )
-            return {
-                "composure": result.get("composure", 70.0),
-                "relevance": result.get("relevance", 70.0),
-                "feedback": result.get("feedback", "Good response."),
-            }
+            composure = relevance._clamp_score(result.get("composure"))
+            rel = relevance._clamp_score(result.get("relevance"))
+            if composure is not None and rel is not None:
+                feedback = result.get("feedback", "Good response.")
+                if is_defensive:
+                    composure = min(composure, 40.0)
+                    feedback = ("Your response sounded defensive. Accept audience questions "
+                                "gracefully, even if you disagree. " + feedback)
+                return {
+                    "composure": composure,
+                    "relevance": rel,
+                    "scoring_status": relevance.STATUS_SCORED,
+                    "feedback": feedback,
+                }
+            logger.warning("Q&A evaluation returned no usable scores: %r", result)
         except Exception as e:
             logger.error(f"Q&A evaluation failed: {e}")
-    
-    words = user_response.split()
-    composure = min(100.0, 50.0 + len(words) * 2)
-    relevance = 75.0
-    
+
+    # No grader, no numbers. This used to return composure = 50 + 2 words (so 25 words of
+    # anything scored 100) and a flat relevance of 75 that nothing had measured.
     return {
-        "composure": round(composure, 1),
-        "relevance": round(relevance, 1),
-        "feedback": "Good effort. Continue practicing impromptu responses to build confidence.",
+        "composure": None,
+        "relevance": None,
+        "scoring_status": relevance.STATUS_UNAVAILABLE,
+        "feedback": "Scoring is temporarily unavailable — your response is saved.",
     }
