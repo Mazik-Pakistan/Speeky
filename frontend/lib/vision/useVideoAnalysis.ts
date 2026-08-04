@@ -206,9 +206,13 @@ export function useVideoAnalysis(
                 readHandShape(
                   landmarks as Landmark[],
                   // Handedness is reported from the IMAGE's perspective; readHandShape swaps it
-                  // to the user's own. Default to "Right" so a missing label degrades to a
-                  // consistent side rather than throwing.
-                  result.handednesses?.[index]?.[0]?.categoryName ?? "Right",
+                  // to the user's own. `handednesses` is deprecated in favour of `handedness`,
+                  // but both ship today — prefer the current one and fall back, so this keeps
+                  // working whichever is dropped first. Default to "Right" so a missing label
+                  // degrades to a consistent side rather than throwing.
+                  result.handedness?.[index]?.[0]?.categoryName ??
+                    result.handednesses?.[index]?.[0]?.categoryName ??
+                    "Right",
                   frameSize,
                 ),
               )
