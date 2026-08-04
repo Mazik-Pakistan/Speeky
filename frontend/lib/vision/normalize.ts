@@ -16,6 +16,8 @@
  * Pure and synchronous — no React, no DOM.
  */
 
+import type { FramingState } from "./types";
+
 /** The subset of MediaPipe's NormalizedLandmark this module needs. */
 export interface Landmark {
   x: number;
@@ -76,6 +78,39 @@ export const POSE = {
   leftHip: 23,
   rightHip: 24,
 } as const;
+
+/** Healthy head-and-shoulders webcam framing, as a fraction of frame width. Shared between the
+ *  pre-session check modal and the live in-session overlay so the two never disagree. */
+const FACE_RATIO_MIN = 0.055;
+const FACE_RATIO_MAX = 0.13;
+/** Nose outside this horizontal band means the user is sitting off to one side. */
+const CENTRE_MIN = 0.25;
+const CENTRE_MAX = 0.75;
+
+/**
+ * Classify webcam framing from face landmarks alone.
+ *
+ * Used both by the calibration modal (via requestAnimationFrame) and by the live session
+ * overlay (via the face model's own cadence) — kept here rather than duplicated so the two
+ * thresholds can never drift apart.
+ */
+export function evaluateFraming(
+  landmarks: Landmark[] | undefined,
+  frame: FrameSize,
+): FramingState {
+  if (!landmarks) return "unknown";
+
+  const ratio = faceWidthRatio(landmarks, frame);
+  if (ratio === null) return "unknown";
+
+  if (ratio < FACE_RATIO_MIN) return "too_far";
+  if (ratio > FACE_RATIO_MAX) return "too_close";
+
+  const nose = landmarks[FACE.noseTip];
+  if (nose && (nose.x < CENTRE_MIN || nose.x > CENTRE_MAX)) return "off_center";
+
+  return "good";
+}
 
 /** Landmarks below this `visibility` are MediaPipe's guesses, not observations. */
 export const MIN_VISIBILITY = 0.6;

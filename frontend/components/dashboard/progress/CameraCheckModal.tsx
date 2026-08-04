@@ -164,7 +164,10 @@ export function CameraCheckModal({
   }
 
   const failure = check.failureReason ? FAILURE_COPY[check.failureReason] : null;
-  const showPreview = step !== "device" || check.isStreaming;
+  // Must mount before check.start() calls getUserMedia — start() reads videoRef.current right
+  // after the camera opens, and a null ref there throws, tearing the just-opened stream back
+  // down (camera light on, then immediately off).
+  const showPreview = step !== "device" || check.isStreaming || check.isPreparing;
 
   return (
     <Modal

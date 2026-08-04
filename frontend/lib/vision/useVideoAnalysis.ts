@@ -27,16 +27,51 @@ import {
   type FrameScheduler,
   type ModelKind,
 } from "./frameScheduler";
-import type { GazeCalibration } from "./gaze";
+import { classifyGaze, gazeAngles, type GazeBucket, type GazeCalibration } from "./gaze";
 import { anglesFromMatrix, irisOffset } from "./headPose";
 import { readHandShape } from "./metrics/hands";
 import { readPoseFrame } from "./metrics/posture";
 import { VisionLoadError, ensureLandmarkers, type Landmarkers } from "./mediapipeLoader";
-import { FACE, distancePx, type Landmark } from "./normalize";
-import type { VideoFeatures } from "./types";
+import { evaluateFraming, FACE, distancePx, type Landmark } from "./normalize";
+import type { FramingState, VideoFeatures } from "./types";
 
 /** Models loaded for a session. The scheduler's tier table decides their cadences. */
 const SESSION_MODELS: ModelKind[] = ["face", "pose", "hand"];
+
+/** Dwell before a live framing/gaze reading reaches the UI. Matches the away-episode dwell
+ *  (`GazeMetrics` doc, aggregator.ts) so a brief glance away isn't flagged as a live issue any
+ *  sooner than it would count as one in the aggregate. */
+const LIVE_DWELL_MS = 700;
+
+interface DwellState<T> {
+  value: T;
+  candidate: T;
+  since: number;
+}
+
+/** Only commits `next` once it has been the steady reading for `LIVE_DWELL_MS` — otherwise a
+ *  face sample flickering between two framing/gaze buckets would flash the live overlay at
+ *  face-model cadence (up to 15Hz). */
+function commitWithDwell<T>(
+  state: DwellState<T>,
+  next: T,
+  atMs: number,
+  setState: (value: T) => void,
+): void {
+  if (next === state.value) {
+    state.candidate = next;
+    return;
+  }
+  if (next !== state.candidate) {
+    state.candidate = next;
+    state.since = atMs;
+    return;
+  }
+  if (atMs - state.since >= LIVE_DWELL_MS) {
+    state.value = next;
+    setState(next);
+  }
+}
 
 const CAPTURE_CONSTRAINTS: MediaStreamConstraints = {
   video: {
@@ -76,6 +111,13 @@ export interface UseVideoAnalysisResult {
   videoRef: React.RefObject<HTMLVideoElement>;
   /** Consume-once, mirroring useVoiceSocket.getLastAudioFeatures(). */
   getVideoFeatures: () => VideoFeatures | null;
+  /** Live framing reading, dwell-debounced. "unknown" when the camera is off or no face has
+   *  been seen yet — never shown as an issue. */
+  liveFraming: FramingState;
+  /** Live gaze bucket, dwell-debounced. Null when the camera is off, no face is visible, or the
+   *  session has no usable calibration — an uncalibrated gaze reading is not shown live for the
+   *  same reason it is not shown in the results tile (see invariant 3, video-analysis-handoff). */
+  liveGazeBucket: GazeBucket | null;
 }
 
 const FAILURE_COPY: Record<string, string> = {
@@ -102,8 +144,20 @@ export function useVideoAnalysis(
   const [videoStatus, setVideoStatus] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [loadProgress, setLoadProgress] = React.useState<number | null>(null);
+  const [liveFraming, setLiveFraming] = React.useState<FramingState>("unknown");
+  const [liveGazeBucket, setLiveGazeBucket] = React.useState<GazeBucket | null>(null);
 
   const videoRef = React.useRef<HTMLVideoElement>(null);
+  const liveFramingDwellRef = React.useRef<DwellState<FramingState>>({
+    value: "unknown",
+    candidate: "unknown",
+    since: 0,
+  });
+  const liveGazeDwellRef = React.useRef<DwellState<GazeBucket | null>>({
+    value: null,
+    candidate: null,
+    since: 0,
+  });
   const streamRef = React.useRef<MediaStream | null>(null);
   const schedulerRef = React.useRef<FrameScheduler | null>(null);
   const aggregatorRef = React.useRef<ReturnType<typeof createAggregator> | null>(null);
@@ -128,6 +182,13 @@ export function useVideoAnalysis(
 
     const video = videoRef.current;
     if (video) video.srcObject = null;
+
+    // The overlay must not show a stale reading once the camera is off, and dwell state must
+    // not carry a half-committed candidate into the next session.
+    liveFramingDwellRef.current = { value: "unknown", candidate: "unknown", since: 0 };
+    liveGazeDwellRef.current = { value: null, candidate: null, since: 0 };
+    setLiveFraming("unknown");
+    setLiveGazeBucket(null);
   }, []);
 
   const startVideo = React.useCallback(async () => {
@@ -193,9 +254,26 @@ export function useVideoAnalysis(
 
           if (kind === "face") {
             const result = landmarkers.face.detectForVideo(video, timestampMs);
-            aggregator.addFaceSample(
-              toFaceSample(result, atMs, blendshapeIndicesRef, frameSize),
+            const sample = toFaceSample(result, atMs, blendshapeIndicesRef, frameSize);
+            aggregator.addFaceSample(sample);
+
+            const landmarks = result.faceLandmarks?.[0] as Landmark[] | undefined;
+            commitWithDwell(
+              liveFramingDwellRef.current,
+              evaluateFraming(landmarks, frameSize),
+              atMs,
+              setLiveFraming,
             );
+
+            // Uncalibrated gaze is not shown live for the same reason it is not shown in the
+            // results tile (invariant 3) — a raw head-pose reading is wrong by exactly the
+            // unmodelled camera offset.
+            const calibration = calibrationRef.current;
+            const nextGaze =
+              calibration && calibration.quality !== "failed" && sample.pose
+                ? classifyGaze(gazeAngles(sample.pose, sample.iris, calibration), calibration)
+                : null;
+            commitWithDwell(liveGazeDwellRef.current, nextGaze, atMs, setLiveGazeBucket);
             return;
           }
 
@@ -342,6 +420,8 @@ export function useVideoAnalysis(
     stopVideo,
     videoRef,
     getVideoFeatures,
+    liveFraming,
+    liveGazeBucket,
   };
 }
 

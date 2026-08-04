@@ -31,6 +31,25 @@ import {
 import { buildVoiceWsUrl, useVoiceSocket, type VoiceFeatures } from "@/lib/useVoiceSocket";
 import { usePracticeTimePing } from "@/lib/usePracticeTimePing";
 import { useVideoAnalysis } from "@/lib/vision/useVideoAnalysis";
+import type { GazeBucket } from "@/lib/vision/gaze";
+import type { FramingState } from "@/lib/vision/types";
+
+/** Short, live-overlay phrasing — terser than the calibration modal's copy, since this shows
+ *  during active recording and must not compete with the transcript for attention. Framing
+ *  takes priority over gaze: a bad gaze reading is meaningless until framing is fixed. */
+const LIVE_FRAMING_HINTS: Partial<Record<FramingState, string>> = {
+  too_close: "Move back a little",
+  too_far: "Move a little closer",
+  off_center: "Centre yourself in frame",
+  shoulders_cropped: "Tilt your screen back",
+};
+
+const LIVE_GAZE_HINTS: Partial<Record<GazeBucket, string>> = {
+  down: "Try looking up at the camera",
+  up: "Try looking at the camera",
+  side: "Try looking at the camera",
+  offscreen: "You're out of frame",
+};
 
 const SPEECH_TYPE_CONFIG: Record<string, { label: string; description: string; ideal_wpm: string }> = {
   business_pitch: {
@@ -177,7 +196,14 @@ export default function PublicSpeakingSessionPage() {
     stopVideo,
     videoRef,
     getVideoFeatures,
+    liveFraming,
+    liveGazeBucket,
   } = useVideoAnalysis({ calibration: calibration ?? undefined });
+
+  const liveVisualHint = isVideoActive
+    ? (LIVE_FRAMING_HINTS[liveFraming] ??
+      (liveGazeBucket ? LIVE_GAZE_HINTS[liveGazeBucket] : undefined))
+    : undefined;
 
   // PDG-US-15: heartbeat pings while this speech is the active practice
   // session, crediting lifetime practice time and surfacing any milestone
@@ -456,6 +482,14 @@ export default function PublicSpeakingSessionPage() {
                       {isStartingVideo
                         ? `${videoStatus}${loadProgress !== null ? ` ${Math.round(loadProgress * 100)}%` : ""}`
                         : "Camera starts when you begin recording"}
+                    </div>
+                  ) : null}
+                  {/* Live visual feedback, mirroring the calibration modal's framing banner but
+                      terse — this competes with the transcript for attention during recording,
+                      so it only appears when there's actually something to fix. */}
+                  {liveVisualHint ? (
+                    <div className="absolute inset-x-0 bottom-0 bg-warning/90 px-2 py-1 text-center text-[11px] font-medium text-white">
+                      {liveVisualHint}
                     </div>
                   ) : null}
                 </div>

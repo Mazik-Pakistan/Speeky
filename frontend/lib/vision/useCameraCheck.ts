@@ -22,7 +22,7 @@ import {
 } from "./gaze";
 import { anglesFromMatrix, irisOffset } from "./headPose";
 import { VisionLoadError, ensureLandmarkers } from "./mediapipeLoader";
-import { faceWidthRatio, FACE, type Landmark } from "./normalize";
+import { evaluateFraming, type Landmark } from "./normalize";
 import type { FramingState } from "./types";
 
 export type CameraCheckFailureReason =
@@ -42,12 +42,6 @@ const HOLD_MS = 3000;
 const SETTLE_MS = 1000;
 const SAMPLE_INTERVAL_MS = 80;
 
-/** Healthy head-and-shoulders webcam framing, as a fraction of frame width. */
-const FACE_RATIO_MIN = 0.055;
-const FACE_RATIO_MAX = 0.13;
-/** Nose outside this horizontal band means the user is sitting off to one side. */
-const CENTRE_MIN = 0.25;
-const CENTRE_MAX = 0.75;
 /** Mean luma below this (0-255) is too dark for reliable landmarks. */
 const DARK_LUMA = 40;
 
@@ -134,25 +128,6 @@ export function useCameraCheck(): CameraCheckState {
     return total / (data.length / 4);
   }, []);
 
-  const evaluateFraming = React.useCallback(
-    (landmarks: Landmark[] | undefined, video: HTMLVideoElement): FramingState => {
-      if (!landmarks) return "unknown";
-
-      const frame = { width: video.videoWidth, height: video.videoHeight };
-      const ratio = faceWidthRatio(landmarks, frame);
-      if (ratio === null) return "unknown";
-
-      if (ratio < FACE_RATIO_MIN) return "too_far";
-      if (ratio > FACE_RATIO_MAX) return "too_close";
-
-      const nose = landmarks[FACE.noseTip];
-      if (nose && (nose.x < CENTRE_MIN || nose.x > CENTRE_MAX)) return "off_center";
-
-      return "good";
-    },
-    [],
-  );
-
   const start = React.useCallback(async () => {
     if (streamRef.current) return;
 
@@ -202,7 +177,10 @@ export function useCameraCheck(): CameraCheckState {
         const matrix = result.facialTransformationMatrixes?.[0] as { data: number[] } | undefined;
         const pose = anglesFromMatrix(matrix?.data);
 
-        const nextFraming = evaluateFraming(landmarks, video);
+        const nextFraming = evaluateFraming(landmarks, {
+          width: video.videoWidth,
+          height: video.videoHeight,
+        });
         setFraming(nextFraming);
 
         if (nextFraming === "good") {
@@ -237,7 +215,7 @@ export function useCameraCheck(): CameraCheckState {
     } finally {
       setIsPreparing(false);
     }
-  }, [evaluateFraming, sampleBrightness, teardown]);
+  }, [sampleBrightness, teardown]);
 
   /**
    * Capture one calibration hold.
