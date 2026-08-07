@@ -54,6 +54,17 @@ export interface GazeCalibration {
   quality: CalibrationQuality;
 }
 
+/** Whether a calibration is good enough for its gaze readings to be worth quoting.
+ *
+ *  This is the frontend's mirror of what the backend's weight table works out to: anything short
+ *  of an on-screen-target fit of "good" quality lands under the confidence_weight the results
+ *  tile requires before it shows a number (_CALIBRATION_METHOD_WEIGHTS x _CALIBRATION_WEIGHTS in
+ *  lib/video_scorer.py). Live coaching uses it too, so the session cannot promise eye-contact
+ *  feedback it will then decline to score. */
+export function isScorableCalibration(calibration: GazeCalibration): boolean {
+  return calibration.method === "on_screen_target" && calibration.quality === "good";
+}
+
 export const NO_CALIBRATION: GazeCalibration = {
   performed: false,
   method: "none",

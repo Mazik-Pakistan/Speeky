@@ -3,27 +3,25 @@
 /**
  * Side-by-side Q&A call: the speaker on the left, the avatar audience member on the right.
  *
- * Only rendered once the session reaches `qa_phase`. During the speech itself there is no room
- * and no avatar — a live participant would talk over a monologue, and its voice would be picked
- * up by the mic feeding the audio scorer (`useVoiceSocket` captures with no echo cancellation).
- * The backend enforces this too: `live_call_service` refuses to mint a token before `qa_phase`.
+ * Only rendered once the session reaches `qa_phase`. During the speech itself there is no
+ * talking agent — one would talk over a monologue, and its voice would be picked up by the mic
+ * feeding the audio scorer (`useVoiceSocket` captures with no echo cancellation). The backend
+ * enforces this too: `live_call_service` refuses to mint a "qa" token before `qa_phase`. The
+ * silent audience shown during the speech is a separate mode — see IdleAudiencePanel.
  *
- * The user's own webcam panel deliberately reuses whatever `<video>` the caller already has
- * running for MediaPipe rather than opening a second capture — one camera, one stream.
+ * The self-view is its own capture, not the speech phase's MediaPipe stream: that camera is
+ * released the moment recording stops, and its <video> element unmounts with the recording
+ * screen. Q&A is not scored, so there is nothing to share between them anyway.
  */
 
 import * as React from "react";
-import {
-  LiveKitRoom,
-  RoomAudioRenderer,
-  VideoTrack,
-  useVoiceAssistant,
-} from "@livekit/components-react";
-import { Loader2, PhoneOff, Video as VideoIcon } from "lucide-react";
+import { PhoneOff, Video as VideoIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { useLiveCallConnection } from "@/lib/useLiveCallConnection";
+import { useSelfCamera } from "@/lib/useSelfCamera";
+
+import { AvatarRoom, AvatarVideo, Panel, PanelPlaceholder } from "./AvatarVideoPanel";
 
 interface QaAvatarCallProps {
   sessionId: string;
@@ -32,23 +30,16 @@ interface QaAvatarCallProps {
   /** The question, shown as text alongside the spoken version — a user who mishears or has the
    *  volume down should never be stuck. */
   question: string | null;
-  /** Rendered into the left panel: the existing self-view, not a second camera. */
-  selfView?: React.ReactNode;
   onEnded: () => void;
 }
 
-export function QaAvatarCall({
-  sessionId,
-  active,
-  question,
-  selfView,
-  onEnded,
-}: QaAvatarCallProps) {
+export function QaAvatarCall({ sessionId, active, question, onEnded }: QaAvatarCallProps) {
   const { connection, connecting, error, disconnect } = useLiveCallConnection(
     "public_speaking",
     sessionId,
     active,
   );
+  const { videoRef, error: cameraError } = useSelfCamera(active);
 
   function handleEnd() {
     disconnect();
@@ -77,76 +68,35 @@ export function QaAvatarCall({
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-2">
-        <Panel label="You">{selfView ?? <PanelPlaceholder text="Camera off" />}</Panel>
-
-        <Panel label="Audience">
-          {error ? (
-            // Losing the avatar must not lose the Q&A — the answer is still typed and scored the
-            // normal way, so this degrades to the existing text flow rather than blocking.
-            <PanelPlaceholder text="Couldn't reach the audience — answer below instead." />
-          ) : connection ? (
-            <LiveKitRoom
-              serverUrl={connection.url}
-              token={connection.token}
-              connect
-              audio
-              video={false}
-              onDisconnected={onEnded}
-              className="h-full w-full"
-            >
-              <RoomAudioRenderer />
-              <AvatarVideo />
-            </LiveKitRoom>
+        <Panel label="You">
+          {cameraError ? (
+            <PanelPlaceholder text={cameraError} />
           ) : (
-            <PanelPlaceholder
-              text={connecting ? "Connecting…" : "Starting…"}
-              spinner
+            // Mirrored, matching the recording screen's self-view — an unmirrored view of
+            // yourself reads as wrong even though it is what the audience sees.
+            <video
+              ref={videoRef}
+              muted
+              playsInline
+              className="h-full w-full -scale-x-100 object-cover"
             />
           )}
         </Panel>
+
+        <Panel label="Audience">
+          {/* Losing the avatar must not lose the Q&A — the answer is still typed and scored the
+              normal way, so this degrades to the existing text flow rather than blocking. */}
+          <AvatarRoom
+            connection={connection}
+            connecting={connecting}
+            tokenError={error}
+            errorText="Couldn't reach the audience — answer below instead."
+            onDisconnected={onEnded}
+          >
+            <AvatarVideo />
+          </AvatarRoom>
+        </Panel>
       </div>
-    </div>
-  );
-}
-
-/** Renders the agent's published video track, or its speaking state while it has none. */
-function AvatarVideo() {
-  const { videoTrack, state } = useVoiceAssistant();
-
-  if (videoTrack) {
-    return <VideoTrack trackRef={videoTrack} className="h-full w-full object-cover" />;
-  }
-
-  // Beyond Presence is env-gated in live_call/worker.py: with no BEY_API_KEY the call runs
-  // audio-only and no video track ever arrives. That is a supported mode, not a failure, so
-  // show the agent's state rather than an error.
-  return (
-    <PanelPlaceholder
-      text={state === "speaking" ? "Speaking…" : state === "thinking" ? "Thinking…" : "Listening…"}
-    />
-  );
-}
-
-function Panel({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <div className="relative aspect-video overflow-hidden rounded-xl border border-border bg-black">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function PanelPlaceholder({ text, spinner }: { text: string; spinner?: boolean }) {
-  return (
-    <div
-      className={cn(
-        "flex h-full w-full items-center justify-center gap-2 px-4 text-center text-xs text-white/80",
-      )}
-    >
-      {spinner ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-      {text}
     </div>
   );
 }

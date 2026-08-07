@@ -27,12 +27,19 @@ import {
   type FrameScheduler,
   type ModelKind,
 } from "./frameScheduler";
-import { classifyGaze, gazeAngles, type GazeBucket, type GazeCalibration } from "./gaze";
+import {
+  classifyGaze,
+  gazeAngles,
+  isScorableCalibration,
+  type GazeBucket,
+  type GazeCalibration,
+} from "./gaze";
 import { anglesFromMatrix, irisOffset } from "./headPose";
 import { readHandShape } from "./metrics/hands";
 import { readPoseFrame } from "./metrics/posture";
 import { VisionLoadError, ensureLandmarkers, type Landmarkers } from "./mediapipeLoader";
 import { evaluateFraming, FACE, distancePx, type Landmark } from "./normalize";
+import { loadCalibration } from "../cameraReadiness";
 import type { FramingState, VideoFeatures } from "./types";
 
 /** Models loaded for a session. The scheduler's tier table decides their cadences. */
@@ -118,6 +125,10 @@ export interface UseVideoAnalysisResult {
    *  session has no usable calibration — an uncalibrated gaze reading is not shown live for the
    *  same reason it is not shown in the results tile (see invariant 3, video-analysis-handoff). */
   liveGazeBucket: GazeBucket | null;
+  /** Whether this session's calibration is good enough for eye contact to be scored at all.
+   *  False is worth saying out loud while the camera is still running: everything else on screen
+   *  looks identical either way, so the first sign used to be an empty tile in the results. */
+  gazeScorable: boolean;
 }
 
 const FAILURE_COPY: Record<string, string> = {
@@ -146,6 +157,7 @@ export function useVideoAnalysis(
   const [loadProgress, setLoadProgress] = React.useState<number | null>(null);
   const [liveFraming, setLiveFraming] = React.useState<FramingState>("unknown");
   const [liveGazeBucket, setLiveGazeBucket] = React.useState<GazeBucket | null>(null);
+  const [gazeScorable, setGazeScorable] = React.useState(false);
 
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const liveFramingDwellRef = React.useRef<DwellState<FramingState>>({
@@ -170,6 +182,9 @@ export function useVideoAnalysis(
   const unviableRef = React.useRef(false);
   const calibrationRef = React.useRef(options.calibration);
   calibrationRef.current = options.calibration;
+  // The above is re-assigned on every render, so the resolution-checked value startVideo settles
+  // on needs somewhere of its own to live for the length of the session.
+  const sessionCalibrationRef = React.useRef<GazeCalibration | undefined>(undefined);
 
   const teardownCapture = React.useCallback(() => {
     schedulerRef.current?.stop();
@@ -232,12 +247,25 @@ export function useVideoAnalysis(
         });
       }
 
+      // The camera-check gate loads the stored calibration before this stream exists, so it
+      // cannot check it against the resolution actually in use. Now that the dimensions are
+      // known, re-load with them: a calibration fitted at a different capture size describes a
+      // different field of view, and loadCalibration drops it rather than hand back angles that
+      // no longer correspond. Falling through to no calibration is the correct outcome — the
+      // aggregate reports method "none" and the backend discounts it, which beats confident
+      // numbers built on the wrong baseline.
+      const sessionCalibration = calibrationRef.current
+        ? loadCalibration(video.videoWidth, video.videoHeight) ?? undefined
+        : undefined;
+      sessionCalibrationRef.current = sessionCalibration;
+      setGazeScorable(!!sessionCalibration && isScorableCalibration(sessionCalibration));
+
       const aggregator = createAggregator({
         videoWidth: video.videoWidth,
         videoHeight: video.videoHeight,
         modelVersions: landmarkers.versions,
         userAgentHint: coarseUserAgent(),
-        calibration: calibrationRef.current,
+        calibration: sessionCalibration,
       });
       aggregatorRef.current = aggregator;
       startedAtRef.current = performance.now();
@@ -267,10 +295,12 @@ export function useVideoAnalysis(
 
             // Uncalibrated gaze is not shown live for the same reason it is not shown in the
             // results tile (invariant 3) — a raw head-pose reading is wrong by exactly the
-            // unmodelled camera offset.
-            const calibration = calibrationRef.current;
+            // unmodelled camera offset. The bar is the same one the results tile uses, not a
+            // softer one: coaching a user's eye contact live and then declining to score it is
+            // how a session ends up feeling like it worked when it did not.
+            const calibration = sessionCalibrationRef.current;
             const nextGaze =
-              calibration && calibration.quality !== "failed" && sample.pose
+              calibration && isScorableCalibration(calibration) && sample.pose
                 ? classifyGaze(gazeAngles(sample.pose, sample.iris, calibration), calibration)
                 : null;
             commitWithDwell(liveGazeDwellRef.current, nextGaze, atMs, setLiveGazeBucket);
@@ -422,6 +452,7 @@ export function useVideoAnalysis(
     getVideoFeatures,
     liveFraming,
     liveGazeBucket,
+    gazeScorable,
   };
 }
 

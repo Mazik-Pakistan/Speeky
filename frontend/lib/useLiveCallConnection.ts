@@ -13,7 +13,7 @@
 
 import * as React from "react";
 
-import { fetchLiveCallToken, type LiveCallFeature } from "./liveCall";
+import { fetchLiveCallToken, type LiveCallFeature, type LiveCallMode } from "./liveCall";
 import { stopCurrent } from "./tts";
 
 export interface LiveCallConnection {
@@ -24,6 +24,9 @@ export interface LiveCallConnection {
 export interface UseLiveCallConnectionResult {
   connection: LiveCallConnection | null;
   connecting: boolean;
+  /** Only covers the token request. Anything that fails afterwards — LiveKit connect, track
+   *  publish, a worker that never joins — surfaces through the room component's own handlers,
+   *  not here. */
   error: string | null;
   /** Drop the room and clear state. Safe to call when not connected. */
   disconnect: () => void;
@@ -34,6 +37,7 @@ export function useLiveCallConnection(
   sessionId: string | null,
   /** Nothing is fetched until this is true — the caller decides when a room is appropriate. */
   enabled: boolean,
+  mode: LiveCallMode = "qa",
 ): UseLiveCallConnectionResult {
   const [connection, setConnection] = React.useState<LiveCallConnection | null>(null);
   const [connecting, setConnecting] = React.useState(false);
@@ -55,7 +59,7 @@ export function useLiveCallConnection(
     setConnecting(true);
     setError(null);
 
-    fetchLiveCallToken(feature, sessionId)
+    fetchLiveCallToken(feature, sessionId, mode)
       .then((result) => {
         if (!cancelled) setConnection({ token: result.token, url: result.url });
       })
@@ -71,7 +75,7 @@ export function useLiveCallConnection(
     return () => {
       cancelled = true;
     };
-  }, [enabled, feature, sessionId]);
+  }, [enabled, feature, sessionId, mode]);
 
   const disconnect = React.useCallback(() => {
     setConnection(null);

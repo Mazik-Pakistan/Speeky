@@ -7,10 +7,17 @@ assessment, coaching's draft-and-grade scenarios) where a scripted read-and-scor
 doesn't fit a live back-and-forth call.
 
 Public Speaking is a partial exception, and the distinction is worth stating: the SPEECH is a
-monologue and gets no agent at all — a live participant would talk over the speaker and its
-voice would be transcribed into the audio being scored. The Q&A that follows genuinely is
-back-and-forth, so that phase alone gets the avatar. services/live_call_service.py enforces it
-by refusing to mint a token until the session reaches "qa_phase".
+monologue and gets no *conversational* agent at all — a live participant would talk over the
+speaker and its voice would be transcribed into the audio being scored. The Q&A that follows
+genuinely is back-and-forth, so that phase alone gets the talking avatar.
+services/live_call_service.py enforces it by refusing to mint a "qa" token until the session
+reaches "qa_phase".
+
+The speech phase does get one thing: an "idle" avatar, a silent stand-in for an audience member
+to speak to. It is a separate mode, not a loosening of the above — worker.py starts it with no
+STT, LLM or TTS whatsoever, so the reasons the Q&A gate exists simply do not apply to it. That
+mode is allowed only while the session is still "in_progress" (build_idle_setup below), which is
+the exact inverse of the qa_phase window.
 """
 
 from dataclasses import dataclass
@@ -44,17 +51,58 @@ class LiveCallSetup:
     turn_handler: Callable[[str], Awaitable[str]]
 
 
-def parse_room_name(room_name: str) -> tuple[str, str]:
-    """"livecall_{feature}_{session_id}" (services/live_call_service.py). Matched against
-    the known feature list rather than a blind split — "interview_coach" and
-    "public_speaking" contain underscores themselves, so a plain split(_, 2) would cut
-    the feature name in the wrong place."""
+@dataclass
+class IdleAvatarSetup:
+    """Deliberately not a LiveCallSetup: no turn_handler, no opening_line, nothing to say.
+
+    The absence of those fields is the point — there is no callable here for a later refactor
+    to wire an LLM into by accident, which is what would put a talking agent back into the
+    speech phase.
+    """
+
+    instructions: str
+
+
+def parse_room_name(room_name: str) -> tuple[str, str, str]:
+    """"livecall_{feature}_{session_id}", or "livecall_public_speaking_{mode}_{session_id}"
+    (services/live_call_service.py). Returns (feature, mode, session_id).
+
+    Matched against the known feature list rather than a blind split — "interview_coach" and
+    "public_speaking" contain underscores themselves, so a plain split(_, 2) would cut the
+    feature name in the wrong place. Only public_speaking carries a mode segment; everything
+    else is conversational by definition, so it reports "qa".
+    """
     body = room_name.removeprefix("livecall_")
     for feature in _FEATURES:
         prefix = f"{feature}_"
-        if body.startswith(prefix):
-            return feature, body[len(prefix):]
+        if not body.startswith(prefix):
+            continue
+        rest = body[len(prefix):]
+        if feature == "public_speaking":
+            for mode in ("qa", "idle"):
+                mode_prefix = f"{mode}_"
+                if rest.startswith(mode_prefix):
+                    return feature, mode, rest[len(mode_prefix):]
+            raise ValueError(f"Public speaking room name carries no mode: {room_name!r}")
+        return feature, "qa", rest
     raise ValueError(f"Unrecognized Live Call room name: {room_name!r}")
+
+
+async def build_idle_setup(session_id: str, user_id: str) -> IdleAvatarSetup:
+    """The silent audience avatar shown during the speech itself.
+
+    Re-checks the phase even though live_call_service already did at token-mint time, matching
+    what _build_public_speaking_setup does for the Q&A side — the worker trusts the room name,
+    so the phase is worth confirming against the database once more here.
+    """
+    session = await public_speaking_service.get_session(session_id, user_id)
+    if session.get("status") != "in_progress":
+        raise SessionNotFoundError(
+            f"Public speaking session {session_id} is not in the speech phase"
+        )
+    return IdleAvatarSetup(
+        instructions="You are a silent audience member. You never speak.",
+    )
 
 
 async def build_setup(feature: str, session_id: str, user_id: str) -> LiveCallSetup:

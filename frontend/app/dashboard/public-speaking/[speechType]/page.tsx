@@ -34,6 +34,13 @@ const QaAvatarCall = dynamic(
     import("@/components/dashboard/public-speaking/QaAvatarCall").then((m) => m.QaAvatarCall),
   { ssr: false },
 );
+const IdleAudiencePanel = dynamic(
+  () =>
+    import("@/components/dashboard/public-speaking/IdleAudiencePanel").then(
+      (m) => m.IdleAudiencePanel,
+    ),
+  { ssr: false },
+);
 import { ApiError } from "@/lib/api";
 import {
   startPublicSpeakingSession,
@@ -113,10 +120,13 @@ export default function PublicSpeakingSessionPage() {
   const [qaScore, setQaScore] = React.useState<any>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [showQa, setShowQa] = React.useState(false);
-  // The avatar audience is opt-in and Q&A-only. It never runs during the speech: a live
-  // participant would talk over the speaker, and its voice would be picked up by the mic
-  // feeding the audio scorer. The backend refuses a token before qa_phase regardless.
+  // Both avatar panels are opt-in. The Q&A one talks, so it is Q&A-only: during the speech it
+  // would talk over the speaker and its voice would reach the mic feeding the audio scorer. The
+  // backend refuses a "qa" token before qa_phase regardless.
   const [qaCallActive, setQaCallActive] = React.useState(false);
+  // The speech-phase one is silent — no STT, LLM or TTS exist in that room — so it is presence
+  // to speak to, with nothing to talk over and nothing listening. Gated on in_progress instead.
+  const [idleAudienceActive, setIdleAudienceActive] = React.useState(false);
 
   const sessionIdRef = React.useRef<string | null>(null);
   sessionIdRef.current = sessionId;
@@ -229,6 +239,7 @@ export default function PublicSpeakingSessionPage() {
     getVideoFeatures,
     liveFraming,
     liveGazeBucket,
+    gazeScorable,
   } = useVideoAnalysis({ calibration: calibration ?? undefined });
 
   const liveVisualHint = isVideoActive
@@ -286,6 +297,9 @@ export default function PublicSpeakingSessionPage() {
   const handleSubmitSpeech = async () => {
     if (!sessionId) return;
     if (isVoiceActive) await handleStopVoice();
+    // Submitting flips the session to qa_phase, which invalidates the idle room's own gate.
+    // Close it here rather than letting the branch switch unmount it, so teardown is ordered.
+    setIdleAudienceActive(false);
     const content = textContent.trim();
     if (!content) {
       setError(
@@ -532,6 +546,17 @@ export default function PublicSpeakingSessionPage() {
                 <p className="text-center text-sm text-warning">{videoError}</p>
               ) : null}
 
+              {/* Said here rather than only in the results, where it arrives too late to act on:
+                  the camera looks identical whether or not eye contact will be scored, so
+                  without this the first sign is a tile that declines to show a number. */}
+              {isVideoActive && !gazeScorable ? (
+                <p className="text-center text-sm text-muted-foreground">
+                  Posture and gestures are being measured. Eye contact isn&apos;t — that needs the
+                  camera calibration step, which was skipped or didn&apos;t take. Restart the
+                  session to run it.
+                </p>
+              ) : null}
+
               <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border p-6">
                 <button
                   onClick={isVoiceActive ? handleStopVoice : () => void runWithVoiceReadiness(handleStartVoice)}
@@ -558,6 +583,26 @@ export default function PublicSpeakingSessionPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Speaking to a face beats speaking to a browser tab, but it is still a live
+                  room — opt in, same as the Q&A call does. The avatar here is silent by
+                  construction, so it cannot intrude on what is being recorded. */}
+              {idleAudienceActive ? (
+                <IdleAudiencePanel
+                  sessionId={sessionId!}
+                  active={idleAudienceActive}
+                  onHide={() => setIdleAudienceActive(false)}
+                />
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIdleAudienceActive(true)}
+                  className="w-full"
+                >
+                  Show an audience to speak to
+                </Button>
+              )}
               <Textarea
                 label="Transcript (editable)"
                 value={textContent}
@@ -604,6 +649,7 @@ export default function PublicSpeakingSessionPage() {
                 question={qaQuestion}
                 onEnded={() => setQaCallActive(false)}
               />
+
             ) : (
               <>
                 <div className="rounded-lg bg-secondary/20 p-4">
@@ -790,11 +836,11 @@ function VideoPresenceSection({
     );
   }
 
-  // Until gaze calibration ships (phase 2), the camera's position relative to the user's neutral
-  // head pose is unknown, so every derived figure carries a large unmodelled bias — the backend
-  // reports that as a very low confidence_weight. Showing "Eye Contact 62" off the back of that
-  // is precisely the confident-wrong-number failure this feature is designed to avoid, so below
-  // this threshold we confirm the capture worked and show nothing numeric.
+  // Without a good calibration the camera's position relative to the user's neutral head pose is
+  // unknown, so every derived figure carries a large unmodelled bias — the backend reports that
+  // as a very low confidence_weight. Showing "Eye Contact 62" off the back of that is precisely
+  // the confident-wrong-number failure this feature is designed to avoid, so below this
+  // threshold we confirm the capture worked and show nothing numeric.
   if (video.confidence_weight < 0.35) {
     return (
       <div className="rounded-lg border border-border bg-muted/30 p-4">
@@ -803,9 +849,10 @@ function VideoPresenceSection({
           <div>
             <div className="font-medium text-foreground">Delivery captured</div>
             <p className="mt-1 text-sm text-muted-foreground">
-              We analysed your body language on your device, but we can&apos;t score it accurately
-              yet — that needs a quick camera calibration step, which is coming soon. Nothing was
-              uploaded.
+              We analysed your body language on your device, but this session&apos;s camera
+              calibration wasn&apos;t good enough to score it from — so we&apos;d rather show
+              nothing than a misleading number. Run the calibration step at the start of your next
+              session and hold still through the countdown. Nothing was uploaded.
             </p>
           </div>
         </div>
