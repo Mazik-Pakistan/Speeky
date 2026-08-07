@@ -14,27 +14,30 @@ is identical in shape to a typed/push-to-talk one — no HTTP relay back to the 
 import asyncio
 import contextlib
 import logging
+import os
 
 from dotenv import load_dotenv
-from livekit import agents
+
+load_dotenv(override=True)  # must run before any project-lib import for proper envs.
+
+import numpy as np
+from livekit import agents, rtc
 from livekit.agents import Agent, AgentSession, stt
 from livekit.agents.voice.turn import TurnHandlingOptions
-from livekit.plugins import silero
+from livekit.plugins import bey, silero
 from prisma.engine.errors import EngineError
 
+from lib import stt_engine, tts_client
 from lib.prisma_client import db
+from lib.speech_config import load_speech_config
 from live_call import dispatch
 from live_call.llm_plugin import ServiceLLM
 from live_call.stt_plugin import WhisperSTT
 from live_call.tts_plugin import PiperTTS
 
-load_dotenv(override=True)
 logger = logging.getLogger("live-call-agent")
 
-# `dev` mode's CLI defaults the root logger to DEBUG, which makes every prisma query,
-# every piper phoneme breakdown, and asyncio's own internals print on every turn. None
-# of that is actionable here — keep our own + livekit.agents' lifecycle/warning logs,
-# drop the rest.
+# `dev` mode's CLI defaults the root logger to DEBUG, which makes every query call breakdown so reduce that to warning level.
 for _noisy in ("prisma", "asyncio", "piper"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 logging.getLogger("livekit").setLevel(logging.INFO)
@@ -54,11 +57,7 @@ async def _ensure_db_connected() -> None:
 
 
 async def _reset_db_connection() -> None:
-    """`_db_connected` was a connect-once-ever flag — once True it stayed True even
-    if the query engine process died underneath it (DB restart, OOM, network drop),
-    so every job after that failed forever until someone restarted the whole worker.
-    Drop the stale engine handle and clear the flag so the next job's
-    `_ensure_db_connected()` spins up a fresh one instead of reusing a dead one."""
+    """ _ensure_db_connected() spins up a fresh one instead of reusing a dead one."""
     global _db_connected
     async with _db_lock:
         _db_connected = False
@@ -67,6 +66,38 @@ async def _reset_db_connection() -> None:
 
 
 _SETUP_TIMEOUT_S = 15
+
+
+def _prewarm(proc: agents.JobProcess) -> None:
+    """Runs once per worker subprocess, before it accepts any job — loads Silero
+    once instead of on every entrypoint() call (official LiveKit prewarm pattern)."""
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration=1.1)
+
+
+def _warm_stt_tts() -> None:
+    """faster-whisper (thread-local) and Piper (process-global) both lazy-load their
+    model on first real call — several seconds of load time on top of actual inference.
+    That cost lands on whichever turn happens first in a call (the
+    canned opener's TTS, or worse, the caller's own STT if they talk over it), reading as the agent going silent. Fired fire-and-forget right after room connect so it overlaps the existing DB/setup awaits instead of adding wall-clock time. Piper's
+    warm-up is a permanent win (global singleton); whisper's is best-effort only since
+    a later call can still land on a different, cold executor thread."""
+    with contextlib.suppress(Exception):
+        stt_engine.transcribe(np.zeros(8000, dtype=np.float32), 16000, load_speech_config())
+    with contextlib.suppress(Exception):
+        tts_client.synthesize(" ")
+
+
+async def _start_avatar_or_skip(session: AgentSession, room: rtc.Room) -> bool:
+    """Optional Beyond Presence lip-synced avatar. Env-gated (unset key or blocked/dropped = audio-call only)."""
+    if not os.getenv("BEY_API_KEY"):
+        return False
+    try:
+        avatar = bey.AvatarSession(avatar_id=os.getenv("BEY_AVATAR_ID","694c83e2-8895-4a98-bd16-56332ca3f449"))
+        await asyncio.wait_for(avatar.start(session, room=room), timeout=_SETUP_TIMEOUT_S)
+        return True
+    except Exception:
+        logger.exception("Beyond Presence avatar failed to start; continuing audio-only")
+        return False
 
 
 async def _speak_and_disconnect(ctx: agents.JobContext, message: str) -> None:
@@ -84,6 +115,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # must never block the room join itself, or the caller sees an agent that never
     # even connects (indistinguishable from a crash) instead of a spoken error.
     await ctx.connect()
+    asyncio.create_task(asyncio.to_thread(_warm_stt_tts))
 
     feature, session_id = dispatch.parse_room_name(ctx.room.name)
     participant = await ctx.wait_for_participant()
@@ -119,10 +151,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # min_silence_duration is longer than push-to-talk's 0.55s (lib/voice_ws.py):
     # push-to-talk is "read one sentence", Live Call is free conversation where an ESL
     # learner routinely pauses mid-sentence to find a word. At 0.55s that pause reads as
-    # "done talking" — the fragment gets sent as its own turn, generates an off-topic
-    # reply, and the rest of what they were saying becomes a second, disconnected turn
-    # (this is what looked like "no answer, then a doubled message").
-    vad = silero.VAD.load(min_silence_duration=1.1)
+    # "done talking"
+    vad = ctx.proc.userdata["vad"]
     session = AgentSession(
         stt=stt.StreamAdapter(stt=WhisperSTT(), vad=vad),
         llm=ServiceLLM(setup.turn_handler),
@@ -134,13 +164,30 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # interim text, which timed out and mis-fired here, cutting users off mid-
         # sentence). Plain VAD silence-based endpointing, on both turn-taking and
         # interruption detection, matches what we can actually signal from a batch STT.
+        #
+        # "dynamic" mode starts at min_delay (snappier than the old fixed 1.1s) and
+        # learns this caller's actual pause length from their own speech, floating the
+        # wait up toward max_delay when they hesitate mid-sentence — fast by default,
+        # still forgiving of a real pause, instead of every user paying a flat tax.
         turn_handling=TurnHandlingOptions(
             turn_detection="vad",
-            endpointing={"min_delay": 1.1, "max_delay": 5.0},
+            endpointing={"mode": "dynamic", "min_delay": 0.7, "max_delay": 5.0},
             interruption={"mode": "vad"},
         ),
     )
+    await _start_avatar_or_skip(session, ctx.room)
     await session.start(room=ctx.room, agent=Agent(instructions=setup.instructions))
+
+    # Voice barge-in (talking over the agent) is already handled by
+    # TurnHandlingOptions(interruption={"mode": "vad"}) above — the framework cuts off
+    # whatever's currently playing the instant VAD detects the user speaking. This adds
+    # the other trigger the frontend wants: a manual "interrupt" button for when the
+    # user wants to jump in without out-talking the agent. 
+    def _on_interrupt_rpc(_data: rtc.RpcInvocationData) -> str:
+        session.interrupt()
+        return "ok"
+
+    ctx.room.local_participant.register_rpc_method("interrupt_agent", _on_interrupt_rpc)
 
     # The caller's mic is live the instant start() returns, and our STT is a single
     # batch transcription per VAD segment, not a real streaming one — if the canned
@@ -166,4 +213,4 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
 
 if __name__ == "__main__":
-    agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=entrypoint))
+    agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=_prewarm))

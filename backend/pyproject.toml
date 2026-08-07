@@ -43,6 +43,9 @@ dependencies = [
     "livekit-api>=0.8",
     "livekit-agents>=1.0",
     "livekit-plugins-silero>=1.0",
+    # Optional Beyond Presence avatar (lip-synced video) — env-gated in worker.py,
+    # calls stay audio-only if BEY_API_KEY isn't set.
+    "livekit-plugins-bey>=1.6",
 ]
 
 [tool.taskipy.tasks]

@@ -4,6 +4,7 @@ import * as React from "react";
 import {
   LiveKitRoom,
   RoomAudioRenderer,
+  VideoTrack,
   useVoiceAssistant,
   useLocalParticipant,
   useMultibandTrackVolume,
@@ -42,10 +43,8 @@ interface LiveCallModalProps {
 }
 
 /**
- * Shared Live Call UI for Conversation / Interview Coach / Scenario. Renders
- * as a full-screen sheet on small viewports and a centered card on larger
- * ones. Background + orb are a CSS-only ambient visualization (no WebGL/
- * third-party shader) built from the app's own --primary/--accent theme
+ * Shared Live Call UI with background + orb are a CSS-only ambient visualization
+ * built from the app's own --primary/--accent theme
  * tokens, so it's themed automatically in both light and dark mode.
  */
 export function LiveCallModal({
@@ -56,31 +55,41 @@ export function LiveCallModal({
   onEndSession,
   onCallEnded,
 }: LiveCallModalProps) {
-  const [connection, setConnection] = React.useState<{ token: string; url: string } | null>(null);
+  const [connection, setConnection] = React.useState<{
+    token: string;
+    url: string;
+  } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [connecting, setConnecting] = React.useState(false);
   const [endingSession, setEndingSession] = React.useState(false);
+  // Live, not one-shot — mirrors useVoiceAssistant's state directly (via
+  // setAgentConnecting, passed straight down as a stable setState reference) so the
+  // connect sound and the "Connecting…" blink can never desync from what's on screen.
+  const [agentConnecting, setAgentConnecting] = React.useState(true);
 
   React.useEffect(() => {
     if (!open) {
       setConnection(null);
       setError(null);
+      setAgentConnecting(true);
       return;
     }
-    // The chat page's "Audio mode" TTS (lib/tts.ts) may still be reading out a
-    // previous message when Live Call opens — without this they talk over each
-    // other. Live Call owns the mic/speaker from here on.
+
+    // Live Call owns the mic/speaker from here on.
     stopCurrent();
     let cancelled = false;
     setConnecting(true);
     setError(null);
+    setAgentConnecting(true);
     fetchLiveCallToken(feature, sessionId)
       .then((result) => {
         if (!cancelled) setConnection({ token: result.token, url: result.url });
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Couldn't start the call.");
+          setError(
+            err instanceof Error ? err.message : "Couldn't start the call.",
+          );
         }
       })
       .finally(() => {
@@ -90,6 +99,21 @@ export function LiveCallModal({
       cancelled = true;
     };
   }, [open, feature, sessionId]);
+
+  const isConnectingSound =
+    open && !error && (connecting || !connection || agentConnecting);
+  React.useEffect(() => {
+    if (!isConnectingSound) return;
+    const audio = new Audio("/sounds/livecall-connect.mp3");
+    audio.loop = true;
+    void audio.play().catch(() => {
+      // Autoplay blocked or file missing — silently skip, no dead-air regression.
+    });
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+    };
+  }, [isConnectingSound]);
 
   if (!open) return null;
 
@@ -112,13 +136,7 @@ export function LiveCallModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center sm:p-4">
-      {/* h-auto + max-h-[Xvh] (not a fixed h-[Xvh]) above mobile — the card sizes to
-          its actual content and only clamps (letting the captions region scroll
-          internally) on a viewport short enough that content genuinely doesn't
-          fit. A fixed vh height clipped the button row off the bottom edge on
-          real desktop windows shorter than assumed (browser chrome, OS scaling,
-          a non-maximized window). */}
-      <div className="flex h-[100dvh] max-h-[100dvh] w-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(ellipse_at_50%_10%,hsl(var(--primary)/0.28),hsl(var(--background))_65%)] sm:h-auto sm:max-h-[85vh] sm:w-[90vw] sm:max-w-md sm:rounded-2xl sm:border sm:border-border sm:shadow-xl md:w-3/5 md:max-w-2xl md:max-h-[80vh] lg:w-1/2 lg:max-w-3xl lg:max-h-[75vh]">
+      <div className="flex h-[100vh] w-full flex-col overflow-hidden bg-[radial-gradient(ellipse_at_50%_10%,hsl(var(--primary)/0.28),hsl(var(--background))_65%)] sm:h-[85vh] sm:max-h-[85vh] sm:w-[90vw] sm:max-w-md sm:rounded-2xl sm:border sm:border-border sm:shadow-xl md:w-3/5 md:max-w-2xl lg:w-1/2 lg:max-w-3xl">
         <div className="flex shrink-0 items-center justify-between px-4 py-3 sm:px-5">
           <p className="text-sm font-semibold text-foreground">Live Call</p>
           <button
@@ -144,7 +162,9 @@ export function LiveCallModal({
               className="h-8 w-8 animate-spin rounded-full border-2 border-current border-t-transparent text-muted-foreground"
               aria-hidden="true"
             />
-            <p className="text-sm text-muted-foreground">Connecting…</p>
+            <p className="text-sm text-muted-foreground animate-pulse">
+              Connecting…
+            </p>
           </div>
         ) : (
           <LiveKitRoom
@@ -153,7 +173,7 @@ export function LiveCallModal({
             connect
             audio
             video={false}
-            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            className="flex flex-1 flex-col sm:overflow-y-auto"
             onDisconnected={() => setConnection(null)}
           >
             <RoomAudioRenderer />
@@ -161,6 +181,7 @@ export function LiveCallModal({
               endingSession={endingSession}
               onEndSession={() => void handleEndSession()}
               onEndCall={handleEndCall}
+              onConnectingChange={setAgentConnecting}
             />
           </LiveKitRoom>
         )}
@@ -173,44 +194,111 @@ function LiveCallControls({
   endingSession,
   onEndSession,
   onEndCall,
+  onConnectingChange,
 }: {
   endingSession: boolean;
   onEndSession: () => void;
   onEndCall: () => void;
+  /** Kept in sync with every connecting/initializing transition (not one-shot) so
+   * the modal's connect sound + "Connecting…" blink always mirror the real state. */
+  onConnectingChange: (connecting: boolean) => void;
 }) {
-  const { state, audioTrack } = useVoiceAssistant();
-  const { localParticipant, isMicrophoneEnabled, microphoneTrack } = useLocalParticipant();
+  const { state, audioTrack, videoTrack, agent } = useVoiceAssistant();
+  const { localParticipant, isMicrophoneEnabled, microphoneTrack } =
+    useLocalParticipant();
+  const localMicTrack = microphoneTrack?.track as LocalAudioTrack | undefined;
+  const isAgentTurn = state === "speaking" || state === "thinking";
+  const isConnectingState = state === "connecting" || state === "initializing";
+
+  React.useEffect(() => {
+    onConnectingChange(isConnectingState);
+  }, [isConnectingState, onConnectingChange]);
+
+  async function handleInterrupt() {
+    if (!agent) return;
+    try {
+      await localParticipant.performRpc({
+        destinationIdentity: agent.identity,
+        method: "interrupt_agent",
+        payload: "",
+      });
+    } catch {
+      // Best-effort — a missed interrupt just means the agent keeps talking a beat longer.
+    }
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
       {/* Orb + status never scroll or shrink — always fully visible no matter how
           long the caption text below grows or how much vertical room the modal has. */}
       <div className="flex shrink-0 flex-col items-center gap-3 pt-2">
-        <LiveCallOrb
-          state={state}
-          agentAudioTrack={audioTrack}
-          localMicTrack={microphoneTrack?.track as LocalAudioTrack | undefined}
-        />
-        <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+        {videoTrack ? (
+          <div className="relative w-40 sm:w-56 md:w-64">
+            {isAgentTurn ? (
+              <div className="absolute left-1/2 bottom-0 z-10 -translate-x-1/2 translate-y-1/2">
+                <LiveCallOrb
+                  size="sm"
+                  state={state}
+                  agentAudioTrack={audioTrack}
+                  localMicTrack={localMicTrack}
+                />
+              </div>
+            ) : null}
+            <VideoTrack
+              trackRef={videoTrack}
+              className="aspect-square w-full rounded-2xl object-cover"
+            />
+          </div>
+        ) : (
+          <LiveCallOrb
+            state={state}
+            agentAudioTrack={audioTrack}
+            localMicTrack={localMicTrack}
+          />
+        )}
+        <p
+          role="status"
+          aria-live="polite"
+          className={cn(
+            "text-sm text-muted-foreground",
+            isConnectingState && "animate-pulse",
+          )}
+        >
           {STATE_LABELS[state] ?? "Connected"}
         </p>
+        {state === "speaking" ? (
+          <button
+            type="button"
+            onClick={() => void handleInterrupt()}
+            className="rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            Jump in
+          </button>
+        ) : null}
       </div>
-
-      {/* Captions — the only part allowed to scroll. A long exchange gets its own
-          scrollbar here instead of dragging the orb along with it or growing the
-          modal past its bounds; short exchanges (the common case) just sit centered
-          in the space below the orb, no scrollbar at all since nothing overflows. */}
-      <div className="mt-3 flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto">
+      <div className="mt-3 flex min-h-[4.5rem] flex-1 flex-col items-center justify-center overflow-y-auto">
         <LiveCallLastLines localIdentity={localParticipant.identity} />
       </div>
 
       <div className="flex shrink-0 flex-col items-center gap-3 pt-3">
+        {videoTrack && !isAgentTurn ? (
+          <LiveCallOrb
+            size="sm"
+            state={state}
+            agentAudioTrack={audioTrack}
+            localMicTrack={localMicTrack}
+          />
+        ) : null}
         <div className="flex items-center gap-5">
           <button
             type="button"
-            onClick={() => void localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled)}
+            onClick={() =>
+              void localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled)
+            }
             aria-pressed={isMicrophoneEnabled}
-            aria-label={isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"}
+            aria-label={
+              isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"
+            }
             className={cn(
               "flex h-12 w-12 shrink-0 items-center justify-center rounded-full border transition-colors sm:h-14 sm:w-14",
               isMicrophoneEnabled
@@ -260,40 +348,85 @@ function LiveCallOrb({
   state,
   agentAudioTrack,
   localMicTrack,
+  size = "lg",
 }: {
   state: string;
   agentAudioTrack?: TrackReference;
   localMicTrack?: LocalAudioTrack;
+  /** "sm" is the turn-indicator badge shown alongside an avatar video; "lg"
+   * (default) is the standalone orb shown when no avatar video is active. */
+  size?: "lg" | "sm";
 }) {
   const isAgentTurn = state === "speaking" || state === "thinking";
   const activeTrack = isAgentTurn ? agentAudioTrack : localMicTrack;
-  const rawBands = useMultibandTrackVolume(activeTrack, { bands: ORB_BANDS, updateInterval: 50 });
+  const rawBands = useMultibandTrackVolume(activeTrack, {
+    bands: ORB_BANDS,
+    updateInterval: 50,
+    // Library defaults (loPass:100/hiPass:600 bins, no smoothingTimeConstant override)
+    // sit above most vocal energy and inherit the Web Audio AnalyserNode's spec
+    // default smoothingTimeConstant of 0.8 — heavy frame-to-frame damping, which is
+    // why the orb barely moved. Lower bins = more low/mid vocal range; low smoothing
+    // = the orb actually snaps to what's being said instead of crawling toward it.
+    loPass: 15,
+    hiPass: 350,
+    analyserOptions: { fftSize: 2048, smoothingTimeConstant: 0.15 },
+  });
   const [bass, low, high, treble] =
-    rawBands.length === ORB_BANDS ? rawBands.map((v) => Math.min(v, 1)) : [0, 0, 0, 0];
+    rawBands.length === ORB_BANDS
+      ? rawBands.map((v) => Math.min(v, 1))
+      : [0, 0, 0, 0];
 
   const colorClass = isAgentTurn ? "bg-primary" : "bg-accent";
   const colorVar = isAgentTurn ? "--primary" : "--accent";
 
   return (
-    <div className="relative flex h-28 w-28 shrink-0 items-center justify-center sm:h-44 sm:w-44 md:h-52 md:w-52">
+    <div
+      className={cn(
+        "relative flex shrink-0 items-center justify-center",
+        size === "lg"
+          ? "h-28 w-28 sm:h-44 sm:w-44 md:h-52 md:w-52"
+          : "h-14 w-14 sm:h-16 sm:w-16",
+      )}
+    >
       {/* Bass — outermost, softest, widest swing */}
       <div
-        className={cn("absolute inset-0 rounded-full blur-3xl transition-[background-color] duration-700 ease-out", colorClass)}
-        style={{ opacity: 0.28 + bass * 0.5, transform: `scale(${0.85 + bass * 0.45})` }}
+        className={cn(
+          "absolute inset-0 rounded-full blur-3xl transition-[background-color] duration-700 ease-out",
+          colorClass,
+        )}
+        style={{
+          opacity: 0.28 + bass * 0.5,
+          transform: `scale(${0.85 + bass * 0.45})`,
+        }}
       />
       {/* Low-mid */}
       <div
-        className={cn("absolute h-4/5 w-4/5 rounded-full blur-2xl transition-[background-color] duration-500 ease-out", colorClass)}
-        style={{ opacity: 0.32 + low * 0.45, transform: `scale(${0.88 + low * 0.32})` }}
+        className={cn(
+          "absolute h-4/5 w-4/5 rounded-full blur-2xl transition-[background-color] duration-500 ease-out",
+          colorClass,
+        )}
+        style={{
+          opacity: 0.32 + low * 0.45,
+          transform: `scale(${0.88 + low * 0.32})`,
+        }}
       />
       {/* High-mid */}
       <div
-        className={cn("absolute h-3/5 w-3/5 rounded-full blur-xl transition-[background-color] duration-500 ease-out", colorClass)}
-        style={{ opacity: 0.4 + high * 0.4, transform: `scale(${0.9 + high * 0.22})` }}
+        className={cn(
+          "absolute h-3/5 w-3/5 rounded-full blur-xl transition-[background-color] duration-500 ease-out",
+          colorClass,
+        )}
+        style={{
+          opacity: 0.4 + high * 0.4,
+          transform: `scale(${0.9 + high * 0.22})`,
+        }}
       />
       {/* Treble — core, sharpest response, real glow via box-shadow */}
       <div
-        className={cn("relative h-2/5 w-2/5 rounded-full transition-[background-color] duration-700 ease-out", colorClass)}
+        className={cn(
+          "relative h-2/5 w-2/5 rounded-full transition-[background-color] duration-700 ease-out",
+          colorClass,
+        )}
         style={{
           transform: `scale(${0.94 + treble * 0.22})`,
           boxShadow: `0 0 ${30 + treble * 40}px ${6 + treble * 12}px hsl(var(${colorVar}) / ${0.35 + treble * 0.4})`,
@@ -326,7 +459,10 @@ function useFadeHandoff(value: TranscriptSegment | null) {
     }
     idRef.current = nextId;
     setPair((prev) => ({ current: value, exiting: prev.current }));
-    const timer = setTimeout(() => setPair((prev) => ({ ...prev, exiting: null })), 320);
+    const timer = setTimeout(
+      () => setPair((prev) => ({ ...prev, exiting: null })),
+      320,
+    );
     return () => clearTimeout(timer);
   }, [value]);
 
@@ -392,9 +528,7 @@ function LiveCallSpeakerSlot({
 }
 
 /**
- * Just the most recent AI line and most recent your-line — not a transcript,
- * not a chat log. Each is replaced (with a fade-out/fade-in hand-off, not an
- * instant swap) when a newer one for that speaker arrives.
+ * Just the most recent AI line and most recent your-line, not a transcript or chat-log.
  */
 function LiveCallLastLines({ localIdentity }: { localIdentity: string }) {
   const transcriptions = useTranscriptions();
@@ -404,7 +538,8 @@ function LiveCallLastLines({ localIdentity }: { localIdentity: string }) {
     for (const seg of transcriptions) {
       const isLocal = seg.participantInfo.identity === localIdentity;
       if (isLocal !== matchLocal) continue;
-      if (!latest || seg.streamInfo.timestamp > latest.streamInfo.timestamp) latest = seg;
+      if (!latest || seg.streamInfo.timestamp > latest.streamInfo.timestamp)
+        latest = seg;
     }
     return latest;
   };
@@ -416,8 +551,16 @@ function LiveCallLastLines({ localIdentity }: { localIdentity: string }) {
 
   return (
     <div className="flex w-full max-w-sm flex-col items-center gap-1.5 text-center sm:max-w-md md:max-w-xl lg:max-w-2xl">
-      <LiveCallSpeakerSlot segment={latestAgent} label="Coach" className="text-foreground" />
-      <LiveCallSpeakerSlot segment={latestUser} label="You" className="text-muted-foreground" />
+      <LiveCallSpeakerSlot
+        segment={latestAgent}
+        label="Coach"
+        className="text-foreground"
+      />
+      <LiveCallSpeakerSlot
+        segment={latestUser}
+        label="You"
+        className="text-muted-foreground"
+      />
     </div>
   );
 }
