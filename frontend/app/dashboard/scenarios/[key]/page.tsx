@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
+import { toast } from "react-toastify";
 import { SessionRating } from "@/components/dashboard/SessionRating";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -9,6 +11,7 @@ import {
   Lock,
   Mic,
   MicOff,
+  Phone,
   Sparkles,
   TriangleAlert,
 } from "lucide-react";
@@ -16,6 +19,13 @@ import { Button } from "@/components/ui/button";
 import { AiCoachAvatar } from "@/components/common/AiCoachAvatar";
 import { UserChatAvatar } from "@/components/common/UserChatAvatar";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
+
+// livekit-client is ~150KB — load it only once a user actually opens a call,
+// not on every visit to this page.
+const LiveCallModal = dynamic(
+  () => import("@/components/common/LiveCallModal").then((m) => m.LiveCallModal),
+  { ssr: false },
+);
 import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { ApiError } from "@/lib/api";
 import {
@@ -68,6 +78,7 @@ export default function ScenarioSessionPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [audioMode, setAudioMode] = React.useState(false);
   const [greeting, setGreeting] = React.useState<string | null>(null);
+  const [liveCallOpen, setLiveCallOpen] = React.useState(false);
   const chatTurns = step.name === "chat" ? step.turns : null;
   const scrollRef = useAutoScroll(chatTurns?.length ?? 0);
 
@@ -268,6 +279,29 @@ export default function ScenarioSessionPage() {
     return () => clearTimeout(timer);
   }, [step, chatInput, isSubmitting, sendTurn]);
 
+  // Re-fetches turns from the backend after a Live Call ends — the call's turns
+  // already landed via the same send_turn path a typed message uses, this just
+  // pulls them into view.
+  async function refreshScenarioTurns() {
+    if (step.name !== "chat") return;
+    try {
+      const state = await getScenarioSessionState(step.session.session_id);
+      setStep((prev) =>
+        prev.name === "chat"
+          ? {
+              ...prev,
+              turns: state.turns.map((t) => ({
+                role: t.role === "user" ? "user" : "assistant",
+                content: t.content,
+              })),
+            }
+          : prev,
+      );
+    } catch {
+      toast.error("Couldn't refresh the transcript.");
+    }
+  }
+
   async function handleEnd() {
     if (step.name !== "chat") return;
     if (isVoiceActive) await stopVoice();
@@ -376,6 +410,16 @@ export default function ScenarioSessionPage() {
     return (
       <div className="mx-auto flex max-w-2xl flex-col gap-4">
         {gate}
+        {liveCallOpen ? (
+          <LiveCallModal
+            feature="scenario"
+            sessionId={step.session.session_id}
+            open={liveCallOpen}
+            onClose={() => setLiveCallOpen(false)}
+            onEndSession={handleEnd}
+            onCallEnded={() => void refreshScenarioTurns()}
+          />
+        ) : null}
         <MilestoneCelebrationModal
           milestone={newlyUnlocked[0] ?? null}
           onClose={() =>
@@ -476,7 +520,7 @@ export default function ScenarioSessionPage() {
               placeholder="Type your response..."
               className="h-11 min-w-0 sm:flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
             />
-            <div className="flex justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <Button
                 size="md"
                 loading={isSubmitting}
@@ -485,28 +529,40 @@ export default function ScenarioSessionPage() {
               >
                 Send
               </Button>
-              {isVoiceActive ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {isVoiceActive ? (
+                  <Button
+                    size="md"
+                    variant="outline"
+                    className="voice-listening-button"
+                    loading={isStoppingVoice}
+                    onClick={() => void stopVoice()}
+                  >
+                    <MicOff className="h-4 w-4" aria-hidden="true" />
+                    Stop Voice
+                  </Button>
+                ) : (
+                  <Button
+                    size="md"
+                    variant="outline"
+                    loading={isConnectingVoice}
+                    onClick={() => void runWithVoiceReadiness(startVoice)}
+                  >
+                    <Mic className="h-4 w-4" aria-hidden="true" />
+                    Start Voice
+                  </Button>
+                )}
                 <Button
                   size="md"
                   variant="outline"
-                  className="voice-listening-button"
-                  loading={isStoppingVoice}
-                  onClick={() => void stopVoice()}
+                  onClick={() =>
+                    void runWithVoiceReadiness(() => setLiveCallOpen(true))
+                  }
                 >
-                  <MicOff className="h-4 w-4" aria-hidden="true" />
-                  Stop Voice
+                  <Phone className="h-4 w-4" aria-hidden="true" />
+                  Live Call
                 </Button>
-              ) : (
-                <Button
-                  size="md"
-                  variant="outline"
-                  loading={isConnectingVoice}
-                  onClick={() => void runWithVoiceReadiness(startVoice)}
-                >
-                  <Mic className="h-4 w-4" aria-hidden="true" />
-                  Start Voice
-                </Button>
-              )}
+              </div>
             </div>
           </div>
           {voiceStatus ? (

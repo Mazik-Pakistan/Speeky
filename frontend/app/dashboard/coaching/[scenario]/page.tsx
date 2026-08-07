@@ -1,12 +1,14 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "react-toastify";
 import {
   CheckCircle2,
   Mic,
   MicOff,
+  Phone,
   Sparkles,
   TriangleAlert,
 } from "lucide-react";
@@ -15,6 +17,13 @@ import { AiCoachAvatar } from "@/components/common/AiCoachAvatar";
 import { UserChatAvatar } from "@/components/common/UserChatAvatar";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
 import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
+
+// livekit-client is ~150KB — load it only once a user actually opens a call,
+// not on every visit to this page.
+const LiveCallModal = dynamic(
+  () => import("@/components/common/LiveCallModal").then((m) => m.LiveCallModal),
+  { ssr: false },
+);
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
@@ -67,6 +76,7 @@ export default function CoachingSessionPage() {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [voiceStatus, setVoiceStatus] = React.useState("");
+  const [liveCallOpen, setLiveCallOpen] = React.useState(false);
   const scrollRef = useAutoScroll(
     step.name === "roleplay" ? step.turns.length : 0,
   );
@@ -300,6 +310,30 @@ export default function CoachingSessionPage() {
     }
   }
 
+  // Re-fetches turns from the backend after a Live Call ends — the call's turns
+  // already landed via the same roleplay_turn path a typed message uses, this just
+  // pulls them into view.
+  async function refreshRoleplayTurns() {
+    if (step.name !== "roleplay") return;
+    try {
+      const state = await getCoachingSessionState(step.session.session_id);
+      setStep((prev) =>
+        prev.name === "roleplay"
+          ? {
+              ...prev,
+              turns: state.turns,
+              transcript: state.turns
+                .filter((t) => t.role === "user")
+                .map((t) => t.content)
+                .join(" "),
+            }
+          : prev,
+      );
+    } catch {
+      toast.error("Couldn't refresh the transcript.");
+    }
+  }
+
   async function handleEndRoleplay() {
     if (step.name !== "roleplay") return;
     if (isVoiceActive) await stopVoice();
@@ -433,6 +467,16 @@ export default function CoachingSessionPage() {
     return (
       <div className="mx-auto flex max-w-2xl flex-col gap-4">
         {gate}
+        {liveCallOpen ? (
+          <LiveCallModal
+            feature="coaching"
+            sessionId={step.session.session_id}
+            open={liveCallOpen}
+            onClose={() => setLiveCallOpen(false)}
+            onEndSession={handleEndRoleplay}
+            onCallEnded={() => void refreshRoleplayTurns()}
+          />
+        ) : null}
         <MilestoneCelebrationModal
           milestone={newlyUnlocked[0] ?? null}
           onClose={() =>
@@ -547,6 +591,16 @@ export default function CoachingSessionPage() {
                     Start Voice
                   </Button>
                 )}
+                <Button
+                  size="md"
+                  variant="outline"
+                  onClick={() =>
+                    void runWithVoiceReadiness(() => setLiveCallOpen(true))
+                  }
+                >
+                  <Phone className="h-4 w-4" aria-hidden="true" />
+                  Live Call
+                </Button>
               </div>
             </div>
           )}
