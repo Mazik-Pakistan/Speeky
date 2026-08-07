@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "react-toastify";
 import {
   CheckCircle2,
   ClipboardList,
@@ -207,7 +206,11 @@ export default function AssessmentPage() {
         questionMode: result.question_mode,
       });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't restart the assessment.");
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Couldn't restart the assessment.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -395,7 +398,12 @@ export default function AssessmentPage() {
               </Button>
               {/* Last resort if scoring can never finish — otherwise the account would
                   stay locked behind an assessment that cannot complete. */}
-              <Button size="sm" variant="ghost" onClick={handleRestart} loading={isSubmitting}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleRestart}
+                loading={isSubmitting}
+              >
                 Start the assessment over
               </Button>
             </div>
@@ -443,7 +451,11 @@ export default function AssessmentPage() {
         </div>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         <div className="flex flex-col items-center gap-3">
-          <Button size="lg" loading={isSubmitting} onClick={() => void runWithVoiceReadiness(handleStart)}>
+          <Button
+            size="lg"
+            loading={isSubmitting}
+            onClick={() => void runWithVoiceReadiness(handleStart)}
+          >
             Start Assessment
           </Button>
           <button
@@ -536,7 +548,11 @@ export default function AssessmentPage() {
                 className={isVoiceActive ? "voice-listening-button" : undefined}
                 loading={isConnectingVoice || isStoppingVoice}
                 disabled={isConnectingVoice || isStoppingVoice}
-                onClick={isVoiceActive ? handleStopVoice : () => void runWithVoiceReadiness(handleStartVoice)}
+                onClick={
+                  isVoiceActive
+                    ? handleStopVoice
+                    : () => void runWithVoiceReadiness(handleStartVoice)
+                }
               >
                 {isConnectingVoice
                   ? "Connecting..."

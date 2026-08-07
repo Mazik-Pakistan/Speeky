@@ -189,7 +189,7 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
     <>
       {/* Desktop / tablet rail — icon-only below `lg`, labeled at `lg+`. Hidden
           entirely below that, replaced by the drawer below. */}
-      <aside className="hidden w-[4.5rem] shrink-0 flex-col items-center border-r border-border bg-surface-elevated px-2 py-6 lg:flex lg:w-64 lg:items-stretch lg:px-4">
+      <aside key={pathname} className="hidden w-[4.5rem] shrink-0 flex-col items-center border-r border-border bg-surface-elevated px-2 py-6 lg:flex lg:w-64 lg:items-stretch lg:px-4 animate-scale-in">
         <div className="flex flex-col items-center px-2 lg:items-start">
           <Link href="/dashboard" className="flex items-center gap-2">
             <Image

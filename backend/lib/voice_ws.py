@@ -110,6 +110,34 @@ def _transcribe_partial(waveform: np.ndarray) -> dict:
     return {"text": text}
 
 
+_TRAILING_SILENCE_WINDOW_S = 0.1
+_TRAILING_SILENCE_DBFS = -40.0  # same speech/silence line as SpeechConfig.min_avg_dbfs
+
+
+def _trim_trailing_silence(waveform: np.ndarray, sample_rate: int) -> np.ndarray:
+    """Drop trailing near-silent windows (a mid-passage pause, a breath, background
+    hum) off the end of a growing buffer. A cheap RMS-per-window scan rather than a VAD
+    pass -- this runs on every partial tick (every 1.2s, over a buffer that can grow to
+    180s), so it needs to be fast, not exact."""
+    window = int(_TRAILING_SILENCE_WINDOW_S * sample_rate)
+    if window <= 0 or len(waveform) <= window:
+        return waveform
+    end = len(waveform)
+    while end > window and audio_io.rms_dbfs(waveform[end - window : end]) < _TRAILING_SILENCE_DBFS:
+        end -= window
+    return waveform[:end]
+
+
+def _transcribe_live_preview(waveform: np.ndarray) -> dict:
+    """Same cheap pass as _transcribe_partial, but first drops a trailing near-silent
+    stretch. LivePreviewSession re-transcribes the whole buffer from t=0 on every
+    partial, so the tail is often silence, a breath, or background noise while the
+    reader pauses mid-passage -- feeding Whisper a buffer that ends in near-silence is
+    exactly when it hallucinates a word to fill the gap, which is what surfaces
+    client-side as the live preview marking words ahead of what was actually said."""
+    return _transcribe_partial(_trim_trailing_silence(waveform, SAMPLE_RATE))
+
+
 class VoiceSession:
     """Per-connection VAD segmenter + transcription dispatcher. One instance per open
     WebSocket; fed raw int16 PCM bytes as they arrive, emits status/transcript messages
@@ -294,7 +322,7 @@ class LivePreviewSession:
     async def _run_partial(self, waveform: np.ndarray) -> None:
         loop = asyncio.get_running_loop()
         try:
-            body = await loop.run_in_executor(_executor, _transcribe_partial, waveform)
+            body = await loop.run_in_executor(_executor, _transcribe_live_preview, waveform)
         except Exception:
             logger.exception("Live-preview transcription failed")
             return

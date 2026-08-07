@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "react-toastify";
 import {
@@ -8,6 +9,7 @@ import {
   Mic,
   MicOff,
   Pause,
+  Phone,
   Play,
   Share2,
   Sparkles,
@@ -16,6 +18,13 @@ import { Button } from "@/components/ui/button";
 import { AiCoachAvatar } from "@/components/common/AiCoachAvatar";
 import { UserChatAvatar } from "@/components/common/UserChatAvatar";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
+
+// livekit-client is ~150KB — load it only once a user actually opens a call,
+// not on every visit to this page.
+const LiveCallModal = dynamic(
+  () => import("@/components/common/LiveCallModal").then((m) => m.LiveCallModal),
+  { ssr: false },
+);
 import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { Modal } from "@/components/ui/modal";
 import { Input } from "@/components/ui/input";
@@ -69,6 +78,7 @@ export default function InterviewCoachSessionPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [feedback, setFeedback] = React.useState<SessionFeedback | null>(null);
   const [resumeBanner, setResumeBanner] = React.useState<string | null>(null);
+  const [liveCallOpen, setLiveCallOpen] = React.useState(false);
 
   const questionShownAt = React.useRef<number>(Date.now());
   const firstKeystrokeAt = React.useRef<number | null>(null);
@@ -200,6 +210,27 @@ export default function InterviewCoachSessionPage() {
     };
   }, [sessionId]);
 
+  // Re-fetches from the backend (bypassing the sessionStorage fast-path above, which
+  // would otherwise still show the pre-call state) — used after a Live Call ends so
+  // the exchanges it added via the same _submit_answer path show up here too.
+  const refreshFromServer = React.useCallback(async () => {
+    try {
+      const state = await getInterviewCoachSession(sessionId);
+      setMode(state.mode);
+      setTurns(
+        state.exchanges.map((ex) => ({
+          speaker: ex.speaker,
+          question: ex.question,
+          answer: ex.answer ?? null,
+          flags: ex.flags,
+        })),
+      );
+      if (state.status === "paused") setStatus("paused");
+    } catch {
+      toast.error("Couldn't refresh the transcript.");
+    }
+  }, [sessionId]);
+
   async function finishSession() {
     if (isVoiceActive) await stopVoice();
     setIsEnding(true);
@@ -305,9 +336,21 @@ export default function InterviewCoachSessionPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
       {gate}
+      {liveCallOpen ? (
+        <LiveCallModal
+          feature="interview_coach"
+          sessionId={sessionId}
+          open={liveCallOpen}
+          onClose={() => setLiveCallOpen(false)}
+          onEndSession={finishSession}
+          onCallEnded={() => void refreshFromServer()}
+        />
+      ) : null}
       <MilestoneCelebrationModal
         milestone={newlyUnlocked[0] ?? null}
-        onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+        onClose={() =>
+          newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)
+        }
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-h2 font-semibold capitalize text-foreground">
@@ -384,7 +427,7 @@ export default function InterviewCoachSessionPage() {
             Session paused — click Resume to continue.
           </p>
         ) : (
-          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+          <div className="flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-center">
             <input
               type="text"
               value={answer}
@@ -401,38 +444,52 @@ export default function InterviewCoachSessionPage() {
                 }
               }}
               placeholder="Type your answer..."
-              className="h-11 min-w-0 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
+              className="h-11 min-w-0 sm:flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
             />
-            <Button
-              size="md"
-              loading={isSubmitting}
-              disabled={!answer.trim()}
-              onClick={handleSubmitAnswer}
-            >
-              Send
-            </Button>
-            {isVoiceActive ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <Button
                 size="md"
-                variant="outline"
-                className="voice-listening-button"
-                loading={isStoppingVoice}
-                onClick={() => void stopVoice()}
+                loading={isSubmitting}
+                disabled={!answer.trim()}
+                onClick={handleSubmitAnswer}
               >
-                <MicOff className="h-4 w-4" aria-hidden="true" />
-                Stop Voice
+                Send
               </Button>
-            ) : (
-              <Button
-                size="md"
-                variant="outline"
-                loading={isConnectingVoice}
-                onClick={() => void runWithVoiceReadiness(startVoice)}
-              >
-                <Mic className="h-4 w-4" aria-hidden="true" />
-                Start Voice
-              </Button>
-            )}
+              <div className="flex flex-wrap items-center gap-2">
+                {isVoiceActive ? (
+                  <Button
+                    size="md"
+                    variant="outline"
+                    className="voice-listening-button"
+                    loading={isStoppingVoice}
+                    onClick={() => void stopVoice()}
+                  >
+                    <MicOff className="h-4 w-4" aria-hidden="true" />
+                    Stop Voice
+                  </Button>
+                ) : (
+                  <Button
+                    size="md"
+                    variant="outline"
+                    loading={isConnectingVoice}
+                    onClick={() => void runWithVoiceReadiness(startVoice)}
+                  >
+                    <Mic className="h-4 w-4" aria-hidden="true" />
+                    Start Voice
+                  </Button>
+                )}
+                <Button
+                  size="md"
+                  variant="outline"
+                  onClick={() =>
+                    void runWithVoiceReadiness(() => setLiveCallOpen(true))
+                  }
+                >
+                  <Phone className="h-4 w-4" aria-hidden="true" />
+                  Live Call
+                </Button>
+              </div>
+            </div>
           </div>
         )}
         {voiceStatus ? (
@@ -445,7 +502,11 @@ export default function InterviewCoachSessionPage() {
           </p>
         ) : null}
         {livePreview ? (
-          <p role="status" aria-live="polite" className="text-sm italic text-muted-foreground">
+          <p
+            role="status"
+            aria-live="polite"
+            className="text-sm italic text-muted-foreground"
+          >
             {livePreview}
           </p>
         ) : null}

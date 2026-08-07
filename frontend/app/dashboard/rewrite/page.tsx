@@ -142,7 +142,7 @@ export default function RewriteLabPage() {
           <span className="text-xs text-muted-foreground">
             Your facts are preserved — the rewrite never invents new details.
           </span>
-          <Button onClick={handleRun} loading={loading} disabled={!original.trim()}>
+          <Button className="h-auto md:h-10" onClick={handleRun} loading={loading} disabled={!original.trim()}>
             <Wand2 className="h-4 w-4" aria-hidden="true" />
             Rewrite &amp; Analyze
           </Button>

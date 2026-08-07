@@ -78,9 +78,13 @@ export function usePronunciationLivePreview(targetWords: string[], getWsUrl: () 
   // recreated every time the caller's target sentence changes.
   const targetWordsRef = React.useRef(targetWords);
   targetWordsRef.current = targetWords;
+  // Previous tick's raw (unsmoothed) alignment — see onmessage below.
+  const lastRawRef = React.useRef<WordPreviewStatus[]>(targetWords.map(() => "pending"));
 
   const reset = React.useCallback(() => {
-    setWordStatuses(targetWordsRef.current.map(() => "pending"));
+    const initial = targetWordsRef.current.map(() => "pending" as WordPreviewStatus);
+    setWordStatuses(initial);
+    lastRawRef.current = initial;
   }, []);
 
   const teardown = React.useCallback(() => {
@@ -109,7 +113,19 @@ export function usePronunciationLivePreview(targetWords: string[], getWsUrl: () 
           const data = JSON.parse(event.data as string);
           if (data.type !== "partial" || typeof data.text !== "string") return;
           const recognized: string[] = data.text.split(/\s+/).filter(Boolean).map(normalizeWord);
-          setWordStatuses(alignWords(targetWordsRef.current.map(normalizeWord), recognized));
+          const raw = alignWords(targetWordsRef.current.map(normalizeWord), recognized);
+          // Debounced against a single bad tick: a cheap beam_size=1 partial pass
+          // occasionally mis-hears/hallucinates and self-corrects ~1.2s later, and
+          // re-running the alignment DP over a growing recognized-word list can flip an
+          // already-matched word's verdict even without any new mis-transcription. Only
+          // promote a word's shown status once two consecutive partials agree on it —
+          // otherwise hold whatever was last confirmed. Trades ~1.2s of extra latency
+          // before a word's first verdict for not flashing a wrong one.
+          const lastRaw = lastRawRef.current;
+          setWordStatuses((confirmed) =>
+            raw.map((status, i) => (status === lastRaw[i] && status !== confirmed[i] ? status : confirmed[i])),
+          );
+          lastRawRef.current = raw;
         } catch {
           // Malformed preview message — cosmetic feature, never worth surfacing an error.
         }

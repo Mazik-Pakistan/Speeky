@@ -36,6 +36,16 @@ dependencies = [
     "pronouncing>=0.2.0",
     "torch", # Need to do explicit for torch-cpu.
     "torchaudio",
+    # Live Call (two-way voice) — WebRTC transport + turn-taking orchestration for the
+    # agent worker under backend/live_call/. STT/TTS/LLM stay the engines above
+    # (faster-whisper, piper-tts, Groq via services/*) — LiveKit only supplies
+    # transport, VAD-based turn detection, and the Agent/AgentSession runtime.
+    "livekit-api>=0.8",
+    "livekit-agents>=1.0",
+    "livekit-plugins-silero>=1.0",
+    # Optional Beyond Presence avatar (lip-synced video) — env-gated in worker.py,
+    # calls stay audio-only if BEY_API_KEY isn't set.
+    "livekit-plugins-bey>=1.6",
 ]
 
 [tool.taskipy.tasks]
