@@ -3,8 +3,14 @@ by services/live_call_service.py) and builds everything worker.py needs to start
 AgentSession for that specific call. Live Call is scoped to free-flowing chat features
 only — conversation / interview_coach / scenario / coaching (roleplay scenarios only) —
 deliberately not the assessment/scoring exercises (pronunciation coach, accent
-assessment, public speaking, coaching's draft-and-grade scenarios) where a scripted
-read-and-score flow doesn't fit a live back-and-forth call.
+assessment, coaching's draft-and-grade scenarios) where a scripted read-and-score flow
+doesn't fit a live back-and-forth call.
+
+Public Speaking is a partial exception, and the distinction is worth stating: the SPEECH is a
+monologue and gets no agent at all — a live participant would talk over the speaker and its
+voice would be transcribed into the audio being scored. The Q&A that follows genuinely is
+back-and-forth, so that phase alone gets the avatar. services/live_call_service.py enforces it
+by refusing to mint a token until the session reaches "qa_phase".
 """
 
 from dataclasses import dataclass
@@ -17,11 +23,18 @@ from lib.prisma_client import db
 from schemas.coaching_schemas import RoleplayTurnSchema
 from schemas.conversation_schemas import SendMessageSchema
 from schemas.interview_coach_schemas import AnswerRequest
+from schemas.public_speaking_schemas import QAResponseSchema
 from schemas.scenario_schemas import ScenarioTurnSchema
-from services import coaching_service, conversation_service, interview_coach_service, scenario_service
+from services import (
+    coaching_service,
+    conversation_service,
+    interview_coach_service,
+    public_speaking_service,
+    scenario_service,
+)
 from utils.feature_errors import SessionNotFoundError
 
-_FEATURES = ("conversation", "interview_coach", "scenario", "coaching")
+_FEATURES = ("conversation", "interview_coach", "scenario", "coaching", "public_speaking")
 
 
 @dataclass
@@ -53,6 +66,8 @@ async def build_setup(feature: str, session_id: str, user_id: str) -> LiveCallSe
         return await _build_scenario_setup(session_id, user_id)
     if feature == "coaching":
         return await _build_coaching_setup(session_id, user_id)
+    if feature == "public_speaking":
+        return await _build_public_speaking_setup(session_id, user_id)
     raise NotImplementedError(f"Live Call not wired up yet for feature={feature!r}")
 
 
@@ -156,5 +171,51 @@ async def _build_coaching_setup(session_id: str, user_id: str) -> LiveCallSetup:
         if isinstance(result, JSONResponse):
             return "Sorry, something went wrong there — let's try again."
         return result["reply"]
+
+    return LiveCallSetup(instructions=instructions, opening_line=opening_line, turn_handler=turn_handler)
+
+
+async def _build_public_speaking_setup(session_id: str, user_id: str) -> LiveCallSetup:
+    """Q&A only — see the module docstring for why the speech itself gets no agent.
+
+    The question was already generated and persisted when the speech was submitted (submit_turn
+    flips the row to "qa_phase" and stores aiQuestion), so the avatar speaks that rather than
+    inventing a new one. Two reasons that matters: the user has already seen it on the results
+    screen, and it was generated against the full transcript, which the agent does not carry.
+    """
+    session = await public_speaking_service.get_session(session_id, user_id)
+    if session.get("status") != "qa_phase":
+        raise SessionNotFoundError(
+            f"Public speaking session {session_id} is not in the Q&A phase"
+        )
+
+    speech_type = str(session.get("speech_type") or "business_pitch")
+    config = public_speaking_service.SPEECH_TYPES.get(
+        speech_type, public_speaking_service.SPEECH_TYPES["business_pitch"]
+    )
+    label = config.get("label", "a speech")
+
+    instructions = (
+        f"You are an audience member who has just listened to {label}. "
+        "Ask your question, listen to the answer, and respond briefly and naturally — one or two "
+        "sentences. Stay in character as a listener, not a coach: do not grade the answer, score "
+        "it, or list what they should have done. The written feedback covers that."
+    )
+
+    opening_line = session.get("ai_question") or "Thanks for that — what would you say is your main takeaway?"
+
+    async def turn_handler(user_text: str) -> str:
+        # submit_qa_response scores the answer AND completes the session — Public Speaking's Q&A
+        # is a single exchange by design. So this handler runs at most once per call, and what
+        # it returns is a sign-off rather than a follow-up question.
+        try:
+            await public_speaking_service.submit_qa_response(
+                session_id, user_id, QAResponseSchema(text_content=user_text)
+            )
+        except Exception:
+            # The user has already spoken; failing the call now would lose their answer with no
+            # way to retry. Persisting is best-effort, closing gracefully is not.
+            return "Thanks — that's all from me. Your written feedback is on screen."
+        return "Thank you, that answers it. Your full feedback is ready on screen whenever you are."
 
     return LiveCallSetup(instructions=instructions, opening_line=opening_line, turn_handler=turn_handler)

@@ -104,6 +104,9 @@ export function submitPublicSpeakingTurn(
       avg_db?: number;
       pitch_range_semitones?: number;
       duration_seconds?: number;
+      snr_db?: number;
+      mean_pitch_hz?: number;
+      intensity_variation_db?: number;
     };
     /** Aggregated delivery metrics from the browser vision pipeline. No video, frames, or
      *  per-frame landmarks are ever uploaded. */

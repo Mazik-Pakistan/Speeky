@@ -71,6 +71,32 @@ ever** — if you see one, that is a real bug.
 
 ---
 
+## 1b. What changed after the first camera pass
+
+**Calibration** no longer runs a second `detectForVideo` on an 80ms timer while the rAF loop is
+already detecting — collection happens inside that loop, giving ~5x the samples at half the CPU.
+Plus a 3-2-1 countdown with the target dot already visible, looser floors (`MIN_SAMPLES` 5,
+`MAX_USABLE_MAD_DEG` 14) and a silent auto-retry. Two correctness fixes fell out of it: the
+tolerance cone is now capped strictly inside the measured screen offset (a wide cone was
+swallowing it, so panel gaze scored as lens contact), and `screenOffsetPitchDeg` is computed in
+gaze space rather than head space — it was being compared against a head+iris value while being
+measured head-only, understating the real gap by about half.
+
+**Emotional register** (`backend/lib/register_scorer.py`) scores delivery against what the
+scenario asks for, per speech type, across three channels: voice arousal, facial warmth, lexical
+formality. Never an emotion label — `test_no_issue_ever_names_an_emotion` enforces it. The voice
+channel modulates `tone_variation`/`audience_engagement` and therefore `overall_score` for spoken
+sessions (`scoring_version: 2`); face and words do not, for the same comparability reason
+`visual_presence` stays out.
+
+`voice_ws.py`'s `"full"` tier now also carries `mean_pitch_hz` and `intensity_variation_db`, and
+`snr_db` finally reaches the server — it was computed, sent, and dropped by the client type, so
+`voice_clarity` scored a constant ~85.3 for every live-voice session.
+
+**Avatar Q&A.** `public_speaking` is now a Live Call feature, Q&A-only. The speech phase has no
+room and no avatar; `live_call_service` refuses to mint a token until `status == "qa_phase"`.
+See §9.
+
 ## 2. Getting it running on the laptop
 
 ```bash
@@ -385,3 +411,51 @@ resolution change or after 24h.
 - [ ] End session → OS camera light off within 1s; navigate away mid-session → same
 - [ ] DevTools CPU throttle 6× → tier demotes; gesture metrics come back `null` not `0`
 - [ ] DB: `videoFeatures` holds aggregates + timeline, **no frame or landmark arrays**
+
+
+---
+
+## 9. Avatar Q&A (Beyond Presence via LiveKit)
+
+The avatar is an **audience member during Q&A only**. It never runs during the speech: a live
+participant would talk over a monologue, and its voice would be picked up by the mic feeding the
+audio scorer (`useVoiceSocket` captures with **no echo cancellation**). Three things enforce that
+independently — the backend phase gate, the dispatch setup builder, and the UI only offering the
+call on the results screen.
+
+### Running it
+
+```bash
+cd backend && uv run python -m live_call.worker dev
+```
+
+The worker is **not** part of the FastAPI process — LiveKit Cloud dispatches one job per room to
+it. It wraps the app's own Whisper and Piper as LiveKit plugins rather than duplicating them.
+
+### Env vars — the failure mode to know
+
+`live_call/worker.py:92` gates the avatar on `BEY_API_KEY`, and falls back to audio-only
+**silently** when it is unset. A mis-named key is therefore indistinguishable from "the avatar
+is broken", with nothing in the logs. The names it reads are `BEY_API_KEY` and `BEY_AVATAR_ID` —
+earlier `.env` files used `BEYOND_PRESENCE_API_KEY` and `AVATAR_ID`, which do nothing.
+
+### Debugging
+
+| Symptom | Cause |
+|---|---|
+| Right panel says "Listening…", never shows video | `BEY_API_KEY` unset or wrong — audio-only mode, working as designed |
+| Token request 404s | session is not in `qa_phase` — the gate is doing its job |
+| Avatar never joins, no error | worker not running, or not connected to the same LiveKit project |
+| Agent talks over the user | `TurnHandlingOptions` endpointing; the room should be short-lived anyway |
+| Piper audio overlaps the avatar | `lib/tts.ts` `stopCurrent()` is called on connect — check it ran |
+
+Room name is `livecall_public_speaking_{session_id}`; the worker parses feature and session id
+straight back out of it. `parse_room_name` matches against the known feature list rather than
+splitting on underscores, because both `public_speaking` and `interview_coach` contain one.
+
+The Q&A is **a single exchange** — `submit_qa_response` scores the answer and completes the
+session — so the agent asks the stored question, hears one answer, signs off. Multi-question Q&A
+would need a backend change.
+
+`@livekit/components-react` is ~150kB and is loaded via `next/dynamic` with `ssr: false`. Static
+import put it in the page bundle for every visitor (First Load 137kB -> 288kB); keep it lazy.

@@ -95,6 +95,24 @@ class PublicSpeakingScorecard(BaseModel):
     # Audio delivery metrics
     delivery: Optional[Dict] = Field(None, description="Audio quality metrics")
 
+    # Scenario-conditioned emotional register — how well the delivery matched what this kind of
+    # speech asks for. Never an emotion label; see lib/register_scorer.py.
+    emotional_register: Optional[float] = Field(
+        None, ge=0, le=100, description="Match between delivery and the scenario's expected register"
+    )
+    register_detail: Optional[Dict] = Field(
+        None,
+        description="register_scorer.ScoredRegister.to_dict(): per-channel voice/face/word "
+        "sub-scores, confidence_weight, and the expected bands. Channels are null when their "
+        "source was absent (no camera, text mode, transcript too short). Named _detail because "
+        "a bare 'register' field shadows a BaseModel attribute inherited from ABCMeta.",
+    )
+    scoring_version: int = Field(
+        1,
+        description="2 once the voice register channel began modulating tone_variation and "
+        "audience_engagement. Rows scored at 1 are not directly comparable on those two axes.",
+    )
+
     # Physical delivery (camera sessions only). Deliberately NOT folded into overall_score —
     # see _generate_scorecard for why. None whenever the camera was off.
     visual_presence: Optional[float] = Field(

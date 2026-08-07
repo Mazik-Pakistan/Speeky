@@ -36,11 +36,19 @@ export type CameraCheckFailureReason =
 
 export type CalibrationTarget = "camera" | "screen";
 
-/** Each hold runs this long; the first second is discarded because users take a moment to
- *  settle onto a target. */
-const HOLD_MS = 3000;
-const SETTLE_MS = 1000;
-const SAMPLE_INTERVAL_MS = 80;
+/**
+ * Hold timings.
+ *
+ * A countdown runs before capture with the target dot already on screen, so the user's eyes are
+ * on target *before* the first sample rather than travelling toward it. That is what lets the
+ * settle window be short and the hold itself shorter than it used to be — a 2.5s hold with the
+ * eyes already in place yields far more usable samples than the old 3s hold did, because the old
+ * one spent its first second recording wherever the user happened to be looking.
+ */
+const COUNTDOWN_FROM = 3;
+const COUNTDOWN_STEP_MS = 700;
+const HOLD_MS = 2500;
+const SETTLE_MS = 300;
 
 /** Mean luma below this (0-255) is too dark for reliable landmarks. */
 const DARK_LUMA = 40;
@@ -56,10 +64,13 @@ export interface CameraCheckState {
   brightnessOk: boolean | null;
   /** True once framing has been "good" continuously for the required window. */
   framingSettled: boolean;
+  /** 3, 2, 1 while a hold is about to start; null otherwise. Drives the on-screen counter so
+   *  the user knows when to look, instead of capture beginning the instant they click. */
+  countdown: number | null;
   videoRef: React.RefObject<HTMLVideoElement>;
   start: () => Promise<void>;
   stop: () => void;
-  /** Capture one 3-second hold. Resolves with how many usable samples it got. */
+  /** Count down, then capture one hold. Resolves with how many usable samples it got. */
   captureHold: (target: CalibrationTarget) => Promise<number>;
   /** Fit a calibration from the holds captured so far. */
   fitCalibration: () => GazeCalibration | null;
@@ -79,6 +90,7 @@ export function useCameraCheck(): CameraCheckState {
   const [framing, setFraming] = React.useState<FramingState>("unknown");
   const [brightnessOk, setBrightnessOk] = React.useState<boolean | null>(null);
   const [framingSettled, setFramingSettled] = React.useState(false);
+  const [countdown, setCountdown] = React.useState<number | null>(null);
 
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
@@ -94,6 +106,20 @@ export function useCameraCheck(): CameraCheckState {
     screen: [],
   });
 
+  /**
+   * The hold currently being recorded, or null.
+   *
+   * Set by captureHold and drained by the rAF loop. This is the whole fix for calibration
+   * failing so often: the loop is already running a detect every animation frame, so collecting
+   * there gives ~60 samples/second for free. The previous version ran a SECOND detect on an
+   * 80ms timer while that loop was still going — paying double inference to keep a fifth of the
+   * data, and drifting long enough under that load that the sample-count floor tripped on
+   * perfectly good calibrations.
+   */
+  const activeHoldRef = React.useRef<{ samples: CalibrationSample[]; startedAt: number } | null>(
+    null,
+  );
+
   const teardown = React.useCallback(() => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
@@ -102,6 +128,7 @@ export function useCameraCheck(): CameraCheckState {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     detectRef.current = null;
+    activeHoldRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     setIsStreaming(false);
   }, []);
@@ -197,7 +224,16 @@ export function useCameraCheck(): CameraCheckState {
           if (luma !== null) setBrightnessOk(luma >= DARK_LUMA);
         }
 
-        return pose ? { pose, iris: irisOffset(landmarks) } : null;
+        const sample = pose ? { pose, iris: irisOffset(landmarks) } : null;
+
+        // Collect into the in-flight hold, if one is armed. Samples from the settle window are
+        // dropped: even with a countdown, the eyes are still arriving for the first moments.
+        const hold = activeHoldRef.current;
+        if (hold && sample && atMs - hold.startedAt >= SETTLE_MS) {
+          hold.samples.push(sample);
+        }
+
+        return sample;
       };
 
       const loop = (now: number) => {
@@ -218,34 +254,29 @@ export function useCameraCheck(): CameraCheckState {
   }, [sampleBrightness, teardown]);
 
   /**
-   * Capture one calibration hold.
+   * Count the user in, then capture one calibration hold.
    *
-   * Samples for HOLD_MS but keeps only what arrives after SETTLE_MS — the first second is the
-   * user's eyes travelling to the target, which would drag the median toward wherever they were
-   * looking beforehand.
+   * Collection happens in the rAF loop (see activeHoldRef) rather than here — this function
+   * only arms it and waits. The countdown exists so the eyes are already on the target when the
+   * first sample lands; without it the settle window has to absorb the eye movement, which both
+   * wastes most of the hold and inflates the MAD that decides calibration quality.
    */
   const captureHold = React.useCallback(async (target: CalibrationTarget): Promise<number> => {
-    const samples: CalibrationSample[] = [];
-    const startedAt = performance.now();
+    const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
-    await new Promise<void>((resolve) => {
-      const tick = () => {
-        const elapsed = performance.now() - startedAt;
-        if (elapsed >= HOLD_MS) {
-          resolve();
-          return;
-        }
-        if (elapsed >= SETTLE_MS) {
-          const sample = detectRef.current?.(performance.now());
-          if (sample) samples.push(sample);
-        }
-        window.setTimeout(tick, SAMPLE_INTERVAL_MS);
-      };
-      tick();
-    });
+    for (let n = COUNTDOWN_FROM; n > 0; n -= 1) {
+      setCountdown(n);
+      await sleep(COUNTDOWN_STEP_MS);
+    }
+    setCountdown(null);
 
-    holdsRef.current[target] = samples;
-    return samples.length;
+    const hold = { samples: [] as CalibrationSample[], startedAt: performance.now() };
+    activeHoldRef.current = hold;
+    await sleep(HOLD_MS);
+    activeHoldRef.current = null;
+
+    holdsRef.current[target] = hold.samples;
+    return hold.samples.length;
   }, []);
 
   const fitCalibration = React.useCallback((): GazeCalibration | null => {
@@ -261,6 +292,8 @@ export function useCameraCheck(): CameraCheckState {
 
   const reset = React.useCallback(() => {
     holdsRef.current = { camera: [], screen: [] };
+    activeHoldRef.current = null;
+    setCountdown(null);
     goodFramingSinceRef.current = null;
     setFraming("unknown");
     setFramingSettled(false);
@@ -285,6 +318,7 @@ export function useCameraCheck(): CameraCheckState {
     framing,
     brightnessOk,
     framingSettled,
+    countdown,
     videoRef,
     start,
     stop: teardown,

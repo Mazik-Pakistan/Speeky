@@ -72,10 +72,23 @@ export const NO_CALIBRATION: GazeCalibration = {
  *  "eye contact" meaningless. */
 const MIN_TOLERANCE_DEG = 6;
 const MAX_TOLERANCE_DEG = 15;
-/** MAD above this means the user never held still enough for the sample to mean anything. */
-const MAX_USABLE_MAD_DEG = 10;
-/** Below this many usable samples the medians are not trustworthy. */
-const MIN_SAMPLES = 8;
+/**
+ * MAD above this means the user never held still enough for the sample to mean anything.
+ *
+ * Loosened from 10 after real-camera testing: normal people are not statues, and a MAD in the
+ * 10-14 degree range still produces a perfectly usable median — it just widens the tolerance
+ * cone, which is the intended, proportionate penalty. Failing outright instead was costing
+ * calibrations that would have been fine.
+ */
+const MAX_USABLE_MAD_DEG = 14;
+/**
+ * Below this many usable samples the medians are not trustworthy.
+ *
+ * Also loosened (was 8). Since collection moved into the rAF loop a healthy hold now yields
+ * well over a hundred samples rather than a dozen, so this floor only fires when detection is
+ * genuinely failing — which is exactly when it should.
+ */
+const MIN_SAMPLES = 5;
 /** Iris travel between the two targets must exceed this for the gain fit to be meaningful;
  *  otherwise we are dividing by noise. */
 const MIN_IRIS_TRAVEL = 0.04;
@@ -162,6 +175,53 @@ export function calibrateFromTargets(
     irisGainDegPerUnit = DEFAULT_IRIS_GAIN;
   }
 
+  /**
+   * Re-express the screen offset in GAZE space, not head space.
+   *
+   * `screenOffsetPitchDeg` above is a pure head-pitch delta, but `classifyGaze` compares it
+   * against the output of `gazeAngles`, which is head pitch *plus* the iris term. Those are
+   * different units, and the mismatch is real: most people barely move their head between two
+   * nearby targets and do almost all of the travel with their eyes, so the head-only delta
+   * badly understates the gap — by more than half in typical testing.
+   *
+   * Recomputing it with the same transform the classifier uses keeps both sides in one space,
+   * and is what makes the separation cap below meaningful rather than arbitrary.
+   */
+  if (screenOffsetPitchDeg !== null && irisGainDegPerUnit !== null && baselineIrisDy !== null) {
+    const screenIris = screenSamples.map((s) => s.iris).filter((i): i is IrisOffset => i !== null);
+    const screenIrisDy = median(screenIris.map((i) => i.dy));
+    if (screenIrisDy !== null) {
+      screenOffsetPitchDeg -= irisGainDegPerUnit * (screenIrisDy - baselineIrisDy);
+    }
+  }
+
+  let pitchToleranceDeg = toleranceFrom(pitch.spread);
+
+  /**
+   * The cone must never be wide enough to swallow the screen offset.
+   *
+   * A restless user gets a wider cone, which is the right penalty — but taken far enough it
+   * absorbs the very gap the second calibration target measured, and then "looking at the app
+   * panel" classifies as "looking at the lens". That inflates `on_camera_pct` for exactly the
+   * users whose data is least reliable, which is the worst possible direction for the error.
+   *
+   * So cap the cone below the measured offset. If the floor (MIN_TOLERANCE_DEG) is already too
+   * wide to keep them apart — a very short screen offset, e.g. a laptop with the camera almost
+   * in line with the panel — then we genuinely cannot distinguish the two, and the honest move
+   * is to drop the screen target rather than report a separation we can't make.
+   */
+  if (screenOffsetPitchDeg !== null) {
+    // Panel gaze lands at exactly `screenOffsetPitchDeg`, and classifyGaze calls anything within
+    // `pitchToleranceDeg` of zero "on camera" — so the cone has to stay strictly inside the
+    // offset. 0.9 keeps a small margin without narrowing the cone more than necessary.
+    const separable = Math.abs(screenOffsetPitchDeg) * 0.9;
+    if (separable >= MIN_TOLERANCE_DEG) {
+      pitchToleranceDeg = Math.min(pitchToleranceDeg, separable);
+    } else {
+      screenOffsetPitchDeg = null;
+    }
+  }
+
   const hasScreenTarget = screenOffsetPitchDeg !== null;
   const quality: CalibrationQuality = tooJittery || tooFewSamples ? "weak" : hasScreenTarget ? "good" : "weak";
 
@@ -175,7 +235,7 @@ export function calibrateFromTargets(
     baselineIrisDx,
     baselineIrisDy,
     yawToleranceDeg: toleranceFrom(yaw.spread),
-    pitchToleranceDeg: toleranceFrom(pitch.spread),
+    pitchToleranceDeg,
     screenOffsetPitchDeg,
     irisGainDegPerUnit,
     quality,

@@ -18,6 +18,13 @@ export interface VoiceFeatures {
   duration_seconds?: number;
   avg_db?: number;
   pitch_range_semitones?: number;
+  /** Signal-to-noise, dB. The backend has always sent this; it was missing from this type, so
+   *  it never reached the server's `_AgentAnalysis` and `voice_clarity` scored a constant ~85.3
+   *  for every live-voice session. */
+  snr_db?: number;
+  /** Vocal arousal inputs for scenario-conditioned register scoring. */
+  mean_pitch_hz?: number;
+  intensity_variation_db?: number;
 }
 
 // Ceiling for how long stopVoice() waits for an in-flight transcript before giving up

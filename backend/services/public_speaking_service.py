@@ -33,7 +33,16 @@ from typing import Dict, List, Optional, Tuple
 
 from fastapi import WebSocket
 from prisma import Json
-from lib import llm_client, prompts, recording_engine, relevance, session_scorer, video_scorer, voice_ws
+from lib import (
+    llm_client,
+    prompts,
+    recording_engine,
+    register_scorer,
+    relevance,
+    session_scorer,
+    video_scorer,
+    voice_ws,
+)
 from lib.audio_io import AudioDecodeError
 from lib.prisma_client import db
 from lib.session_scorer import AudioFeatures
@@ -56,6 +65,14 @@ SPEECH_TYPES = {
         "ideal_wpm_range": (130, 160),
         "prioritize_structure": True,
         "prioritize_persuasiveness": True,
+        # Measured and credible. Some animation reads as conviction; a monotone pitch reads as
+        # not believing your own numbers, so the floor is not zero.
+        "register": {
+            "label": "a business pitch",
+            "arousal_band": (35, 70),
+            "smile_band": (5, 35),
+            "formality": "formal",
+        },
     },
     "casual_event": {
         "label": "Casual Event Speech (Wedding/Toast)",
@@ -63,6 +80,15 @@ SPEECH_TYPES = {
         "ideal_wpm_range": (120, 150),
         "disable_corporate_tone": True,
         "prioritize_warmth": True,
+        # A toast is the one format where warmth is the point. Deadpan is a failure here even
+        # if every other metric is strong.
+        "register": {
+            "label": "a wedding or celebration speech",
+            "arousal_band": (45, 85),
+            "smile_band": (20, 65),
+            "formality": "informal",
+            "laughter_ok": True,
+        },
     },
     "motivational": {
         "label": "Motivational Speech",
@@ -70,6 +96,14 @@ SPEECH_TYPES = {
         "ideal_wpm_range": (130, 160),
         "prioritize_energy": True,
         "prioritize_tone_variation": True,
+        # Highest expected energy of any format — this is the one place where a wide pitch
+        # range and big dynamics are the target rather than a risk.
+        "register": {
+            "label": "a motivational speech",
+            "arousal_band": (60, 100),
+            "smile_band": (10, 50),
+            "formality": "neutral",
+        },
     },
     "classroom": {
         "label": "Classroom Presentation",
@@ -80,6 +114,13 @@ SPEECH_TYPES = {
         # A teacher who locks onto one spot is a problem, so this is the one format where a
         # HIGHER gaze-shift rate scores better. See video_scorer._presence_weights.
         "reward_gaze_scan": True,
+        # Clear and even. Warmth helps, theatrics distract from the material.
+        "register": {
+            "label": "a classroom presentation",
+            "arousal_band": (35, 70),
+            "smile_band": (8, 40),
+            "formality": "neutral",
+        },
     },
     "ted_talk": {
         "label": "TED-Style Talk",
@@ -87,6 +128,14 @@ SPEECH_TYPES = {
         "ideal_wpm_range": (130, 150),
         "prioritize_storytelling": True,
         "prioritize_engagement": True,
+        # Storytelling wants range: the dynamic band is deliberately wide, because a good talk
+        # moves between quiet and emphatic rather than sitting at one level.
+        "register": {
+            "label": "a TED-style talk",
+            "arousal_band": (45, 90),
+            "smile_band": (10, 50),
+            "formality": "neutral",
+        },
     },
 }
 
@@ -224,6 +273,7 @@ async def submit_turn(
         speech_config=speech_config,
         video_features=video_features,
         topic=session.topic,
+        raw_audio_features=turn.audio_features,
     )
 
     # Update session — audioFeatures/videoFeatures are optional (Json?). Skip the key entirely
@@ -435,6 +485,10 @@ async def _generate_scorecard(
     speech_config: Dict,
     video_features: Optional[Dict] = None,
     topic: Optional[str] = None,
+    # The raw client feature dict, NOT the AudioFeatures dataclass — that class has no prosody
+    # fields, so pitch_range_semitones / intensity_variation_db would be dropped before the
+    # register scorer ever sees them.
+    raw_audio_features: Optional[Dict] = None,
 ) -> Dict:
     if audio_features:
         scored = session_scorer.score_audio_session(audio_features, strict=True)
@@ -456,6 +510,16 @@ async def _generate_scorecard(
     structure_analysis = _evaluate_structure(speech_type, text_content, speech_config)
     clarity_analysis = _analyze_voice_clarity(analysis)
 
+    # Register is scored before the overall pass because its VOICE channel feeds tone_score.
+    # audio_features is the raw dict from the client (prosody), not the AudioFeatures dataclass —
+    # arousal needs pitch_range_semitones / intensity_variation_db, which never enter that class.
+    scored_register = register_scorer.score_register(
+        text=text_content,
+        audio_features=raw_audio_features,
+        video=video_features,
+        speech_config=speech_config,
+    )
+
     scores = _calculate_overall_scores(
         speech_type=speech_type,
         wpm_metrics=wpm_metrics,
@@ -466,6 +530,7 @@ async def _generate_scorecard(
         scored=scored,
         speech_config=speech_config,
         topic_relevance=topic_relevance,
+        register_voice=scored_register.voice_arousal,
     )
 
     flags = _generate_flags(
@@ -497,6 +562,14 @@ async def _generate_scorecard(
     # surface (flags, highlights, tips) — which is where the value actually is — plus its own
     # visual_presence tile. If a blended headline is ever wanted, add a separate key and a
     # scoring_version marker; do not overload this one.
+    # Register feedback merges the same way, but unlike video it can apply to a camera-off
+    # session — the voice and word channels are always there on the audio path.
+    if scored_register.issues or scored_register.highlights:
+        flags = flags + scored_register.issues
+        highlights = highlights + scored_register.highlights
+        register_tips = [i["suggestion"] for i in scored_register.issues if i.get("suggestion")]
+        actionable_tips = _interleave(actionable_tips, register_tips)[:6]
+
     scored_video = video_scorer.score_video_session(video_features, speech_config)
     if video_features:
         flags = flags + scored_video.issues
@@ -530,6 +603,7 @@ async def _generate_scorecard(
         "fluency": scored.fluency_score,
         "vocabulary": scored.vocabulary_score,
         "pronunciation": scored.pronunciation_score,
+        "emotional_connection": scored_register.emotional_register,
         "words_per_minute": wpm_metrics["wpm"],
         "filler_word_count": filler_analysis["count"],
         "filler_words": filler_analysis["words"],
@@ -539,6 +613,11 @@ async def _generate_scorecard(
         "summary": summary,
         "actionable_tips": actionable_tips,
         "delivery": scored.delivery if audio_features else None,
+        "emotional_register": scored_register.emotional_register,
+        "register_detail": scored_register.to_dict(),
+        # Bumped when register began modulating tone_variation/audience_engagement, so a row
+        # scored before that change stays interpretable rather than looking like drift.
+        "scoring_version": 2,
         "visual_presence": scored_video.visual_presence,
         "video": scored_video.to_dict() if video_features else None,
         # Echoed straight back for the results sparklines. Not scored from — the aggregates
@@ -745,7 +824,7 @@ def _analyze_voice_clarity(
     }
 
 
-def _calculate_overall_scores(
+def _calculate_overall_scores(  # noqa: PLR0913 — mirrors the analyzer set it composes
     speech_type: str,
     wpm_metrics: Dict,
     filler_analysis: Dict,
@@ -755,6 +834,7 @@ def _calculate_overall_scores(
     scored: "session_scorer.ScoredSession",
     speech_config: Dict,
     topic_relevance: Optional[float] = None,
+    register_voice: Optional[float] = None,
 ) -> Dict:
     fluency = scored.fluency_score
 
@@ -774,6 +854,17 @@ def _calculate_overall_scores(
         tone_score = fluency
     if tone_analysis["monotone_risk"]:
         tone_score -= 20
+
+    # Scenario-conditioned register nudges tone, because raw vocal energy is only half the
+    # judgement — the same energy is right for a motivational talk and wrong for a eulogy.
+    # Only the VOICE channel is allowed in here: it exists in every scored voice session, so it
+    # cannot make two users' headline scores mean different things. The face channel is
+    # deliberately excluded for the same reason visual_presence is (see _generate_scorecard).
+    #
+    # Capped at +/-12 so register adjusts a delivery judgement rather than replacing it.
+    if register_voice is not None:
+        tone_score += max(-12.0, min(12.0, (register_voice - 60.0) * 0.3))
+
     tone_score = max(0.0, min(100.0, tone_score))
 
     structure_score = structure_analysis["structure_score"]

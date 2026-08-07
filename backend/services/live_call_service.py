@@ -14,6 +14,7 @@ from schemas.live_call_schemas import (
 from services.coaching_service import get_session as _get_coaching_session
 from services.conversation_service import _get_session as _get_conversation_session
 from services.interview_coach_service import _get_session as _get_interview_coach_session
+from services.public_speaking_service import get_session as _get_public_speaking_session
 from services.scenario_service import get_session as _get_scenario_session
 from utils.feature_errors import SessionNotFoundError
 
@@ -37,6 +38,14 @@ async def _session_belongs_to_user(feature: LiveCallFeature, session_id: str, us
         elif feature == "coaching":
             result = await _get_coaching_session(session_id, user_id)
             if isinstance(result, JSONResponse):
+                return False
+        elif feature == "public_speaking":
+            session = await _get_public_speaking_session(session_id, user_id)
+            # Ownership is not enough here. Unlike the free-flowing features, Public Speaking has
+            # a phase where a live agent must NOT be present: during the speech it would talk
+            # over the speaker and its voice would land in the audio being scored. The room only
+            # exists for the Q&A that follows.
+            if session.get("status") != "qa_phase":
                 return False
         return True
     except SessionNotFoundError:

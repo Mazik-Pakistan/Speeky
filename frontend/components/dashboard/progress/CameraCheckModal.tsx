@@ -115,23 +115,40 @@ export function CameraCheckModal({
     return captured;
   }
 
-  async function handleCalibrate() {
-    setCalibrationWarning(null);
+  /** Below this a hold clearly failed to see the face — distinct from a merely unsteady one. */
+  const MIN_USABLE_SAMPLES = 5;
 
+  /**
+   * Run both holds once. Returns null when the attempt is not usable.
+   *
+   * Split out from handleCalibrate so a failure can be retried transparently rather than
+   * bounced back to the user as a warning plus a button press.
+   */
+  async function attemptCalibration() {
     const atCamera = await runHold("camera");
-    if (atCamera < 8) {
-      setCalibrationWarning(
-        "We couldn't see your face clearly enough during that step. Try again with more light, or skip for now.",
-      );
-      return;
-    }
+    if (atCamera < MIN_USABLE_SAMPLES) return null;
 
     await runHold("screen");
 
     const calibration = check.fitCalibration();
-    if (!calibration || calibration.quality === "failed") {
+    if (!calibration || calibration.quality === "failed") return null;
+    return calibration;
+  }
+
+  async function handleCalibrate() {
+    setCalibrationWarning(null);
+
+    // Retry once, silently. A first attempt can fail for entirely transient reasons — the user
+    // blinked through the hold, glanced away, or the tab lost a second of frames — and making
+    // them read a warning and press a button for that is the complaint this flow generated.
+    // Only a second consecutive failure is worth telling them about.
+    let calibration = await attemptCalibration();
+    if (!calibration) calibration = await attemptCalibration();
+
+    if (!calibration) {
       setCalibrationWarning(
-        "Calibration didn't take. Retry to get delivery scores — without it we'll record your body language but won't score it.",
+        "We couldn't get a clear read on your eyes. More light on your face usually fixes it — " +
+          "or skip for now and we'll record your body language without scoring it.",
       );
       return;
     }
@@ -139,11 +156,8 @@ export function CameraCheckModal({
     const { width, height } = check.captureDimensions();
     saveCalibration(calibration, width, height);
 
-    if (calibration.quality === "weak") {
-      setCalibrationWarning(
-        "Calibration was a little unsteady, so delivery numbers will be approximate. You can retry for a sharper result.",
-      );
-    }
+    // "weak" is a usable calibration with a wider tolerance cone, not a problem to report — the
+    // reduced confidence_weight already flows through to how prominently the numbers are shown.
     setStep("done");
   }
 
@@ -189,7 +203,9 @@ export function CameraCheckModal({
               playsInline
               className="h-[200px] w-[266px] -scale-x-100 object-cover"
             />
-            {holdTarget ? <HoldOverlay target={holdTarget} /> : null}
+            {holdTarget ? (
+              <HoldOverlay target={holdTarget} countdown={check.countdown} />
+            ) : null}
           </div>
         ) : null}
 
@@ -294,7 +310,11 @@ export function CameraCheckModal({
           {step === "calibrate" ? (
             <>
               <Button type="button" loading={holdTarget !== null} onClick={handleCalibrate}>
-                {holdTarget ? "Hold still..." : "Start Calibration"}
+                {check.countdown !== null
+                  ? `Get ready... ${check.countdown}`
+                  : holdTarget
+                    ? "Hold still..."
+                    : "Start Calibration"}
               </Button>
               <Button
                 type="button"
@@ -376,7 +396,13 @@ function StepIndicator({ step }: { step: Step }) {
  * webcam physically is; the screen target sits at the middle, standing in for the speaking
  * panel. Their separation is exactly what `screen_offset_pitch_deg` measures.
  */
-function HoldOverlay({ target }: { target: "camera" | "screen" }) {
+function HoldOverlay({
+  target,
+  countdown,
+}: {
+  target: "camera" | "screen";
+  countdown: number | null;
+}) {
   return (
     <div className="absolute inset-0 flex flex-col bg-black/55 text-white">
       <div
@@ -389,6 +415,13 @@ function HoldOverlay({ target }: { target: "camera" | "screen" }) {
         <span className="mt-2 px-4 text-center text-xs font-medium">
           {target === "camera" ? "Look at your camera lens" : "Look here, at the middle of the screen"}
         </span>
+        {/* The dot above is already rendered while this counts down — that is what gets the
+            user's eyes onto the target before the first sample is taken. */}
+        {countdown !== null ? (
+          <span className="mt-1 text-3xl font-bold tabular-nums">{countdown}</span>
+        ) : (
+          <span className="mt-1 text-xs opacity-80">Recording — hold still</span>
+        )}
       </div>
     </div>
   );

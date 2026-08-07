@@ -143,7 +143,7 @@ test("a fidgety user gets a wider cone, not a false negative", () => {
 });
 
 test("excessive jitter downgrades quality rather than producing a confident cone", () => {
-  const unusable = calibrateFromTargets(hold(0, 0, 0, 0, 20, 12), AT_PANEL);
+  const unusable = calibrateFromTargets(hold(0, 0, 0, 0, 20, 20), AT_PANEL);
   assert.equal(unusable.quality, "weak");
   assert.notEqual(unusable.method, "on_screen_target");
 });
@@ -151,6 +151,63 @@ test("excessive jitter downgrades quality rather than producing a confident cone
 test("too few samples cannot claim a good calibration", () => {
   const thin = calibrateFromTargets(hold(0, 0, 0, 0, 3), AT_PANEL);
   assert.equal(thin.quality, "weak");
+});
+
+/**
+ * The acceptance floors were loosened after real-camera testing, where calibration failed far
+ * too readily and forced a manual retry. These two pin the new behaviour so a future tidy-up
+ * doesn't quietly tighten it back and reintroduce the complaint.
+ */
+test("an ordinary, slightly restless hold still calibrates", () => {
+  // ~12 degrees of wobble: a normal person holding still, not a statue. This used to fail.
+  const restless = calibrateFromTargets(hold(0, 0, 0, 0, 40, 5), AT_PANEL);
+
+  assert.equal(restless.quality, "good", "a normal hold must not be downgraded");
+  assert.equal(restless.method, "on_screen_target");
+  // The proportionate penalty is a wider cone, not a rejection.
+  assert.ok((restless.pitchToleranceDeg ?? 0) > 6);
+});
+
+test("a restless user's wider cone never swallows the screen offset", () => {
+  /**
+   * The failure this guards: widening the cone for a fidgety user is correct, but taken far
+   * enough it absorbs the measured lens-to-panel gap, and then watching the on-screen panel
+   * scores as full eye contact. That inflates on_camera_pct for precisely the users whose data
+   * deserves the least confidence.
+   */
+  // A realistic screen offset (~12 degrees below the lens) with a very restless user.
+  const panel = hold(0, -12, 0, 0.24, 40, 5);
+  const calibration = calibrateFromTargets(hold(0, 0, 0, 0, 40, 5), panel);
+
+  assert.ok(calibration.screenOffsetPitchDeg !== null);
+  assert.ok(
+    (calibration.pitchToleranceDeg ?? 99) < Math.abs(calibration.screenOffsetPitchDeg!),
+    `cone ${calibration.pitchToleranceDeg} must stay inside the ${calibration.screenOffsetPitchDeg} offset`,
+  );
+
+  // ...and the two must still land in different buckets.
+  const atLens = bucketsFor(hold(0, 0, 0, 0), calibration);
+  const atPanel = bucketsFor(panel, calibration);
+  assert.ok(share(atLens, "on_camera") > 80, `lens: ${share(atLens, "on_camera")}%`);
+  assert.equal(share(atPanel, "on_camera"), 0, "panel gaze must never read as lens contact");
+});
+
+test("an unseparable screen offset is dropped rather than faked", () => {
+  // Camera almost in line with the panel: the cone floor is wider than the gap, so the two
+  // genuinely cannot be told apart. Claiming otherwise would be a fabricated distinction.
+  const calibration = calibrateFromTargets(AT_LENS, hold(0, -2, 0, 0.05));
+
+  assert.equal(calibration.screenOffsetPitchDeg, null);
+  assert.notEqual(calibration.method, "on_screen_target");
+});
+
+test("a short hold still calibrates as long as the samples are clean", () => {
+  // Detection dropouts can leave a hold thin even when what survived is perfectly good.
+  const short = calibrateFromTargets(hold(0, 0, 0, 0, 6, 0.4), AT_PANEL);
+
+  assert.equal(short.performed, true);
+  assert.notEqual(short.quality, "failed");
+  assert.ok(short.baselinePitchDeg !== null);
 });
 
 test("no samples at all is a failure, not a guess", () => {

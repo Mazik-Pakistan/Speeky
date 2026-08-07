@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -20,6 +21,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { FillerWordsScorecardSection } from "@/components/dashboard/public-speaking/FillerWordsScorecardSection";
 import { DeliverySparkline } from "@/components/dashboard/public-speaking/DeliverySparkline";
+/**
+ * Lazy: @livekit/components-react is ~150kB and only a fraction of sessions open the
+ * face-to-face Q&A at all. Imported statically it landed in this page's bundle for everyone,
+ * taking First Load from 137kB to 288kB — the same mistake the MediaPipe loader avoids by
+ * splitting the vision runtime into its own async chunk.
+ *
+ * ssr:false because LiveKit touches browser media APIs on import.
+ */
+const QaAvatarCall = dynamic(
+  () =>
+    import("@/components/dashboard/public-speaking/QaAvatarCall").then((m) => m.QaAvatarCall),
+  { ssr: false },
+);
 import { ApiError } from "@/lib/api";
 import {
   startPublicSpeakingSession,
@@ -99,6 +113,10 @@ export default function PublicSpeakingSessionPage() {
   const [qaScore, setQaScore] = React.useState<any>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [showQa, setShowQa] = React.useState(false);
+  // The avatar audience is opt-in and Q&A-only. It never runs during the speech: a live
+  // participant would talk over the speaker, and its voice would be picked up by the mic
+  // feeding the audio scorer. The backend refuses a token before qa_phase regardless.
+  const [qaCallActive, setQaCallActive] = React.useState(false);
 
   const sessionIdRef = React.useRef<string | null>(null);
   sessionIdRef.current = sessionId;
@@ -110,6 +128,9 @@ export default function PublicSpeakingSessionPage() {
     duration_seconds: 0,
     avg_db: undefined as number | undefined,
     pitch_range_semitones: 0,
+    snr_db: undefined as number | undefined,
+    mean_pitch_hz: undefined as number | undefined,
+    intensity_variation_db: 0,
   });
   const getWsUrl = React.useCallback(() => {
     const id = sessionIdRef.current;
@@ -172,6 +193,16 @@ export default function PublicSpeakingSessionPage() {
         if (typeof features.avg_db === "number") acc.avg_db = features.avg_db;
         if (typeof features.pitch_range_semitones === "number")
           acc.pitch_range_semitones = Math.max(acc.pitch_range_semitones, features.pitch_range_semitones);
+        // Worst SNR across the session, not the last one: a single noisy utterance is the
+        // clarity problem worth surfacing, and taking the latest would hide it.
+        if (typeof features.snr_db === "number")
+          acc.snr_db = acc.snr_db === undefined ? features.snr_db : Math.min(acc.snr_db, features.snr_db);
+        if (typeof features.mean_pitch_hz === "number") acc.mean_pitch_hz = features.mean_pitch_hz;
+        if (typeof features.intensity_variation_db === "number")
+          acc.intensity_variation_db = Math.max(
+            acc.intensity_variation_db,
+            features.intensity_variation_db,
+          );
         acc.has = true;
       }
     },
@@ -282,6 +313,9 @@ export default function PublicSpeakingSessionPage() {
               word_timings: f.word_timings,
               avg_db: f.avg_db,
               pitch_range_semitones: f.pitch_range_semitones,
+              snr_db: f.snr_db,
+              mean_pitch_hz: f.mean_pitch_hz,
+              intensity_variation_db: f.intensity_variation_db,
               duration_seconds: f.duration_seconds,
             }
           : undefined,
@@ -563,20 +597,42 @@ export default function PublicSpeakingSessionPage() {
               </p>
             </div>
 
-            <div className="rounded-lg bg-secondary/20 p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-white shrink-0">
-                  ?
+            {qaCallActive ? (
+              <QaAvatarCall
+                sessionId={sessionId!}
+                active={qaCallActive}
+                question={qaQuestion}
+                onEnded={() => setQaCallActive(false)}
+              />
+            ) : (
+              <>
+                <div className="rounded-lg bg-secondary/20 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-white shrink-0">
+                      ?
+                    </div>
+                    <div>
+                      <div className="font-medium text-foreground">Question</div>
+                      <p className="mt-1 text-sm text-foreground">{qaQuestion}</p>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <div className="font-medium text-foreground">Question</div>
-                  <p className="mt-1 text-sm text-foreground">{qaQuestion}</p>
-                </div>
-              </div>
-            </div>
+
+                {/* Facing a person is most of what makes Q&A practice worth doing, but it is a
+                    live call — opt in rather than opening a room the moment results render. */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setQaCallActive(true)}
+                  className="w-full"
+                >
+                  Answer face-to-face instead
+                </Button>
+              </>
+            )}
 
             <Textarea
-              label="Your response"
+              label={qaCallActive ? "Or type your response" : "Your response"}
               value={qaResponse}
               onChange={(e) => setQaResponse(e.target.value)}
               placeholder="Type your response..."
