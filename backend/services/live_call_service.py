@@ -1,4 +1,5 @@
 import os
+import secrets
 from datetime import timedelta
 
 from fastapi import Depends
@@ -75,10 +76,17 @@ async def _mint_token(user_id: str, req: LiveCallTokenRequestSchema) -> LiveCall
     # public_speaking carries the mode too, so the worker knows which kind of agent to start
     # from the room name alone. It is the mode this function just *validated*, never the raw
     # request — the room name is what the worker trusts, so it must not be caller-controlled.
+    #
+    # Trailing nonce: LiveKit's automatic agent dispatch fires once per room *creation*, not
+    # per join — a session's room name used to be fully deterministic, so re-opening Live Call
+    # on the same session after an abrupt disconnect (e.g. closing the modal while the avatar
+    # was still speaking) could rejoin the still-alive old room and get no agent at all. A random nonce per mint makes every attempt its own
+    # room, so a fresh dispatch always fires. dispatch.parse_room_name strips it back off.
+    nonce = secrets.token_hex(4)
     room_name = (
-        f"livecall_public_speaking_{req.mode}_{req.session_id}"
+        f"livecall_public_speaking_{req.mode}_{req.session_id}_{nonce}"
         if req.feature == "public_speaking"
-        else f"livecall_{req.feature}_{req.session_id}"
+        else f"livecall_{req.feature}_{req.session_id}_{nonce}"
     )
     token = (
         api.AccessToken(os.environ["LIVEKIT_API_KEY"], os.environ["LIVEKIT_API_SECRET"])

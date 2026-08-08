@@ -24,6 +24,7 @@ import numpy as np
 from livekit import agents, rtc
 from livekit.agents import Agent, AgentSession, stt
 from livekit.agents.voice.room_io import RoomInputOptions, RoomOutputOptions
+from livekit.agents.voice.room_io._output import _ParticipantAudioOutput
 from livekit.agents.voice.turn import TurnHandlingOptions
 from livekit.plugins import bey, silero
 from prisma.engine.errors import EngineError
@@ -88,17 +89,59 @@ def _warm_stt_tts() -> None:
         tts_client.synthesize(" ")
 
 
-async def _start_avatar_or_skip(session: AgentSession, room: rtc.Room) -> bool:
+# Matches RoomOutputOptions' own audio defaults (livekit.agents.voice.room_io.types) —
+# reproducing exactly what RoomIO would have published had the avatar never started.
+_FALLBACK_AUDIO_SAMPLE_RATE = 24000
+_FALLBACK_AUDIO_NUM_CHANNELS = 1
+
+# Bey's own join briefly disconnects-then-reconnects as normal setup churn (observed in
+# practice: a disconnect event fires, then "remote participant ready" ~100ms later) — a
+# bare disconnect is not proof of death, only staying gone past this grace window is.
+_AVATAR_DISCONNECT_GRACE_S = 3.0
+
+
+async def _start_avatar_or_skip(session: AgentSession, room: rtc.Room) -> bey.AvatarSession | None:
     """Optional Beyond Presence lip-synced avatar. Env-gated (unset key or blocked/dropped = audio-call only)."""
     if not os.getenv("BEY_API_KEY"):
-        return False
+        return None
     try:
         avatar = bey.AvatarSession(avatar_id=os.getenv("BEY_AVATAR_ID","694c83e2-8895-4a98-bd16-56332ca3f449"))
         await asyncio.wait_for(avatar.start(session, room=room), timeout=_SETUP_TIMEOUT_S)
-        return True
+        return avatar
     except Exception:
         logger.exception("Beyond Presence avatar failed to start; continuing audio-only")
-        return False
+        return None
+
+
+def _watch_avatar_health(session: AgentSession, room: rtc.Room, avatar: bey.AvatarSession) -> None:
+    """ The avatar publishes as its own room participant (avatar.avatar_identity), 
+    so its disconnect is the signal — but only once it's stayed gone past _AVATAR_DISCONNECT_GRACE_S; swapping on the bare event fired
+    on a transient reconnect blip and severed a still-recovering avatar mid-setup."""
+    fallen_back = False
+
+    async def _confirm_and_fallback() -> None:
+        nonlocal fallen_back
+        await asyncio.sleep(_AVATAR_DISCONNECT_GRACE_S)
+        if fallen_back or avatar.avatar_identity in room.remote_participants:
+            return
+        fallen_back = True
+        room.off("participant_disconnected", _on_disconnected)
+        logger.warning("Beyond Presence avatar disconnected mid-call; falling back to audio-only")
+        session.output.replace_audio_tail(
+            _ParticipantAudioOutput(
+                room,
+                sample_rate=_FALLBACK_AUDIO_SAMPLE_RATE,
+                num_channels=_FALLBACK_AUDIO_NUM_CHANNELS,
+                track_publish_options=rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
+            )
+        )
+
+    def _on_disconnected(participant: rtc.RemoteParticipant) -> None:
+        if participant.identity != avatar.avatar_identity:
+            return
+        asyncio.create_task(_confirm_and_fallback())
+
+    room.on("participant_disconnected", _on_disconnected)
 
 
 async def _run_idle_audience(ctx: agents.JobContext, session_id: str, user_id: str) -> None:
@@ -245,12 +288,14 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # and the agent would publish to the room directly while the avatar, receiving nothing, sat
     # frozen. Suppressing RoomIO's audio output is what leaves the avatar's in place; without an
     # avatar it is still needed, hence the flag rather than a constant.
-    avatar_started = await _start_avatar_or_skip(session, ctx.room)
+    avatar = await _start_avatar_or_skip(session, ctx.room)
     await session.start(
         room=ctx.room,
         agent=Agent(instructions=setup.instructions),
-        room_output_options=RoomOutputOptions(audio_enabled=not avatar_started),
+        room_output_options=RoomOutputOptions(audio_enabled=avatar is None),
     )
+    if avatar is not None:
+        _watch_avatar_health(session, ctx.room, avatar)
 
     # Voice barge-in (talking over the agent) is already handled by
     # TurnHandlingOptions(interruption={"mode": "vad"}) above — the framework cuts off
