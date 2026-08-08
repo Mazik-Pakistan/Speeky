@@ -647,6 +647,9 @@ export default function PublicSpeakingSessionPage() {
                 sessionId={sessionId!}
                 active={qaCallActive}
                 question={qaQuestion}
+                // The spoken answer fills the box below, so ending the call leaves the caller
+                // ready to submit rather than retyping what they just said.
+                onSelfSpeech={setQaResponse}
                 onEnded={() => setQaCallActive(false)}
               />
 

@@ -131,11 +131,15 @@ async def _run_idle_audience(ctx: agents.JobContext, session_id: str, user_id: s
     # Do not even subscribe to the speaker's microphone. With no STT there is nowhere for that
     # audio to go, but the speech being recorded here is the thing under assessment — the room
     # should not receive it at all. Transcription output is off for the same reason.
+    #
+    # audio_enabled=False for the reason described in entrypoint(): RoomIO would otherwise take
+    # ownership of the audio output the avatar just claimed. This session has no voice to lose
+    # today, but the ownership is the avatar's either way.
     await session.start(
         room=ctx.room,
         agent=Agent(instructions=setup.instructions),
         room_input_options=RoomInputOptions(audio_enabled=False, text_enabled=False),
-        room_output_options=RoomOutputOptions(transcription_enabled=False),
+        room_output_options=RoomOutputOptions(audio_enabled=False, transcription_enabled=False),
     )
 
 
@@ -182,7 +186,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             "filename must match TTS_VOICE_MODEL. Dropping this call.",
             tts_client._model_path(),
         )
-        await ctx.shutdown(reason="tts voice model missing")
+        ctx.shutdown(reason="tts voice model missing")
         return
 
     try:
@@ -236,8 +240,18 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             interruption={"mode": "vad"},
         ),
     )
-    await _start_avatar_or_skip(session, ctx.room)
-    await session.start(room=ctx.room, agent=Agent(instructions=setup.instructions))
+    # The avatar takes ownership of the audio output (bey swaps in a DataStreamAudioOutput that
+    # streams speech to it for lip-sync). RoomIO would then assign its own output straight over
+    # that — `self._agent_session.output.audio = self.audio_output`, a whole-chain replacement —
+    # and the agent would publish to the room directly while the avatar, receiving nothing, sat
+    # frozen. Suppressing RoomIO's audio output is what leaves the avatar's in place; without an
+    # avatar it is still needed, hence the flag rather than a constant.
+    avatar_started = await _start_avatar_or_skip(session, ctx.room)
+    await session.start(
+        room=ctx.room,
+        agent=Agent(instructions=setup.instructions),
+        room_output_options=RoomOutputOptions(audio_enabled=not avatar_started),
+    )
 
     # Voice barge-in (talking over the agent) is already handled by
     # TurnHandlingOptions(interruption={"mode": "vad"}) above — the framework cuts off
@@ -249,6 +263,15 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         return "ok"
 
     ctx.room.local_participant.register_rpc_method("interrupt_agent", _on_interrupt_rpc)
+
+    # Public Speaking's opening line is the question being asked, and an avatar adds seconds of
+    # its own before any audio plays (DataStreamAudioOutput blocks until the avatar participant
+    # has published). A caller saying "hello" into that gap used to interrupt the question away,
+    # leaving them to answer something they never heard. Speak it regardless of what they are
+    # doing, and let nothing cut it short.
+    if setup.opening_is_essential:
+        await session.say(setup.opening_line, allow_interruptions=False)
+        return
 
     # The caller's mic is live the instant start() returns, and our STT is a single
     # batch transcription per VAD segment, not a real streaming one — if the canned

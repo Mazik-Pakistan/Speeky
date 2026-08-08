@@ -364,6 +364,19 @@ export function useVideoAnalysis(
           earlyStopRef.current = true;
           void stopVideoRef.current?.();
         });
+
+        // "ended" is the permanent case. A track can also go *mute* — another application takes
+        // the camera, the driver stalls, the device sleeps — which stops the frames without
+        // ending anything. Nothing downstream notices: the scheduler simply sees no new frame,
+        // so it neither analyses nor complains, and the preview sits frozen while the session
+        // records on. These recover on their own, so hold the session open and say so; the
+        // aggregate already discounts itself by the coverage it actually got.
+        track.addEventListener("mute", () => {
+          setVideoStatus("Camera interrupted — your speech is still recording.");
+        });
+        track.addEventListener("unmute", () => {
+          setVideoStatus("Camera on. Delivery is being analysed on your device.");
+        });
       });
 
       setIsVideoActive(true);

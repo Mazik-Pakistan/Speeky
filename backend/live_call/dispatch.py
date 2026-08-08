@@ -20,12 +20,13 @@ mode is allowed only while the session is still "in_progress" (build_idle_setup 
 the exact inverse of the qa_phase window.
 """
 
+import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from fastapi.responses import JSONResponse
 
-from lib import ai_client, prompts
+from lib import ai_client, llm_client, prompts, relevance
 from lib.prisma_client import db
 from schemas.coaching_schemas import RoleplayTurnSchema
 from schemas.conversation_schemas import SendMessageSchema
@@ -41,6 +42,8 @@ from services import (
 )
 from utils.feature_errors import SessionNotFoundError
 
+logger = logging.getLogger("live-call-agent")
+
 _FEATURES = ("conversation", "interview_coach", "scenario", "coaching", "public_speaking")
 
 
@@ -49,6 +52,14 @@ class LiveCallSetup:
     instructions: str
     opening_line: str
     turn_handler: Callable[[str], Awaitable[str]]
+    opening_is_essential: bool = False
+    """Whether the caller must hear the opening line for the call to make any sense.
+
+    False for the chat features, where it is a greeting: if the caller is already talking when
+    the agent connects, their utterance is the better first turn and the greeting is dropped.
+    True for Public Speaking, where the opening line is the *question* — an answer to a question
+    that was never asked is not a Q&A, so it is spoken unconditionally and uninterruptibly.
+    """
 
 
 @dataclass
@@ -223,6 +234,37 @@ async def _build_coaching_setup(session_id: str, user_id: str) -> LiveCallSetup:
     return LiveCallSetup(instructions=instructions, opening_line=opening_line, turn_handler=turn_handler)
 
 
+async def _answers_the_question(question: str, answer: str) -> bool:
+    """Whether `answer` is on the subject `question` asked — not whether it is a *good* answer.
+
+    relevance.evaluate_substance cannot do this: it is a deterministic offline check for whether
+    there is any substance at all, so a fluent reply on the wrong topic passes it cleanly. Topic
+    drift needs the model.
+
+    Fails open on every error, and when no LLM is configured. Being wrongly told "that doesn't
+    answer my question" and asked again is worse than an off-topic answer reaching the scorer,
+    which evaluates relevance properly anyway.
+    """
+    if not llm_client.is_configured():
+        return True
+    try:
+        verdict = await ai_client.generate(
+            system_prompt=(
+                "You judge whether a spoken answer is about the subject the question asked "
+                "about. Ignore quality, length, hesitation and delivery — a rambling or weak "
+                "answer on the right subject still counts. Answer with exactly one word: YES if "
+                "it addresses the question's subject, NO if it is about something else."
+            ),
+            user_message=f"Question: {question}\n\nAnswer: {answer}",
+            max_tokens=5,
+            temperature=0.0,
+        )
+        return not verdict.strip().upper().startswith("NO")
+    except Exception:
+        logger.exception("Q&A topicality check failed; treating the answer as on-topic")
+        return True
+
+
 async def _build_public_speaking_setup(session_id: str, user_id: str) -> LiveCallSetup:
     """Q&A only — see the module docstring for why the speech itself gets no agent.
 
@@ -252,7 +294,27 @@ async def _build_public_speaking_setup(session_id: str, user_id: str) -> LiveCal
 
     opening_line = session.get("ai_question") or "Thanks for that — what would you say is your main takeaway?"
 
+    # A caller who answers a different question than the one asked gets it put to them again
+    # rather than scored and shown the door. Capped, because an audience member that will not
+    # move on is its own kind of broken — and submit_qa_response is what ends the session, so
+    # someone who never satisfies the gate must still be able to finish.
+    max_reasks = 2
+    reasks_used = 0
+
     async def turn_handler(user_text: str) -> str:
+        nonlocal reasks_used
+
+        # Two different failures, both worth a re-ask before anything is persisted: nothing of
+        # substance said at all (the deterministic gate the typed path also scores against), and
+        # a fluent answer to a different question (which that gate passes — it does not read for
+        # topic). Being asked again is worth more to a speaker than a relevance score of 0 they
+        # read about afterwards.
+        if reasks_used < max_reasks:
+            no_substance = relevance.evaluate_substance(user_text, opening_line).rejected
+            if no_substance or not await _answers_the_question(opening_line, user_text):
+                reasks_used += 1
+                return f"That doesn't answer what I asked. Let me put it to you again: {opening_line}"
+
         # submit_qa_response scores the answer AND completes the session — Public Speaking's Q&A
         # is a single exchange by design. So this handler runs at most once per call, and what
         # it returns is a sign-off rather than a follow-up question.
@@ -263,7 +325,16 @@ async def _build_public_speaking_setup(session_id: str, user_id: str) -> LiveCal
         except Exception:
             # The user has already spoken; failing the call now would lose their answer with no
             # way to retry. Persisting is best-effort, closing gracefully is not.
-            return "Thanks — that's all from me. Your written feedback is on screen."
-        return "Thank you, that answers it. Your full feedback is ready on screen whenever you are."
+            return "Thanks — that's all from me. Hang up and your written feedback will be there."
+        # Says what actually happens next: the call is over and ending it is what reveals the
+        # scored feedback. The old wording pointed at a screen the caller was not looking at —
+        # the results are behind this call, not beside it.
+        return "Thank you, that answers it. Hang up whenever you're ready and I'll show you your feedback."
 
-    return LiveCallSetup(instructions=instructions, opening_line=opening_line, turn_handler=turn_handler)
+    return LiveCallSetup(
+        instructions=instructions,
+        opening_line=opening_line,
+        turn_handler=turn_handler,
+        # The opening line here is the question itself.
+        opening_is_essential=True,
+    )
