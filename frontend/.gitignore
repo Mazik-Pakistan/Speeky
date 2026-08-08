@@ -19,4 +19,5 @@ tsconfig.tsbuildinfo
 # MediaPipe runtime assets (~29MB of wasm + .task model bundles). Reproducible from
 # scripts/fetch-mediapipe-assets.mjs, which runs on postinstall — never commit them.
 /public/mediapipe/
+test-build
 
