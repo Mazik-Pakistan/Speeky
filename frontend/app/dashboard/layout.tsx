@@ -69,10 +69,10 @@ export default function DashboardLayout({
     <ConsentGate>
     <AssessmentProvider>
     <ActiveSessionsProvider>
-      <div className="flex min-h-screen bg-background dark:bg-[radial-gradient(60%_50%_at_12%_-8%,hsl(var(--accent)/0.12),transparent_60%),radial-gradient(55%_45%_at_100%_8%,hsl(var(--primary)/0.16),transparent_55%),radial-gradient(60%_45%_at_50%_115%,hsl(var(--accent)/0.08),transparent_60%)]">
+      <div className="flex min-h-screen bg-[radial-gradient(50%_38%_at_12%_-8%,hsl(var(--primary)/0.12),transparent_60%),radial-gradient(44%_34%_at_96%_4%,hsl(var(--accent)/0.10),transparent_60%),radial-gradient(38%_28%_at_72%_110%,hsl(var(--danger)/0.08),transparent_62%),hsl(var(--background))] dark:bg-[radial-gradient(60%_50%_at_12%_-8%,hsl(var(--primary)/0.14),transparent_60%),radial-gradient(55%_45%_at_100%_8%,hsl(var(--accent)/0.10),transparent_55%),radial-gradient(50%_38%_at_74%_112%,hsl(var(--danger)/0.08),transparent_60%),hsl(var(--background))]">
         <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 items-center gap-2 border-b border-border px-4 sm:gap-3 sm:px-6 lg:px-10">
+          <header className="flex h-14 items-center gap-2 border-b border-border bg-background/72 px-4 backdrop-blur-xl sm:gap-3 sm:px-6 lg:px-10">
             <button
               type="button"
               aria-label="Open menu"
