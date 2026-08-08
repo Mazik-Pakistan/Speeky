@@ -12,7 +12,14 @@ import {
   type TrackReference,
 } from "@livekit/components-react";
 import type { LocalAudioTrack } from "livekit-client";
-import { Mic, MicOff, PhoneOff, X } from "lucide-react";
+import {
+  Mic,
+  MicOff,
+  PanelRightClose,
+  PanelRightOpen,
+  PhoneOff,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { fetchLiveCallToken, type LiveCallFeature } from "@/lib/liveCall";
@@ -28,6 +35,10 @@ const STATE_LABELS: Record<string, string> = {
 };
 
 const ORB_BANDS = 4;
+
+// Transcript panel (video mode) caps to the last N messages overall
+const MAX_TRANSCRIPT_MESSAGES = 2;
+const TRANSCRIPT_OPACITY_STEPS = [1, 0.5];
 
 interface LiveCallModalProps {
   feature: LiveCallFeature;
@@ -66,12 +77,22 @@ export function LiveCallModal({
   // setAgentConnecting, passed straight down as a stable setState reference) so the
   // connect sound and the "Connecting…" blink can never desync from what's on screen.
   const [agentConnecting, setAgentConnecting] = React.useState(true);
+  // Whether an avatar video track is live — widens the modal into the side-by-side
+  // layout once true. Starts false (portrait/audio sizing) since a Bey avatar isn't
+  // known to exist until its video track actually arrives a few seconds into the call.
+  const [hasAvatarVideo, setHasAvatarVideo] = React.useState(false);
+  // Video-mode-only: hides the transcript panel and re-centers/grows the video pane.
+  // Owned here (not lifted via a callback like the two above) since the toggle button
+  // itself lives in this component's header, not inside LiveCallControls.
+  const [transcriptCollapsed, setTranscriptCollapsed] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) {
       setConnection(null);
       setError(null);
       setAgentConnecting(true);
+      setHasAvatarVideo(false);
+      setTranscriptCollapsed(false);
       return;
     }
 
@@ -81,6 +102,8 @@ export function LiveCallModal({
     setConnecting(true);
     setError(null);
     setAgentConnecting(true);
+    setHasAvatarVideo(false);
+    setTranscriptCollapsed(false);
     fetchLiveCallToken(feature, sessionId)
       .then((result) => {
         if (!cancelled) setConnection({ token: result.token, url: result.url });
@@ -135,18 +158,54 @@ export function LiveCallModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="flex h-[100vh] w-full flex-col overflow-hidden bg-[radial-gradient(ellipse_at_50%_10%,hsl(var(--primary)/0.28),hsl(var(--background))_65%)] sm:h-[85vh] sm:max-h-[85vh] sm:w-[90vw] sm:max-w-md sm:rounded-2xl sm:border sm:border-border sm:shadow-xl md:w-3/5 md:max-w-2xl lg:w-1/2 lg:max-w-3xl">
+    <div
+      className={cn(
+        "fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center",
+        !hasAvatarVideo && "sm:p-4",
+      )}
+    >
+      <div
+        className={cn(
+          "flex h-[100vh] w-full flex-col overflow-hidden bg-[radial-gradient(ellipse_at_50%_10%,hsl(var(--primary)/0.28),hsl(var(--background))_65%)]",
+          // Video mode fills the whole viewport at every size — no cap, no card
+          // chrome (rounded corners/border/shadow would show the backdrop peeking
+          // rather than just resized). Audio-only keeps today's small centered card.
+          !hasAvatarVideo &&
+            "sm:h-[85vh] sm:max-h-[85vh] sm:w-[90vw] sm:max-w-md sm:rounded-2xl sm:border sm:border-border sm:shadow-xl md:w-3/5 md:max-w-2xl lg:w-1/2 lg:max-w-3xl",
+        )}
+      >
         <div className="flex shrink-0 items-center justify-between px-4 py-3 sm:px-5">
           <p className="text-sm font-semibold text-foreground">Live Call</p>
-          <button
-            type="button"
-            onClick={handleEndCall}
-            aria-label="Close"
-            className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <X className="h-5 w-5" aria-hidden="true" />
-          </button>
+          <div className="flex items-center gap-1">
+            {hasAvatarVideo ? (
+              <button
+                type="button"
+                onClick={() => setTranscriptCollapsed((prev) => !prev)}
+                aria-pressed={transcriptCollapsed}
+                aria-label={
+                  transcriptCollapsed ? "Show transcript" : "Hide transcript"
+                }
+                title={
+                  transcriptCollapsed ? "Show transcript" : "Hide transcript"
+                }
+                className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {transcriptCollapsed ? (
+                  <PanelRightOpen className="h-5 w-5" aria-hidden="true" />
+                ) : (
+                  <PanelRightClose className="h-5 w-5" aria-hidden="true" />
+                )}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={handleEndCall}
+              aria-label="Close"
+              className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <X className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
         </div>
 
         {error ? (
@@ -182,6 +241,8 @@ export function LiveCallModal({
               onEndSession={() => void handleEndSession()}
               onEndCall={handleEndCall}
               onConnectingChange={setAgentConnecting}
+              onVideoChange={setHasAvatarVideo}
+              transcriptCollapsed={transcriptCollapsed}
             />
           </LiveKitRoom>
         )}
@@ -195,6 +256,8 @@ function LiveCallControls({
   onEndSession,
   onEndCall,
   onConnectingChange,
+  onVideoChange,
+  transcriptCollapsed,
 }: {
   endingSession: boolean;
   onEndSession: () => void;
@@ -202,6 +265,10 @@ function LiveCallControls({
   /** Kept in sync with every connecting/initializing transition (not one-shot) so
    * the modal's connect sound + "Connecting…" blink always mirror the real state. */
   onConnectingChange: (connecting: boolean) => void;
+  /** Kept in sync with whether an avatar video track is live, so the modal can
+   * widen into the side-by-side layout once one actually appears. */
+  onVideoChange: (hasVideo: boolean) => void;
+  transcriptCollapsed: boolean;
 }) {
   const { state, audioTrack, videoTrack, agent } = useVoiceAssistant();
   const { localParticipant, isMicrophoneEnabled, microphoneTrack } =
@@ -213,6 +280,21 @@ function LiveCallControls({
   React.useEffect(() => {
     onConnectingChange(isConnectingState);
   }, [isConnectingState, onConnectingChange]);
+
+  // Synced during render, not in an effect: the parent's `hasAvatarVideo` sizes the
+  // outer card (small audio modal vs. full-viewport video layout), while this
+  // component's own return already forks into the wide band1/band2 JSX the instant
+  // `videoTrack` is truthy. An effect-based sync lags one commit behind, so for one
+  // frame the wide layout painted inside the still-small card — squeezing band 2
+  // (status text, buttons) into too little space right as "Listening…" first showed.
+  // Calling the parent setter directly in the render body (React's documented
+  // "adjusting state when a prop changes" pattern) keeps both in the same commit.
+  const hasVideoNow = !!videoTrack;
+  const [reportedVideo, setReportedVideo] = React.useState(hasVideoNow);
+  if (reportedVideo !== hasVideoNow) {
+    setReportedVideo(hasVideoNow);
+    onVideoChange(hasVideoNow);
+  }
 
   async function handleInterrupt() {
     if (!agent) return;
@@ -227,110 +309,171 @@ function LiveCallControls({
     }
   }
 
+  const statusLabel = (
+    <p
+      role="status"
+      aria-live="polite"
+      className={cn(
+        "text-sm text-muted-foreground",
+        isConnectingState && "animate-pulse",
+      )}
+    >
+      {STATE_LABELS[state] ?? "Connected"}
+    </p>
+  );
+
+  const jumpInButton =
+    state === "speaking" ? (
+      <button
+        type="button"
+        onClick={() => void handleInterrupt()}
+        className="rounded-full border-0 bg-gradient-to-r from-primary to-accent px-3 py-1 text-xs font-medium text-primary-foreground shadow-sm transition-all duration-fast ease-spring hover:-translate-y-0.5 hover:shadow-md active:scale-95"
+      >
+        Jump in
+      </button>
+    ) : null;
+
+  const controlsRow = (
+    <div className="flex items-center gap-5">
+      <button
+        type="button"
+        onClick={() =>
+          void localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled)
+        }
+        aria-pressed={isMicrophoneEnabled}
+        aria-label={
+          isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"
+        }
+        className={cn(
+          "flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-all duration-fast ease-spring active:scale-95 sm:h-14 sm:w-14",
+          isMicrophoneEnabled
+            ? "bg-gradient-to-br from-accent to-accent/80 text-accent-foreground shadow-md hover:-translate-y-0.5 hover:shadow-lg"
+            : "border border-danger bg-danger/10 text-danger hover:-translate-y-0.5",
+        )}
+      >
+        {isMicrophoneEnabled ? (
+          <Mic className="h-5 w-5" aria-hidden="true" />
+        ) : (
+          <MicOff className="h-5 w-5" aria-hidden="true" />
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={onEndCall}
+        aria-label="End call — keep chatting by text"
+        title="End call — keep chatting by text"
+        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-danger to-danger/80 text-white shadow-md transition-all duration-fast ease-spring hover:-translate-y-0.5 hover:shadow-lg active:scale-95 sm:h-14 sm:w-14"
+      >
+        <PhoneOff className="h-5 w-5" aria-hidden="true" />
+      </button>
+    </div>
+  );
+
+  const endSessionButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      loading={endingSession}
+      onClick={onEndSession}
+      className="w-full border-0 bg-gradient-to-r from-primary to-accent bg-[length:200%_200%] text-primary-foreground shadow-sm transition-all duration-fast ease-spring animate-gradient-shift hover:-translate-y-0.5 hover:shadow-md sm:w-auto"
+    >
+      End Session &amp; See Report
+    </Button>
+  );
+
+  if (videoTrack) {
+    // Full-viewport layout (LiveCallModal drops its card sizing once hasAvatarVideo is
+    // true). Two height bands from sm: up — band 1 (video + transcript) ~72%, band 2
+    // (all controls) ~28%, centered. Below sm, both bands fall back to today's
+    // flexible, content-sized stacking (mobile keeps its own proportions on purpose;
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col sm:h-[72%] sm:flex-none sm:flex-row">
+          <div
+            className={cn(
+              "flex min-h-0 items-center justify-center p-4 sm:p-6",
+              transcriptCollapsed ? "flex-1" : "shrink-0 sm:w-[56%]",
+            )}
+          >
+            <div
+              className={cn(
+                "relative",
+                transcriptCollapsed ? "h-full w-full" : "w-full",
+              )}
+            >
+              {isAgentTurn ? (
+                <div className="absolute left-1/2 bottom-0 z-10 -translate-x-1/2 translate-y-1/2">
+                  <LiveCallOrb
+                    size="sm"
+                    state={state}
+                    agentAudioTrack={audioTrack}
+                    localMicTrack={localMicTrack}
+                  />
+                </div>
+              ) : null}
+              <VideoTrack
+                trackRef={videoTrack}
+                className={cn(
+                  "rounded-2xl object-cover shadow-lg",
+                  transcriptCollapsed ? "h-full w-full" : "aspect-video w-full",
+                )}
+              />
+            </div>
+          </div>
+          {/* Stays mounted (CSS-hidden, not unmounted) when collapsed — the
+              underlying LiveKit text-stream subscription doesn't replay history to a late subscriber, so unmounting/remounting this on every toggle showed a
+              blank transcript on re-expand until the next new line arrived. */}
+          <div
+            className={cn(
+              "flex min-h-0 flex-1 flex-col border-t-2 border-border p-4 sm:border-l-2 sm:border-t-0 sm:p-6",
+              transcriptCollapsed && "hidden",
+            )}
+          >
+            <LiveCallTranscriptPanel
+              localIdentity={localParticipant.identity}
+            />
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-center justify-center gap-3 border-t-2 border-border p-4 sm:h-[28%] sm:p-6">
+          <div className="flex w-full max-w-xs flex-col items-center gap-3 sm:max-w-sm">
+            {statusLabel}
+            {jumpInButton}
+            {!isAgentTurn ? (
+              <LiveCallOrb
+                size="sm"
+                state={state}
+                agentAudioTrack={audioTrack}
+                localMicTrack={localMicTrack}
+              />
+            ) : null}
+            {controlsRow}
+            {endSessionButton}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
       {/* Orb + status never scroll or shrink — always fully visible no matter how
           long the caption text below grows or how much vertical room the modal has. */}
       <div className="flex shrink-0 flex-col items-center gap-3 pt-2">
-        {videoTrack ? (
-          <div className="relative w-40 sm:w-56 md:w-64">
-            {isAgentTurn ? (
-              <div className="absolute left-1/2 bottom-0 z-10 -translate-x-1/2 translate-y-1/2">
-                <LiveCallOrb
-                  size="sm"
-                  state={state}
-                  agentAudioTrack={audioTrack}
-                  localMicTrack={localMicTrack}
-                />
-              </div>
-            ) : null}
-            <VideoTrack
-              trackRef={videoTrack}
-              className="aspect-square w-full rounded-2xl object-cover"
-            />
-          </div>
-        ) : (
-          <LiveCallOrb
-            state={state}
-            agentAudioTrack={audioTrack}
-            localMicTrack={localMicTrack}
-          />
-        )}
-        <p
-          role="status"
-          aria-live="polite"
-          className={cn(
-            "text-sm text-muted-foreground",
-            isConnectingState && "animate-pulse",
-          )}
-        >
-          {STATE_LABELS[state] ?? "Connected"}
-        </p>
-        {state === "speaking" ? (
-          <button
-            type="button"
-            onClick={() => void handleInterrupt()}
-            className="rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-          >
-            Jump in
-          </button>
-        ) : null}
+        <LiveCallOrb
+          state={state}
+          agentAudioTrack={audioTrack}
+          localMicTrack={localMicTrack}
+        />
+        {statusLabel}
+        {jumpInButton}
       </div>
       <div className="mt-3 flex min-h-[4.5rem] flex-1 flex-col items-center justify-center overflow-y-auto">
         <LiveCallLastLines localIdentity={localParticipant.identity} />
       </div>
 
       <div className="flex shrink-0 flex-col items-center gap-3 pt-3">
-        {videoTrack && !isAgentTurn ? (
-          <LiveCallOrb
-            size="sm"
-            state={state}
-            agentAudioTrack={audioTrack}
-            localMicTrack={localMicTrack}
-          />
-        ) : null}
-        <div className="flex items-center gap-5">
-          <button
-            type="button"
-            onClick={() =>
-              void localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled)
-            }
-            aria-pressed={isMicrophoneEnabled}
-            aria-label={
-              isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"
-            }
-            className={cn(
-              "flex h-12 w-12 shrink-0 items-center justify-center rounded-full border transition-colors sm:h-14 sm:w-14",
-              isMicrophoneEnabled
-                ? "border-border bg-surface text-foreground hover:bg-muted"
-                : "border-danger bg-danger/10 text-danger",
-            )}
-          >
-            {isMicrophoneEnabled ? (
-              <Mic className="h-5 w-5" aria-hidden="true" />
-            ) : (
-              <MicOff className="h-5 w-5" aria-hidden="true" />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={onEndCall}
-            aria-label="End call — keep chatting by text"
-            title="End call — keep chatting by text"
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-danger text-white shadow-sm transition-colors hover:bg-danger/90 sm:h-14 sm:w-14"
-          >
-            <PhoneOff className="h-5 w-5" aria-hidden="true" />
-          </button>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          loading={endingSession}
-          onClick={onEndSession}
-          className="w-full sm:w-auto"
-        >
-          End Session &amp; See Report
-        </Button>
+        {controlsRow}
+        {endSessionButton}
       </div>
     </div>
   );
@@ -378,6 +521,16 @@ function LiveCallOrb({
 
   const colorClass = isAgentTurn ? "bg-primary" : "bg-accent";
   const colorVar = isAgentTurn ? "--primary" : "--accent";
+  // Radial alpha mask instead of relying on blur alone for softness — flat blurred
+  // discs stacked on each other mixed into a hazy, muddy-looking blob at their shared
+  // edges. A true fade-to-transparent center-out reads as a clean glow instead, and
+  // matches the radial-gradient glow language already used elsewhere in this app
+  // (globals.css's own hover glows, this modal's own backdrop gradient).
+  const glowMask = {
+    maskImage: "radial-gradient(circle, black 0%, black 35%, transparent 78%)",
+    WebkitMaskImage:
+      "radial-gradient(circle, black 0%, black 35%, transparent 78%)",
+  } as const;
 
   return (
     <div
@@ -395,6 +548,7 @@ function LiveCallOrb({
           colorClass,
         )}
         style={{
+          ...glowMask,
           opacity: 0.28 + bass * 0.5,
           transform: `scale(${0.85 + bass * 0.45})`,
         }}
@@ -406,6 +560,7 @@ function LiveCallOrb({
           colorClass,
         )}
         style={{
+          ...glowMask,
           opacity: 0.32 + low * 0.45,
           transform: `scale(${0.88 + low * 0.32})`,
         }}
@@ -417,6 +572,7 @@ function LiveCallOrb({
           colorClass,
         )}
         style={{
+          ...glowMask,
           opacity: 0.4 + high * 0.4,
           transform: `scale(${0.9 + high * 0.22})`,
         }}
@@ -562,5 +718,158 @@ function LiveCallLastLines({ localIdentity }: { localIdentity: string }) {
         className="text-muted-foreground"
       />
     </div>
+  );
+}
+
+// @livekit/components-core's setupTextStream gives each streamed chunk of an
+// in-progress message a NEW streamInfo.id — it coalesces them into one array entry
+// itself, matched by this attribute (confirmed in its source), but streamInfo.id on
+// that entry still changes on every chunk. Keying rows by streamInfo.id therefore
+// remounted the row on every word, which is why neither animation looked like it was
+// running and why an in-progress reply could visually read as several messages —
+// this attribute is the one part of a segment's identity that stays stable for its
+// whole lifetime, so it's what dedupe/keying below use instead.
+const TRANSCRIPTION_SEGMENT_ID_ATTR = "lk.segment_id";
+function transcriptKey(segment: TranscriptSegment): string {
+  return (
+    segment.streamInfo.attributes?.[TRANSCRIPTION_SEGMENT_ID_ATTR] ??
+    segment.streamInfo.id
+  );
+}
+
+function speakerMeta(segment: TranscriptSegment, localIdentity: string) {
+  const isLocal = segment.participantInfo.identity === localIdentity;
+  return {
+    label: isLocal ? "You" : "Coach",
+    className: isLocal ? "text-muted-foreground" : "text-foreground",
+  };
+}
+
+/** Caps to the last `max` distinct messages, and separately holds whichever ones just
+ * aged out of that cap for exactly as long as their exit animation runs (320ms, same
+ * duration as the fade-out-up keyframe below) — generalizes useFadeHandoff's single
+ * current/exiting slot above into an N-item list. */
+function useCappedTranscript(transcriptions: TranscriptSegment[], max: number) {
+  const visible = React.useMemo(() => {
+    // Defensive dedupe on top of the library's own coalescing — keep only the latest update per stable segment id before capping, so a duplicate/partial entry can never eat one of the N slots meant for a distinct message.
+    const latestById = new Map<string, TranscriptSegment>();
+    for (const segment of transcriptions) {
+      const id = transcriptKey(segment);
+      const existing = latestById.get(id);
+      if (
+        !existing ||
+        segment.streamInfo.timestamp >= existing.streamInfo.timestamp
+      ) {
+        latestById.set(id, segment);
+      }
+    }
+    return [...latestById.values()]
+      .sort((a, b) => a.streamInfo.timestamp - b.streamInfo.timestamp)
+      .slice(-max);
+  }, [transcriptions, max]);
+
+  const prevVisibleRef = React.useRef<TranscriptSegment[]>([]);
+  const [exiting, setExiting] = React.useState<TranscriptSegment[]>([]);
+
+  React.useEffect(() => {
+    const prevVisible = prevVisibleRef.current;
+    prevVisibleRef.current = visible;
+    const currentIds = new Set(visible.map(transcriptKey));
+    const dropped = prevVisible.filter(
+      (s) => !currentIds.has(transcriptKey(s)),
+    );
+    if (dropped.length === 0) return;
+
+    setExiting((prev) => [...prev, ...dropped]);
+    const timer = setTimeout(() => {
+      const droppedIds = new Set(dropped.map(transcriptKey));
+      setExiting((prev) =>
+        prev.filter((s) => !droppedIds.has(transcriptKey(s))),
+      );
+    }, 320);
+    return () => clearTimeout(timer);
+  }, [visible]);
+
+  return { visible, exiting };
+}
+
+/**
+ * Video-mode-only transcript: capped to the last MAX_TRANSCRIPT_MESSAGES (newest at
+ * the bottom, auto-scrolling as new lines arrive). Older visible messages progressively
+ * dim via TRANSCRIPT_OPACITY_STEPS (a plain CSS transition on an inner wrapper — kept
+ * off the outer animate-fade-up element on purpose: a running/fill-forward CSS
+ * *animation* wins the cascade over an inline style on the same property, which is why
+ * opacity dimming did nothing while animate-fade-up sat on the same node). A message
+ * aging past the cap plays the same animate-fade-out-up exit the audio-only caption
+ * hand-off uses (useFadeHandoff above) before it's actually removed.
+ */
+function LiveCallTranscriptPanel({ localIdentity }: { localIdentity: string }) {
+  const transcriptions = useTranscriptions();
+  const { visible, exiting } = useCappedTranscript(
+    transcriptions,
+    MAX_TRANSCRIPT_MESSAGES,
+  );
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [visible]);
+
+  return (
+    <>
+      <p className="mb-2 shrink-0 text-overline text-muted-foreground">
+        Transcript
+      </p>
+      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+        {visible.length === 0 && exiting.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Captions will appear here once the call starts.
+          </p>
+        ) : (
+          <>
+            {exiting.map((segment) => {
+              const meta = speakerMeta(segment, localIdentity);
+              return (
+                <div
+                  key={transcriptKey(segment)}
+                  className="animate-fade-out-up"
+                >
+                  <FadingLine
+                    segment={segment}
+                    label={meta.label}
+                    className={meta.className}
+                  />
+                </div>
+              );
+            })}
+            {visible.map((segment, index) => {
+              const age = visible.length - 1 - index; // 0 = newest
+              const meta = speakerMeta(segment, localIdentity);
+              return (
+                <div key={transcriptKey(segment)} className="animate-fade-up">
+                  <div
+                    className="transition-opacity duration-500 ease-standard"
+                    style={{
+                      opacity:
+                        TRANSCRIPT_OPACITY_STEPS[
+                          Math.min(age, TRANSCRIPT_OPACITY_STEPS.length - 1)
+                        ],
+                    }}
+                  >
+                    <FadingLine
+                      segment={segment}
+                      label={meta.label}
+                      className={meta.className}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </>
   );
 }

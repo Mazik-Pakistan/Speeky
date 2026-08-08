@@ -80,15 +80,21 @@ class IdleAvatarSetup:
 
 
 def parse_room_name(room_name: str) -> tuple[str, str, str]:
-    """"livecall_{feature}_{session_id}", or "livecall_public_speaking_{mode}_{session_id}"
-    (services/live_call_service.py). Returns (feature, mode, session_id).
+    """"livecall_{feature}_{session_id}_{nonce}", or
+    "livecall_public_speaking_{mode}_{session_id}_{nonce}" (services/live_call_service.py).
+    Returns (feature, mode, session_id).
 
     Matched against the known feature list rather than a blind split — "interview_coach" and
     "public_speaking" contain underscores themselves, so a plain split(_, 2) would cut the
     feature name in the wrong place. Only public_speaking carries a mode segment; everything
     else is conversational by definition, so it reports "qa".
+
+    The trailing "_{nonce}" (a per-mint-attempt random suffix, added so a re-opened Live Call
+    always lands in a brand-new LiveKit room and reliably gets a fresh agent dispatch — see
+    live_call_service._mint_token) is stripped first and otherwise ignored; the worker has no
+    use for it beyond that.
     """
-    body = room_name.removeprefix("livecall_")
+    body = room_name.removeprefix("livecall_").rsplit("_", 1)[0]
     for feature in _FEATURES:
         prefix = f"{feature}_"
         if not body.startswith(prefix):
