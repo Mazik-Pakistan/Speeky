@@ -242,7 +242,9 @@ export default function InterviewCoachSessionPage() {
         session_type: "interview_coach",
         flags_seen: allFlags,
         topic_or_mode: mode,
-        overall_score: result.overall_score,
+        // Omit rather than send null: an ungraded session must not register as a
+        // strength/weakness data point (session_memory treats >= 80 as a strength).
+        overall_score: result.overall_score ?? undefined,
       }).catch(() => {});
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
@@ -564,8 +566,17 @@ function ResultsView({
       <div className="animate-fade-up rounded-2xl border border-border bg-gradient-to-br from-primary to-primary-hover p-8 text-center text-primary-foreground shadow-sm">
         <Sparkles className="mx-auto h-6 w-6" aria-hidden="true" />
         <h1 className="mt-3 font-serif text-h2 font-semibold">
-          Overall Score: {feedback.overall_score}
+          {feedback.overall_score !== null
+            ? `Overall Score: ${feedback.overall_score}`
+            : "Not scored"}
         </h1>
+        {feedback.overall_score === null && (
+          <p className="mt-2 text-sm text-primary-foreground/85">
+            {feedback.scoring_status === "insufficient_evidence"
+              ? "There weren't enough answers in this session to score it."
+              : "Scoring is temporarily unavailable — your transcript is saved."}
+          </p>
+        )}
         <p className="mt-2 text-sm text-primary-foreground/85">
           {feedback.closing_message}
         </p>

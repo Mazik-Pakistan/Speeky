@@ -23,6 +23,7 @@ load_dotenv(override=True)  # must run before any project-lib import for proper 
 import numpy as np
 from livekit import agents, rtc
 from livekit.agents import Agent, AgentSession, stt
+from livekit.agents.voice.room_io import RoomInputOptions, RoomOutputOptions
 from livekit.agents.voice.turn import TurnHandlingOptions
 from livekit.plugins import bey, silero
 from prisma.engine.errors import EngineError
@@ -100,14 +101,57 @@ async def _start_avatar_or_skip(session: AgentSession, room: rtc.Room) -> bool:
         return False
 
 
+async def _run_idle_audience(ctx: agents.JobContext, session_id: str, user_id: str) -> None:
+    """Public Speaking's speech phase: an avatar to speak *to*, that never speaks back.
+
+    The session is built with no stt, llm, tts or turn_handling — not disabled, absent. That is
+    what makes this safe to run during a monologue being recorded and scored: there is no
+    transcription path for the speaker's own voice to leak into, and nothing that could ever
+    produce speech over them (dispatch.IdleAvatarSetup carries no turn_handler for the same
+    reason). Without the avatar there is nothing to show, so this is a no-op rather than an
+    audio-only fallback.
+    """
+    try:
+        await asyncio.wait_for(_ensure_db_connected(), timeout=_SETUP_TIMEOUT_S)
+        setup = await asyncio.wait_for(
+            dispatch.build_idle_setup(session_id, user_id), timeout=_SETUP_TIMEOUT_S
+        )
+    except Exception:
+        logger.exception("Idle audience setup failed: session_id=%s", session_id)
+        ctx.shutdown(reason="idle audience setup failed")
+        return
+
+    session = AgentSession()
+    if not await _start_avatar_or_skip(session, ctx.room):
+        logger.warning("No avatar available; idle audience has nothing to render")
+        ctx.shutdown(reason="idle audience unavailable")
+        return
+
+    # Do not even subscribe to the speaker's microphone. With no STT there is nowhere for that
+    # audio to go, but the speech being recorded here is the thing under assessment — the room
+    # should not receive it at all. Transcription output is off for the same reason.
+    #
+    # audio_enabled=False for the reason described in entrypoint(): RoomIO would otherwise take
+    # ownership of the audio output the avatar just claimed. This session has no voice to lose
+    # today, but the ownership is the avatar's either way.
+    await session.start(
+        room=ctx.room,
+        agent=Agent(instructions=setup.instructions),
+        room_input_options=RoomInputOptions(audio_enabled=False, text_enabled=False),
+        room_output_options=RoomOutputOptions(audio_enabled=False, transcription_enabled=False),
+    )
+
+
 async def _speak_and_disconnect(ctx: agents.JobContext, message: str) -> None:
     """DB/session lookup failed — leaving the caller in silence staring at "Connecting…"
     forever is worse than a short spoken apology. TTS-only session, no STT/LLM needed."""
     session = AgentSession(tts=PiperTTS())
     await session.start(room=ctx.room, agent=Agent(instructions=message))
-    handle = session.say(message)
-    await handle.wait_for_playout()
-    await ctx.shutdown(reason="live call setup failed")
+    # The apology is best-effort: if TTS is what broke, disconnecting still beats hanging.
+    with contextlib.suppress(Exception):
+        handle = session.say(message)
+        await handle.wait_for_playout()
+    ctx.shutdown(reason="live call setup failed")
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:
@@ -117,12 +161,32 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     await ctx.connect()
     asyncio.create_task(asyncio.to_thread(_warm_stt_tts))
 
-    feature, session_id = dispatch.parse_room_name(ctx.room.name)
+    feature, mode, session_id = dispatch.parse_room_name(ctx.room.name)
     participant = await ctx.wait_for_participant()
     user_id = participant.identity  # set via .with_identity(user_id) at token mint time
     logger.info(
-        "Live Call job: feature=%s session_id=%s participant_identity=%s", feature, session_id, user_id
+        "Live Call job: feature=%s mode=%s session_id=%s participant_identity=%s",
+        feature, mode, session_id, user_id,
     )
+
+    # The idle audience has no voice by design, so it must be dispatched before the TTS check
+    # below — that check is about a *talking* agent being unable to do its job.
+    if mode == "idle":
+        await _run_idle_audience(ctx, session_id, user_id)
+        return
+
+    # A voice agent with no voice cannot do anything the caller came for, and the failure is
+    # otherwise invisible: the room connects, the avatar may even appear, then the first
+    # session.say() raises and kills the job mid-call. Fail here instead, loudly and with the
+    # fix in the log — the model file is gitignored, so a fresh machine hits this every time.
+    if not tts_client.is_configured():
+        logger.error(
+            "No Piper voice model — expected %s. Download it (see data/tts/README.md); the "
+            "filename must match TTS_VOICE_MODEL. Dropping this call.",
+            tts_client._model_path(),
+        )
+        ctx.shutdown(reason="tts voice model missing")
+        return
 
     try:
         await asyncio.wait_for(_ensure_db_connected(), timeout=_SETUP_TIMEOUT_S)
@@ -175,8 +239,18 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             interruption={"mode": "vad"},
         ),
     )
-    await _start_avatar_or_skip(session, ctx.room)
-    await session.start(room=ctx.room, agent=Agent(instructions=setup.instructions))
+    # The avatar takes ownership of the audio output (bey swaps in a DataStreamAudioOutput that
+    # streams speech to it for lip-sync). RoomIO would then assign its own output straight over
+    # that — `self._agent_session.output.audio = self.audio_output`, a whole-chain replacement —
+    # and the agent would publish to the room directly while the avatar, receiving nothing, sat
+    # frozen. Suppressing RoomIO's audio output is what leaves the avatar's in place; without an
+    # avatar it is still needed, hence the flag rather than a constant.
+    avatar_started = await _start_avatar_or_skip(session, ctx.room)
+    await session.start(
+        room=ctx.room,
+        agent=Agent(instructions=setup.instructions),
+        room_output_options=RoomOutputOptions(audio_enabled=not avatar_started),
+    )
 
     # Voice barge-in (talking over the agent) is already handled by
     # TurnHandlingOptions(interruption={"mode": "vad"}) above — the framework cuts off
@@ -188,6 +262,15 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         return "ok"
 
     ctx.room.local_participant.register_rpc_method("interrupt_agent", _on_interrupt_rpc)
+
+    # Public Speaking's opening line is the question being asked, and an avatar adds seconds of
+    # its own before any audio plays (DataStreamAudioOutput blocks until the avatar participant
+    # has published). A caller saying "hello" into that gap used to interrupt the question away,
+    # leaving them to answer something they never heard. Speak it regardless of what they are
+    # doing, and let nothing cut it short.
+    if setup.opening_is_essential:
+        await session.say(setup.opening_line, allow_interruptions=False)
+        return
 
     # The caller's mic is live the instant start() returns, and our STT is a single
     # batch transcription per VAD segment, not a real streaming one — if the canned

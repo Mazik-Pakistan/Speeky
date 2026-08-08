@@ -51,6 +51,25 @@ def _get_vad_model():
     return _vad_model
 
 
+def _intensity_variation_db(prosody: "prosody_engine.ProsodyData") -> float:
+    """Spread of the intensity contour over audible frames, in dB.
+
+    Dynamic range is the other half of vocal arousal: pitch range says how much the voice moves
+    up and down, this says how much it moves loud and soft. A monotone-but-loud delivery and an
+    animated one are indistinguishable on pitch alone.
+
+    Frames below the 10th percentile are dropped — silence and room tone would otherwise
+    dominate the spread and make every clip look dynamic.
+    """
+    intensity = prosody.intensity_db
+    if intensity is None or len(intensity) < 4:
+        return 0.0
+    audible = intensity[intensity > float(np.percentile(intensity, 10))]
+    if len(audible) < 4:
+        return 0.0
+    return float(np.std(audible))
+
+
 def _transcribe(waveform: np.ndarray, mode: str) -> dict:
     """Runs on the executor's thread. Mirrors agent.py's transcribe_plain/timed/full
     tiers exactly (same beam_size/temperature/word_timestamps choices, same "full"
@@ -92,6 +111,12 @@ def _transcribe(waveform: np.ndarray, mode: str) -> dict:
                 "avg_db": round(audio_io.rms_dbfs(waveform), 2),
                 "pitch_range_semitones": round(float(prosody.pitch_range_semitones), 2),
                 "snr_db": round(float(snr_db), 1),
+                # Vocal arousal, for scenario-conditioned register scoring (lib/register_scorer.py).
+                # prosody_engine already computed all of this and used to discard it — a wedding
+                # toast and a business pitch want measurably different energy, and pitch RANGE
+                # alone can't tell a low, steady voice from a high, steady one.
+                "mean_pitch_hz": round(float(prosody.mean_pitch_hz), 1),
+                "intensity_variation_db": round(_intensity_variation_db(prosody), 2),
             },
         }
     if mode == "timed":

@@ -108,6 +108,13 @@ export default function AssessmentPage() {
   }, [accessLoading, access]);
   const voiceStartedAt = React.useRef<number | null>(null);
   const voiceAnswerUsed = React.useRef(false);
+  const voiceTurns = React.useRef<
+    {
+      transcript: string;
+      duration_seconds: number;
+      word_timings: { word: string; start: number; end: number }[];
+    }[]
+  >([]);
 
   // WebSocket voice mode — same proven pipeline as AI Conversation (server-side Silero
   // VAD + faster-whisper in backend/lib/voice_ws.py), replacing the browser Web Speech
@@ -128,7 +135,7 @@ export default function AssessmentPage() {
     error: voiceError,
     startVoice,
     stopVoice,
-  } = useVoiceSocket(getWsUrl, (text) => {
+  } = useVoiceSocket(getWsUrl, (text, features) => {
     // Accumulate every VAD utterance until the user hits Stop, instead of overwriting
     // with the latest sentence. The backend sends one final transcript per utterance
     // (backend/lib/voice_ws.py), so a natural pause used to drop everything said before it.
@@ -136,6 +143,18 @@ export default function AssessmentPage() {
     // growing live. Reset happens on Stop/submit/new-question via setAnswer("").
     setAnswer((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
     voiceAnswerUsed.current = true;
+    // Keep each utterance's word timings separately — the backend needs them per-turn to
+    // measure pauses within speech without counting the silence between utterances.
+    // Previously only a wall-clock duration was sent, which left the backend with no
+    // pause data at all and made every spoken answer look perfectly fluent.
+    const timings = features?.word_timings;
+    if (Array.isArray(timings) && timings.length > 0) {
+      voiceTurns.current.push({
+        transcript: text,
+        duration_seconds: features?.duration_seconds ?? 0,
+        word_timings: timings,
+      });
+    }
   });
   const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
     featureName: "Baseline Assessment",
@@ -270,18 +289,22 @@ export default function AssessmentPage() {
         audio_features:
           step.questionMode === "audio" && voiceAnswerUsed.current
             ? {
+                // Wall-clock stays as the fallback for the case where no utterance
+                // carried timings; `turns` is what the scorer actually prefers.
                 duration_seconds: voiceStartedAt.current
                   ? Math.max(
                       0,
                       (performance.now() - voiceStartedAt.current) / 1000,
                     )
                   : 0,
+                turns: voiceTurns.current,
               }
             : undefined,
       });
       setAnswer("");
       voiceStartedAt.current = null;
       voiceAnswerUsed.current = false;
+      voiceTurns.current = [];
       if (isVoiceActive) void stopVoice();
       if (result.status === "completed") {
         await fetchResultsWithAnalysisStep(step.assessmentId);
@@ -318,6 +341,7 @@ export default function AssessmentPage() {
     // answer through the backend AUDIO scoring pipeline). Marked used the moment a
     // transcript lands (see the onTranscript callback above).
     voiceStartedAt.current = performance.now();
+    voiceTurns.current = [];
     await startVoice();
   }
 

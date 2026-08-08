@@ -3,16 +3,30 @@ by services/live_call_service.py) and builds everything worker.py needs to start
 AgentSession for that specific call. Live Call is scoped to free-flowing chat features
 only — conversation / interview_coach / scenario / coaching (roleplay scenarios only) —
 deliberately not the assessment/scoring exercises (pronunciation coach, accent
-assessment, public speaking, coaching's draft-and-grade scenarios) where a scripted
-read-and-score flow doesn't fit a live back-and-forth call.
+assessment, coaching's draft-and-grade scenarios) where a scripted read-and-score flow
+doesn't fit a live back-and-forth call.
+
+Public Speaking is a partial exception, and the distinction is worth stating: the SPEECH is a
+monologue and gets no *conversational* agent at all — a live participant would talk over the
+speaker and its voice would be transcribed into the audio being scored. The Q&A that follows
+genuinely is back-and-forth, so that phase alone gets the talking avatar.
+services/live_call_service.py enforces it by refusing to mint a "qa" token until the session
+reaches "qa_phase".
+
+The speech phase does get one thing: an "idle" avatar, a silent stand-in for an audience member
+to speak to. It is a separate mode, not a loosening of the above — worker.py starts it with no
+STT, LLM or TTS whatsoever, so the reasons the Q&A gate exists simply do not apply to it. That
+mode is allowed only while the session is still "in_progress" (build_idle_setup below), which is
+the exact inverse of the qa_phase window.
 """
 
+import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from fastapi.responses import JSONResponse
 
-from lib import ai_client, prompts
+from lib import ai_client, llm_client, prompts, relevance
 from lib.prisma_client import db
 from schemas.coaching_schemas import RoleplayTurnSchema
 from schemas.conversation_schemas import SendMessageSchema
@@ -22,6 +36,20 @@ from services import coaching_service, conversation_service, interview_coach_ser
 from utils.feature_errors import SessionNotFoundError
 
 _FEATURES = ("conversation", "interview_coach", "scenario", "coaching")
+from schemas.public_speaking_schemas import QAResponseSchema
+from schemas.scenario_schemas import ScenarioTurnSchema
+from services import (
+    coaching_service,
+    conversation_service,
+    interview_coach_service,
+    public_speaking_service,
+    scenario_service,
+)
+from utils.feature_errors import SessionNotFoundError
+
+logger = logging.getLogger("live-call-agent")
+
+_FEATURES = ("conversation", "interview_coach", "scenario", "coaching", "public_speaking")
 
 
 @dataclass
@@ -29,19 +57,68 @@ class LiveCallSetup:
     instructions: str
     opening_line: str
     turn_handler: Callable[[str], Awaitable[str]]
+    opening_is_essential: bool = False
+    """Whether the caller must hear the opening line for the call to make any sense.
+
+    False for the chat features, where it is a greeting: if the caller is already talking when
+    the agent connects, their utterance is the better first turn and the greeting is dropped.
+    True for Public Speaking, where the opening line is the *question* — an answer to a question
+    that was never asked is not a Q&A, so it is spoken unconditionally and uninterruptibly.
+    """
 
 
-def parse_room_name(room_name: str) -> tuple[str, str]:
-    """"livecall_{feature}_{session_id}" (services/live_call_service.py). Matched against
-    the known feature list rather than a blind split — "interview_coach" and
-    "public_speaking" contain underscores themselves, so a plain split(_, 2) would cut
-    the feature name in the wrong place."""
+@dataclass
+class IdleAvatarSetup:
+    """Deliberately not a LiveCallSetup: no turn_handler, no opening_line, nothing to say.
+
+    The absence of those fields is the point — there is no callable here for a later refactor
+    to wire an LLM into by accident, which is what would put a talking agent back into the
+    speech phase.
+    """
+
+    instructions: str
+
+
+def parse_room_name(room_name: str) -> tuple[str, str, str]:
+    """"livecall_{feature}_{session_id}", or "livecall_public_speaking_{mode}_{session_id}"
+    (services/live_call_service.py). Returns (feature, mode, session_id).
+
+    Matched against the known feature list rather than a blind split — "interview_coach" and
+    "public_speaking" contain underscores themselves, so a plain split(_, 2) would cut the
+    feature name in the wrong place. Only public_speaking carries a mode segment; everything
+    else is conversational by definition, so it reports "qa".
+    """
     body = room_name.removeprefix("livecall_")
     for feature in _FEATURES:
         prefix = f"{feature}_"
-        if body.startswith(prefix):
-            return feature, body[len(prefix):]
+        if not body.startswith(prefix):
+            continue
+        rest = body[len(prefix):]
+        if feature == "public_speaking":
+            for mode in ("qa", "idle"):
+                mode_prefix = f"{mode}_"
+                if rest.startswith(mode_prefix):
+                    return feature, mode, rest[len(mode_prefix):]
+            raise ValueError(f"Public speaking room name carries no mode: {room_name!r}")
+        return feature, "qa", rest
     raise ValueError(f"Unrecognized Live Call room name: {room_name!r}")
+
+
+async def build_idle_setup(session_id: str, user_id: str) -> IdleAvatarSetup:
+    """The silent audience avatar shown during the speech itself.
+
+    Re-checks the phase even though live_call_service already did at token-mint time, matching
+    what _build_public_speaking_setup does for the Q&A side — the worker trusts the room name,
+    so the phase is worth confirming against the database once more here.
+    """
+    session = await public_speaking_service.get_session(session_id, user_id)
+    if session.get("status") != "in_progress":
+        raise SessionNotFoundError(
+            f"Public speaking session {session_id} is not in the speech phase"
+        )
+    return IdleAvatarSetup(
+        instructions="You are a silent audience member. You never speak.",
+    )
 
 
 async def build_setup(feature: str, session_id: str, user_id: str) -> LiveCallSetup:
@@ -53,6 +130,8 @@ async def build_setup(feature: str, session_id: str, user_id: str) -> LiveCallSe
         return await _build_scenario_setup(session_id, user_id)
     if feature == "coaching":
         return await _build_coaching_setup(session_id, user_id)
+    if feature == "public_speaking":
+        return await _build_public_speaking_setup(session_id, user_id)
     raise NotImplementedError(f"Live Call not wired up yet for feature={feature!r}")
 
 
@@ -158,3 +237,109 @@ async def _build_coaching_setup(session_id: str, user_id: str) -> LiveCallSetup:
         return result["reply"]
 
     return LiveCallSetup(instructions=instructions, opening_line=opening_line, turn_handler=turn_handler)
+
+
+async def _answers_the_question(question: str, answer: str) -> bool:
+    """Whether `answer` is on the subject `question` asked — not whether it is a *good* answer.
+
+    relevance.evaluate_substance cannot do this: it is a deterministic offline check for whether
+    there is any substance at all, so a fluent reply on the wrong topic passes it cleanly. Topic
+    drift needs the model.
+
+    Fails open on every error, and when no LLM is configured. Being wrongly told "that doesn't
+    answer my question" and asked again is worse than an off-topic answer reaching the scorer,
+    which evaluates relevance properly anyway.
+    """
+    if not llm_client.is_configured():
+        return True
+    try:
+        verdict = await ai_client.generate(
+            system_prompt=(
+                "You judge whether a spoken answer is about the subject the question asked "
+                "about. Ignore quality, length, hesitation and delivery — a rambling or weak "
+                "answer on the right subject still counts. Answer with exactly one word: YES if "
+                "it addresses the question's subject, NO if it is about something else."
+            ),
+            user_message=f"Question: {question}\n\nAnswer: {answer}",
+            max_tokens=5,
+            temperature=0.0,
+        )
+        return not verdict.strip().upper().startswith("NO")
+    except Exception:
+        logger.exception("Q&A topicality check failed; treating the answer as on-topic")
+        return True
+
+
+async def _build_public_speaking_setup(session_id: str, user_id: str) -> LiveCallSetup:
+    """Q&A only — see the module docstring for why the speech itself gets no agent.
+
+    The question was already generated and persisted when the speech was submitted (submit_turn
+    flips the row to "qa_phase" and stores aiQuestion), so the avatar speaks that rather than
+    inventing a new one. Two reasons that matters: the user has already seen it on the results
+    screen, and it was generated against the full transcript, which the agent does not carry.
+    """
+    session = await public_speaking_service.get_session(session_id, user_id)
+    if session.get("status") != "qa_phase":
+        raise SessionNotFoundError(
+            f"Public speaking session {session_id} is not in the Q&A phase"
+        )
+
+    speech_type = str(session.get("speech_type") or "business_pitch")
+    config = public_speaking_service.SPEECH_TYPES.get(
+        speech_type, public_speaking_service.SPEECH_TYPES["business_pitch"]
+    )
+    label = config.get("label", "a speech")
+
+    instructions = (
+        f"You are an audience member who has just listened to {label}. "
+        "Ask your question, listen to the answer, and respond briefly and naturally — one or two "
+        "sentences. Stay in character as a listener, not a coach: do not grade the answer, score "
+        "it, or list what they should have done. The written feedback covers that."
+    )
+
+    opening_line = session.get("ai_question") or "Thanks for that — what would you say is your main takeaway?"
+
+    # A caller who answers a different question than the one asked gets it put to them again
+    # rather than scored and shown the door. Capped, because an audience member that will not
+    # move on is its own kind of broken — and submit_qa_response is what ends the session, so
+    # someone who never satisfies the gate must still be able to finish.
+    max_reasks = 2
+    reasks_used = 0
+
+    async def turn_handler(user_text: str) -> str:
+        nonlocal reasks_used
+
+        # Two different failures, both worth a re-ask before anything is persisted: nothing of
+        # substance said at all (the deterministic gate the typed path also scores against), and
+        # a fluent answer to a different question (which that gate passes — it does not read for
+        # topic). Being asked again is worth more to a speaker than a relevance score of 0 they
+        # read about afterwards.
+        if reasks_used < max_reasks:
+            no_substance = relevance.evaluate_substance(user_text, opening_line).rejected
+            if no_substance or not await _answers_the_question(opening_line, user_text):
+                reasks_used += 1
+                return f"That doesn't answer what I asked. Let me put it to you again: {opening_line}"
+
+        # submit_qa_response scores the answer AND completes the session — Public Speaking's Q&A
+        # is a single exchange by design. So this handler runs at most once per call, and what
+        # it returns is a sign-off rather than a follow-up question.
+        try:
+            await public_speaking_service.submit_qa_response(
+                session_id, user_id, QAResponseSchema(text_content=user_text)
+            )
+        except Exception:
+            # The user has already spoken; failing the call now would lose their answer with no
+            # way to retry. Persisting is best-effort, closing gracefully is not.
+            return "Thanks — that's all from me. Hang up and your written feedback will be there."
+        # Says what actually happens next: the call is over and ending it is what reveals the
+        # scored feedback. The old wording pointed at a screen the caller was not looking at —
+        # the results are behind this call, not beside it.
+        return "Thank you, that answers it. Hang up whenever you're ready and I'll show you your feedback."
+
+    return LiveCallSetup(
+        instructions=instructions,
+        opening_line=opening_line,
+        turn_handler=turn_handler,
+        # The opening line here is the question itself.
+        opening_is_essential=True,
+    )
