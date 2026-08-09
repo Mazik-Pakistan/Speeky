@@ -247,11 +247,88 @@ async def _save_user_path_state(user_id: str, state: Dict):
 async def get_personalized_recommendation(user_id: str) -> RecommendationResponse:
     """
     Analyze latest baseline assessment and recommend an optimal learning path.
-    Times out within 5 seconds, retries once, degrades gracefully to default paths.
     """
     await ensure_default_paths_seeded()
+    state = await get_user_path_state(user_id)
+    all_paths = await list_all_paths()
+    active_path_id = state.get("active_path_id")
+    
+    # ── Level ordering used for auto-promotion ───────────────────────────────
+    LEVEL_ORDER = {"BEGINNER": 0, "ELEMENTARY": 0, "INTERMEDIATE": 1, "ADVANCED": 2}
 
-    # 1. Fetch user's latest baseline assessment from Prisma
+    # 1. Respect user's stored active path if it exists
+    if active_path_id:
+        path_def = await get_path_definition(active_path_id)
+
+        # ── Lightweight completion check directly from state ──────────────────
+        # (avoids calling the heavy check_path_completion which builds certs etc.)
+        is_path_complete = False
+        if path_def:
+            p_hist = state.get("path_history", {}).get(active_path_id, {})
+            completed_mods = p_hist.get("completed_modules", [])
+            total_modules = path_def.get("modules", [])
+            # All module IDs present in completed list → fully done
+            if total_modules and all(m["module_id"] in completed_mods for m in total_modules):
+                is_path_complete = True
+
+        # ── Auto-promote to next level path when current is complete ──────────
+        if is_path_complete:
+            current_level = path_def.get("learning_level", "BEGINNER") if path_def else "BEGINNER"
+            current_rank = LEVEL_ORDER.get(current_level.upper(), 0)
+
+            # Find the best published, non-deprecated next-level path
+            next_path = None
+            next_rank = None
+            for p in all_paths:
+                if p.get("path_id") == active_path_id:
+                    continue
+                if not p.get("is_published") or p.get("is_deprecated"):
+                    continue
+                p_rank = LEVEL_ORDER.get((p.get("learning_level") or "").upper(), -1)
+                if p_rank > current_rank:
+                    if next_rank is None or p_rank < next_rank:
+                        next_rank = p_rank
+                        next_path = p
+
+            if next_path:
+                new_id = next_path["path_id"]
+                # Persist the promotion
+                state["active_path_id"] = new_id
+                state.setdefault("path_history", {}).setdefault(new_id, {
+                    "completed_modules": [], "module_scores": {},
+                    "is_active": True, "started_at": _now_iso(),
+                    "total_practice_time": 0, "vocabulary_mastered": 0,
+                })["is_active"] = True
+                if active_path_id in state.get("path_history", {}):
+                    state["path_history"][active_path_id]["is_active"] = False
+                await _save_user_path_state(user_id, state)
+
+                completed_title = path_def.get("title", active_path_id) if path_def else active_path_id
+                return RecommendationResponse(
+                    recommended_path_id=new_id,
+                    path_title=next_path.get("title", new_id),
+                    reasoning=(
+                        f"🎉 You completed '{completed_title}'! "
+                        f"Moving you up to '{next_path.get('title', new_id)}'."
+                    ),
+                    confidence_score=1.0,
+                    learning_level=next_path.get("learning_level", "INTERMEDIATE"),
+                    is_fallback=False,
+                    available_paths=all_paths,
+                )
+
+        # ── Active path not yet complete — honour it as the recommendation ────
+        return RecommendationResponse(
+            recommended_path_id=active_path_id,
+            path_title=path_def.get("title", "Workplace English Path") if path_def else "Workplace English Path",
+            reasoning="Showing your currently active learning path.",
+            confidence_score=1.0,
+            learning_level=path_def.get("learning_level", "BEGINNER") if path_def else "BEGINNER",
+            is_fallback=False,
+            available_paths=all_paths,
+        )
+
+    # 2. Fallback to assessment-based logic for new users
     assessment = None
     try:
         assessment = await db.baselineassessment.find_first(
@@ -261,91 +338,38 @@ async def get_personalized_recommendation(user_id: str) -> RecommendationRespons
     except Exception as err:
         logger.warning(f"Database check for baseline assessment failed: {err}")
 
-    # 2. Check if no assessment data exists at all -> Default to Beginner Path
     if not assessment:
-        all_paths = await list_all_paths()
         return RecommendationResponse(
             recommended_path_id="beginner-path",
             path_title="Beginner Workplace English",
-            reasoning="No baseline assessment data found. Defaulting to Beginner Path as entry point.",
+            reasoning="No baseline assessment found. Defaulting to Beginner Path.",
             confidence_score=0.0,
             learning_level="BEGINNER",
             is_fallback=True,
             available_paths=all_paths,
         )
 
-    # 3. Check for corrupted/malformed assessment data -> Recalculate/derive
-    fluency = assessment.fluencyScore
-    vocab = assessment.vocabularyScore
-    pron = assessment.pronunciationScore
-    conf = assessment.confidenceScore
+    fluency = assessment.fluencyScore or 50.0
+    vocab = assessment.vocabularyScore or 50.0
+    conf = round((fluency * 0.5) + (vocab * 0.5), 2)
+    level_str = (
+        assessment.learningLevel.value
+        if hasattr(assessment.learningLevel, "value")
+        else (assessment.learningLevel or "INTERMEDIATE")
+    )
 
-    if fluency is None or fluency < 0 or vocab is None or vocab < 0:
-        # Malformed/corrupted scores -> recalculate/derive defaults from available responses
-        responses = assessment.responses or []
-        fluency = min(100.0, max(40.0, len(responses) * 4.0))
-        vocab = min(100.0, max(40.0, len(responses) * 3.5))
-        conf = round((fluency * 0.5) + (vocab * 0.5), 2)
-
-    if conf is None or conf <= 0:
-        conf = round(((fluency or 50.0) * 0.5) + ((vocab or 50.0) * 0.5), 2)
-
-    level_str = assessment.learningLevel.value if assessment.learningLevel else "INTERMEDIATE"
-
-    # 4. Prompt generation via LLM (chat_json) with 5.0 second timeout & retry
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are an expert AI learning path advisor. Recommend one of the following path_ids: "
-                "'beginner-path', 'intermediate-path', or 'advanced-path' based on assessment metrics. "
-                "Return strict JSON: {\"recommended_path_id\": str, \"reasoning\": str}"
-            ),
-        },
-        {
-            "role": "user",
-            "content": f"User Level: {level_str}, Confidence Score: {conf}, Fluency: {fluency}, Vocabulary: {vocab}.",
-        },
-    ]
-
-    llm_result = None
-    for attempt in range(2):
-        try:
-            llm_result = await asyncio.wait_for(
-                llm_client.chat_json(messages, temperature=0.2), timeout=5.0
-            )
-            if llm_result and "recommended_path_id" in llm_result:
-                break
-        except (asyncio.TimeoutError, llm_client.LLMError) as e:
-            logger.warning(f"Recommendation LLM call attempt {attempt + 1} failed/timed out: {e}")
-
-    # Fallback if LLM failed after retries
-    if not llm_result or "recommended_path_id" not in llm_result:
-        if conf < 50.0:
-            rec_id = "beginner-path"
-            reasoning = "Based on baseline confidence score below 50."
-        elif conf < 75.0:
-            rec_id = "intermediate-path"
-            reasoning = "Based on baseline confidence score between 50 and 75."
-        else:
-            rec_id = "advanced-path"
-            reasoning = "Based on baseline confidence score above 75."
-        is_fallback = True
+    if conf < 50.0:
+        rec_id = "beginner-path"
+        reasoning = "Based on baseline confidence score below 50."
+    elif conf < 75.0:
+        rec_id = "intermediate-path"
+        reasoning = "Based on baseline confidence score between 50 and 75."
     else:
-        rec_id = llm_result["recommended_path_id"]
-        reasoning = llm_result.get("reasoning", "Recommended based on assessment breakdown.")
-        is_fallback = False
+        rec_id = "advanced-path"
+        reasoning = "Based on baseline confidence score above 75."
 
-    # 5. Check if recommended path was deprecated -> Map to closest current equivalent
     target_path = await get_path_definition(rec_id)
-    if target_path and target_path.get("is_deprecated"):
-        mapped_id = target_path.get("mapped_to_id") or "beginner-path"
-        rec_id = mapped_id
-        target_path = await get_path_definition(rec_id)
-        reasoning += f" (Mapped from deprecated path to active equivalent '{rec_id}')"
-
     path_title = target_path.get("title", "Workplace English Path") if target_path else "Workplace English Path"
-    all_paths = await list_all_paths()
 
     return RecommendationResponse(
         recommended_path_id=rec_id,
@@ -353,7 +377,7 @@ async def get_personalized_recommendation(user_id: str) -> RecommendationRespons
         reasoning=reasoning,
         confidence_score=float(conf),
         learning_level=level_str,
-        is_fallback=is_fallback,
+        is_fallback=True,
         available_paths=all_paths,
     )
 
@@ -546,6 +570,12 @@ async def evaluate_milestone_completion(
         already_awarded_count=already_awarded_count,
         message=f"Milestones evaluated for module '{payload.module_id}'. {len(newly_awarded)} badge(s) awarded.",
     )
+
+
+async def get_user_badges(user_id: str) -> List[Dict]:
+    """Retrieve all milestone badges earned by a user."""
+    all_badges = await kv_store.store.list_values(BADGES_NS)
+    return [b for b in all_badges if b.get("user_id") == user_id]
 
 
 # ===========================================================================
@@ -937,11 +967,23 @@ async def check_path_completion(user_id: str, path_id: str) -> PathCompletionChe
 
     incomplete = [m["module_id"] for m in modules if m["module_id"] not in completed_mods]
 
-    # Check Grandfathering (if user completed original final module before admin added new module)
+    # Check Grandfathering: only applies if the user completed the module with the highest
+    # sequence_order (i.e. they finished what was previously the last module before an admin
+    # appended a new one). Completing n-1 arbitrary modules does NOT qualify.
     is_grandfathered = False
-    if len(incomplete) > 0 and len(completed_mods) >= (len(modules) - 1):
-        # User completed prior total count
-        is_grandfathered = True
+    if len(incomplete) > 0 and len(modules) > 0:
+        last_module = max(modules, key=lambda m: m["sequence_order"])
+        highest_completed_order = max(
+            (m["sequence_order"] for m in modules if m["module_id"] in completed_mods),
+            default=0,
+        )
+        all_incomplete_are_new = all(
+            m["sequence_order"] > highest_completed_order
+            for m in modules
+            if m["module_id"] in incomplete
+        )
+        if last_module["module_id"] in completed_mods and all_incomplete_are_new:
+            is_grandfathered = True
 
     is_complete = (len(incomplete) == 0) or is_grandfathered
 
@@ -984,7 +1026,10 @@ async def check_path_completion(user_id: str, path_id: str) -> PathCompletionChe
         is_complete=True,
         completed_modules_count=len(completed_mods),
         total_modules_count=len(modules),
-        incomplete_module_ids=[],
+        # Keep the real list even when grandfathered — the path is "complete" for
+        # certification purposes but the UI must still show which modules were
+        # genuinely finished vs. grandfathered-in.
+        incomplete_module_ids=incomplete,
         is_grandfathered=is_grandfathered,
         summary=summary_data,
     )

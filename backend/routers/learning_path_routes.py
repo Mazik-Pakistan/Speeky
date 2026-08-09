@@ -35,6 +35,10 @@ async def evaluate_milestone_endpoint(
     return await learning_path_service.evaluate_milestone_completion(user_id, payload)
 
 
+async def get_user_badges_endpoint(user_id: str = Depends(require_auth)):
+    return await learning_path_service.get_user_badges(user_id)
+
+
 # ── Piece 4: Learning Path Reset ─────────────────────────────────────────────
 async def reset_path_endpoint(
     payload: PathResetRequest, user_id: str = Depends(require_auth)
@@ -112,6 +116,7 @@ async def certification_summary_endpoint(
 router.add_api_route("/recommendation", get_recommendation_endpoint, methods=["GET"])
 router.add_api_route("/switch", switch_path_endpoint, methods=["POST"])
 router.add_api_route("/milestone/evaluate", evaluate_milestone_endpoint, methods=["POST"])
+router.add_api_route("/badges", get_user_badges_endpoint, methods=["GET"])
 router.add_api_route("/reset", reset_path_endpoint, methods=["POST"])
 
 router.add_api_route("/admin/paths", admin_save_path_endpoint, methods=["POST"])

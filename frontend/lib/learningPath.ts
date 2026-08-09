@@ -151,6 +151,17 @@ export function switchPath(data: {
   });
 }
 
+export interface UserBadge {
+  badge_id: string;
+  user_id: string;
+  earned_at: string;
+  source: string;
+}
+
+export function getUserBadges(): Promise<UserBadge[]> {
+  return api<UserBadge[]>("/learning-path/badges");
+}
+
 export function evaluateMilestone(data: {
   path_id: string;
   module_id: string;
