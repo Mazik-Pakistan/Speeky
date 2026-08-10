@@ -45,12 +45,22 @@ interface LiveCallModalProps {
   sessionId: string;
   open: boolean;
   onClose: () => void;
-  /** "End Session" — finalize + show the feature's normal feedback report. */
-  onEndSession: () => void | Promise<void>;
+  /** "End Session" — finalize + show the feature's normal feedback report.
+   *
+   * Optional: when omitted the button is not rendered. Public Speaking's Q&A has no such
+   * action, because the *agent* finalizes it — dispatch.py calls submit_qa_response itself once
+   * the answer satisfies the relevance gate. A second, client-side finaliser would race it. */
+  onEndSession?: () => void | Promise<void>;
   /** "End Call" — just hang up; the call's turns already persisted into the
    * session's normal history as they happened, so the user can keep going by
    * text/push-to-talk with full context. */
   onCallEnded?: () => void;
+  /** Header text. Defaults to "Live Call". */
+  title?: string;
+  /** Rendered beside the avatar in the video layout. Omit for the audio-first features, whose
+   *  "self" side is the orb driven by the local mic — Public Speaking passes a camera, because
+   *  watching your own delivery while being questioned is most of what its Q&A is for. */
+  selfView?: React.ReactNode;
 }
 
 /**
@@ -65,6 +75,8 @@ export function LiveCallModal({
   onClose,
   onEndSession,
   onCallEnded,
+  title = "Live Call",
+  selfView,
 }: LiveCallModalProps) {
   const [connection, setConnection] = React.useState<{
     token: string;
@@ -141,6 +153,7 @@ export function LiveCallModal({
   if (!open) return null;
 
   async function handleEndSession() {
+    if (!onEndSession) return;
     setEndingSession(true);
     try {
       await onEndSession();
@@ -175,7 +188,7 @@ export function LiveCallModal({
         )}
       >
         <div className="flex shrink-0 items-center justify-between px-4 py-3 sm:px-5">
-          <p className="text-sm font-semibold text-foreground">Live Call</p>
+          <p className="text-sm font-semibold text-foreground">{title}</p>
           <div className="flex items-center gap-1">
             {hasAvatarVideo ? (
               <button
@@ -238,11 +251,12 @@ export function LiveCallModal({
             <RoomAudioRenderer />
             <LiveCallControls
               endingSession={endingSession}
-              onEndSession={() => void handleEndSession()}
+              onEndSession={onEndSession ? () => void handleEndSession() : undefined}
               onEndCall={handleEndCall}
               onConnectingChange={setAgentConnecting}
               onVideoChange={setHasAvatarVideo}
               transcriptCollapsed={transcriptCollapsed}
+              selfView={selfView}
             />
           </LiveKitRoom>
         )}
@@ -258,9 +272,11 @@ function LiveCallControls({
   onConnectingChange,
   onVideoChange,
   transcriptCollapsed,
+  selfView,
 }: {
   endingSession: boolean;
-  onEndSession: () => void;
+  /** Undefined when the feature has no client-side finaliser; the button is then omitted. */
+  onEndSession?: () => void;
   onEndCall: () => void;
   /** Kept in sync with every connecting/initializing transition (not one-shot) so
    * the modal's connect sound + "Connecting…" blink always mirror the real state. */
@@ -269,6 +285,7 @@ function LiveCallControls({
    * widen into the side-by-side layout once one actually appears. */
   onVideoChange: (hasVideo: boolean) => void;
   transcriptCollapsed: boolean;
+  selfView?: React.ReactNode;
 }) {
   const { state, audioTrack, videoTrack, agent } = useVoiceAssistant();
   const { localParticipant, isMicrophoneEnabled, microphoneTrack } =
@@ -369,7 +386,9 @@ function LiveCallControls({
     </div>
   );
 
-  const endSessionButton = (
+  // Omitted entirely for features whose session is finalized server-side (Public Speaking's
+  // Q&A) — a button that races the agent's own submit is worse than no button.
+  const endSessionButton = onEndSession ? (
     <Button
       size="sm"
       variant="outline"
@@ -379,7 +398,7 @@ function LiveCallControls({
     >
       End Session &amp; See Report
     </Button>
-  );
+  ) : null;
 
   if (videoTrack) {
     // Full-viewport layout (LiveCallModal drops its card sizing once hasAvatarVideo is
@@ -399,6 +418,10 @@ function LiveCallControls({
               className={cn(
                 "relative",
                 transcriptCollapsed ? "h-full w-full" : "w-full",
+                // The self-view shares this pane rather than becoming a third top-level column,
+                // so the transcript keeps its flex-1 width and the collapse toggle keeps working
+                // untouched. Stacked on narrow screens, side by side once there is room.
+                selfView && "flex flex-col gap-3 sm:flex-row sm:items-center",
               )}
             >
               {isAgentTurn ? (
@@ -415,9 +438,15 @@ function LiveCallControls({
                 trackRef={videoTrack}
                 className={cn(
                   "rounded-2xl object-cover shadow-lg",
-                  transcriptCollapsed ? "h-full w-full" : "aspect-video w-full",
+                  transcriptCollapsed && !selfView ? "h-full w-full" : "aspect-video w-full",
+                  selfView && "min-w-0 flex-1",
                 )}
               />
+              {selfView ? (
+                <div className="aspect-video min-w-0 flex-1 overflow-hidden rounded-2xl bg-black shadow-lg">
+                  {selfView}
+                </div>
+              ) : null}
             </div>
           </div>
           {/* Stays mounted (CSS-hidden, not unmounted) when collapsed — the

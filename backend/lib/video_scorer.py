@@ -59,10 +59,12 @@ _GAZE_SCAN_MAX_BONUS = 8.0
 
 
 class VideoRejectionReason(str, Enum):
-    """Canonical reason-code vocabulary returned instead of a false score.
+    """Canonical capture-quality reason codes.
 
-    Mirrors recording_engine.RejectionReason, and for the same reason: the UI renders a dash
-    plus an explanation, never a number the user might act on.
+    Named "rejection" historically, when hitting one meant the session went unscored. It no
+    longer does — see `_session_warnings`. These now qualify a score rather than replace it, and
+    the UI renders each alongside the numbers so the user knows which measurement to distrust.
+    The vocabulary is unchanged so stored scorecards stay readable.
     """
 
     NO_FACE_DETECTED = "no_face_detected"
@@ -87,7 +89,11 @@ class ScoredVideo:
     visual_presence: Optional[float] = None
     confidence_weight: float = 0.0
 
+    #: The worst capture-quality problem, or None. Retained for stored-scorecard compatibility;
+    #: it no longer suppresses the scores, it only labels them.
     rejection: Optional[VideoRejectionReason] = None
+    #: Every capture-quality problem, worst first. The UI names each one next to the numbers.
+    warnings: List[VideoRejectionReason] = field(default_factory=list)
     issues: List[Dict] = field(default_factory=list)
     highlights: List[Dict] = field(default_factory=list)
     detail: Dict = field(default_factory=dict)
@@ -103,6 +109,7 @@ class ScoredVideo:
             "visual_presence": self.visual_presence,
             "confidence_weight": round(self.confidence_weight, 3),
             "rejection": self.rejection.value if self.rejection else None,
+            "warnings": [w.value for w in self.warnings],
             "issues": self.issues,
             "highlights": self.highlights,
             "detail": self.detail,
@@ -154,37 +161,54 @@ def _mean(values: List[Optional[float]]) -> Optional[float]:
 
 
 # ── Coverage gating ───────────────────────────────────────────────────────────
-def _session_rejection(features: Dict) -> Optional[VideoRejectionReason]:
-    """Decide whether the session is scorable at all, from `quality` rather than from `status`.
+def _session_warnings(features: Dict) -> List[VideoRejectionReason]:
+    """Every capture-quality problem this session hit, worst first.
 
-    The client sends `status`, but it is advisory: we re-derive the verdict so that a client
-    bug, an old client, or a hand-crafted payload cannot talk its way into a score.
+    These used to be *rejections*: the first match short-circuited scoring and the user was told
+    "Delivery not measured" with no numbers at all. That was the wrong trade. A speaker who turned
+    their camera on wants to see what was measured, and a caveated number they can interpret beats
+    a blank panel they cannot — especially since a single failing check (body out of frame, say)
+    usually leaves the other families perfectly measurable.
+
+    So every check still runs, but the result is now advisory. Scoring continues; each violated
+    metric is named to the user, and `_confidence_weight` already discounts the figures. The one
+    thing that never happens is inventing a number: a family with no data still scores None,
+    because the warning explains an absence rather than papering over one.
+
+    Derived from `quality` rather than the client's `status`, which is advisory — a client bug,
+    an old client, or a hand-crafted payload must not be able to talk its way into a clean read.
     """
     quality = features.get("quality") or {}
+    warnings: List[VideoRejectionReason] = []
 
     face_pct = _num(quality, "face_detected_pct")
     if face_pct is None or face_pct <= 1.0:
-        return VideoRejectionReason.NO_FACE_DETECTED
-    if face_pct < _SESSION_FACE_MIN_PCT:
-        return VideoRejectionReason.FACE_COVERAGE_TOO_LOW
+        warnings.append(VideoRejectionReason.NO_FACE_DETECTED)
+    elif face_pct < _SESSION_FACE_MIN_PCT:
+        warnings.append(VideoRejectionReason.FACE_COVERAGE_TOO_LOW)
 
     if quality.get("brightness_ok") is False:
-        return VideoRejectionReason.TOO_DARK
+        warnings.append(VideoRejectionReason.TOO_DARK)
 
     duration = _num(features, "duration_seconds") or 0.0
     if duration < _MIN_DURATION_S:
-        return VideoRejectionReason.CLIP_TOO_SHORT
+        warnings.append(VideoRejectionReason.CLIP_TOO_SHORT)
 
     frames = _num(quality, "frames_analyzed") or 0.0
     if frames < _MIN_FRAMES_ANALYZED:
-        return VideoRejectionReason.DEVICE_TOO_SLOW
+        warnings.append(VideoRejectionReason.DEVICE_TOO_SLOW)
 
     # framing_override means the user was warned and chose to continue; respect that rather
-    # than discarding a session they deliberately started.
+    # than flagging a session they deliberately started.
     if quality.get("framing") == "unknown" and not quality.get("framing_override"):
-        return VideoRejectionReason.FRAMING_UNUSABLE
+        warnings.append(VideoRejectionReason.FRAMING_UNUSABLE)
 
-    return None
+    if features.get("status") == "partial" or "camera_stopped_early" in (
+        features.get("unavailable_reasons") or []
+    ):
+        warnings.append(VideoRejectionReason.CAMERA_STOPPED_EARLY)
+
+    return warnings
 
 
 def _family_available(quality: Dict, coverage_key: str) -> bool:
@@ -494,9 +518,13 @@ def score_video_session(features: Optional[Dict], speech_config: Optional[Dict] 
     (public_speaking_service.SPEECH_TYPES), passed in rather than imported so this module stays
     free of any dependency on services/ — that is what makes it reusable by the Interview Coach.
 
-    Returns a ScoredVideo with everything None and confidence_weight 0.0 when the session is
-    unscorable. Never raises on malformed input: a broken camera must not fail a submission
-    the user already completed.
+    Always scores whatever was measurable. A capture-quality problem produces a `warnings` entry
+    and a lower `confidence_weight`, never a blank panel — see `_session_warnings`. Sub-scores
+    are still None where a family genuinely had no data; a warning explains an absence rather
+    than filling it in.
+
+    Never raises on malformed input: a broken camera must not fail a submission the user already
+    completed.
     """
     if not features:
         return ScoredVideo()
@@ -504,17 +532,7 @@ def score_video_session(features: Optional[Dict], speech_config: Optional[Dict] 
     config = speech_config or {}
     quality = features.get("quality") or {}
 
-    rejection = _session_rejection(features)
-    if rejection is not None:
-        return ScoredVideo(
-            rejection=rejection,
-            confidence_weight=0.0,
-            detail={
-                "status": features.get("status"),
-                "unavailable_reasons": features.get("unavailable_reasons") or [],
-                "duration_seconds": _num(features, "duration_seconds"),
-            },
-        )
+    warnings = _session_warnings(features)
 
     eye_contact_score, eye_contact_detail = _score_eye_contact(features)
     scores: Dict[str, Optional[float]] = {
@@ -545,7 +563,10 @@ def score_video_session(features: Optional[Dict], speech_config: Optional[Dict] 
         stillness_score=_round(scores["stillness"]),
         visual_presence=_round(visual_presence),
         confidence_weight=_confidence_weight(features),
-        rejection=None,
+        # Kept populated so anything reading the old field still sees the headline problem; it no
+        # longer gates rendering.
+        rejection=warnings[0] if warnings else None,
+        warnings=warnings,
         issues=_build_issues(features, scores),
         highlights=_build_highlights(features, scores),
         detail={

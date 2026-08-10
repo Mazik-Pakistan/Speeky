@@ -62,13 +62,17 @@ export type CalibrationMethod = "on_screen_target" | "session_baseline" | "none"
 
 export type CalibrationQuality = "good" | "weak" | "failed";
 
-/** Mirrors VideoRejectionReason in lib/video_scorer.py. The UI renders a dash plus an
- *  explanation for these, never a number. */
+/** Mirrors VideoRejectionReason in lib/video_scorer.py — a capture-quality problem that
+ *  qualifies the delivery numbers rather than replacing them.
+ *
+ *  Two members were previously wrong (`face_lost_too_often` and `too_short`, against the
+ *  backend's `face_coverage_too_low` and `clip_too_short`), which meant a genuine duration
+ *  warning fell through the copy map and rendered as "we couldn't see your face". */
 export type VideoRejectionReason =
   | "no_face_detected"
-  | "face_lost_too_often"
+  | "face_coverage_too_low"
   | "too_dark"
-  | "too_short"
+  | "clip_too_short"
   | "framing_unusable"
   | "device_too_slow"
   | "camera_stopped_early";
@@ -320,7 +324,12 @@ export interface ScoredVideo {
   visual_presence: number | null;
   /** 0-1. Below 0.5 the backend withholds these numbers from the LLM entirely. */
   confidence_weight: number;
+  /** The worst entry in `warnings`, or null. Kept for stored scorecards; it no longer
+   *  suppresses the scores. */
   rejection: VideoRejectionReason | null;
+  /** Every capture-quality problem, worst first. Rendered beside the numbers so the user knows
+   *  which measurement to distrust. Absent on scorecards stored before this existed. */
+  warnings?: VideoRejectionReason[];
   issues: { type: string; message: string; suggestion: string }[];
   highlights: { kind: string; message: string }[];
   detail: Record<string, unknown>;

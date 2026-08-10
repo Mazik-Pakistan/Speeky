@@ -1,9 +1,13 @@
 "use client";
 
 /**
- * The pieces shared by the two rooms Public Speaking opens: the Q&A call (QaAvatarCall) and the
- * silent audience shown during the speech itself (IdleAudiencePanel). Only the framing differs
- * — the video panel, its placeholder states, and the LiveKit room wiring are the same.
+ * The LiveKit room wiring shared by the rooms Public Speaking opens — today the silent audience
+ * shown during the speech itself (IdleAudiencePanel). The Q&A uses the app-wide LiveCallModal.
+ *
+ * Everything in this module pulls in @livekit/components-react, so it must only ever be reached
+ * through a dynamic import. Panel/PanelPlaceholder deliberately live in ./Panel instead: they are
+ * plain markup that non-room callers want, and re-exporting them from here would drag ~150kB of
+ * LiveKit into every one of those callers' bundles.
  */
 
 import * as React from "react";
@@ -17,33 +21,14 @@ import {
   useVoiceAssistant,
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
-import { Loader2 } from "lucide-react";
 
 import type { LiveCallConnection } from "@/lib/useLiveCallConnection";
+
+import { Panel, PanelPlaceholder } from "./Panel";
 
 /** Generous enough for a cold worker subprocess plus the avatar provider's own handshake, which
  *  together ran ~13s in practice. Past this the agent is not coming. */
 const AGENT_JOIN_TIMEOUT_MS = 25_000;
-
-export function Panel({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <div className="relative aspect-video overflow-hidden rounded-xl border border-border bg-black">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-export function PanelPlaceholder({ text, spinner }: { text: string; spinner?: boolean }) {
-  return (
-    <div className="flex h-full w-full items-center justify-center gap-2 px-4 text-center text-xs text-white/80">
-      {spinner ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-      {text}
-    </div>
-  );
-}
 
 /** Renders the agent's published video track, with its speaking state as the fallback caption.
  *

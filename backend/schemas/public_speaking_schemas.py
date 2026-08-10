@@ -59,9 +59,21 @@ class PublicSpeakingScorecard(BaseModel):
     speech_type: str
     input_mode: str
     
-    # Overall scores
+    # Overall scores. On a scenario with Q&A (business_pitch, classroom, ted_talk) both of these
+    # are rewritten once the Q&A is answered — 70% speech, 30% Q&A — so they are the session's
+    # total, not the speech's. speech_only_score keeps the delivery half readable.
     overall_score: float = Field(ge=0, le=100)
     confidence: float = Field(ge=0, le=100)
+    speech_only_score: Optional[float] = Field(
+        None, ge=0, le=100,
+        description="overall_score before the Q&A was folded in. Equal to overall_score until "
+        "the Q&A is answered, and absent on rows scored before scoring_version 3.",
+    )
+    speech_only_confidence: Optional[float] = Field(
+        None, ge=0, le=100,
+        description="confidence before the Q&A was folded in. Written only once a blend has "
+        "happened; it is the anchor that keeps a repeated blend idempotent.",
+    )
     
     # Detailed metrics
     pacing: float = Field(ge=0, le=100, description="Speaking pace score (WPM analysis)")
@@ -110,7 +122,9 @@ class PublicSpeakingScorecard(BaseModel):
     scoring_version: int = Field(
         1,
         description="2 once the voice register channel began modulating tone_variation and "
-        "audience_engagement. Rows scored at 1 are not directly comparable on those two axes.",
+        "audience_engagement. 3 once overall_score/confidence became a 70/30 blend of the speech "
+        "and the Q&A on qa_enabled scenarios. Rows are not directly comparable across versions "
+        "on those axes.",
     )
 
     # Physical delivery (camera sessions only). Deliberately NOT folded into overall_score —
