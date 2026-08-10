@@ -18,6 +18,31 @@ import { AssessmentProvider } from "@/contexts/AssessmentContext";
 import { ActiveSessionsProvider } from "@/contexts/ActiveSessionsContext";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
+const AMBIENT_BACKDROP_ROUTES = new Set([
+  "/dashboard/pronunciation",
+  "/dashboard/accent-assessment",
+  "/dashboard/rewrite",
+  "/dashboard/admin",
+]);
+
+function DashboardAmbientBackdrop({ pathname }: { pathname: string }) {
+  if (!AMBIENT_BACKDROP_ROUTES.has(pathname)) return null;
+
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 z-0 hidden overflow-hidden lg:block"
+    >
+      <span
+        className="absolute -left-16 top-16 h-44 w-44 rounded-br-[6rem] rounded-tr-[6rem] bg-secondary/80 dark:bg-primary/[0.10]"
+      />
+      <span
+        className="absolute -right-16 bottom-10 h-48 w-48 rounded-full bg-danger/10 dark:bg-danger/[0.09]"
+      />
+    </div>
+  );
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -93,13 +118,20 @@ export default function DashboardLayout({
           </header>
 
           <main className="relative flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-8">
-            <AssessmentReminderBanner />
-            <PendingNotificationsBanner />
-            <OveruseNudgeBanner />
-            <StreakWarningBanner />
+            <DashboardAmbientBackdrop pathname={pathname} />
+
+            <div className="relative z-10">
+              <AssessmentReminderBanner />
+              <PendingNotificationsBanner />
+              <OveruseNudgeBanner />
+              <StreakWarningBanner />
+            </div>
 
             {/* Page Transition */}
-            <div key={pathname} className="animate-[fade-up_300ms_cubic-bezier(0.22,1,0.36,1)]">
+            <div
+              key={pathname}
+              className="relative z-10 animate-[fade-up_300ms_cubic-bezier(0.22,1,0.36,1)]"
+            >
               {children}
             </div>
           </main>
