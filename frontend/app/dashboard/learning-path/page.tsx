@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import {
-  Map,
+  Map as MapIcon,
   CheckCircle2,
   Lock,
   Trophy,
@@ -41,6 +41,8 @@ import {
   getCertification,
   getModuleSessionHref,
   getModuleSessionLabel,
+  getUserBadges,
+  type UserBadge,
   type RecommendationResponse,
   type LearningPath,
   type LPModule,
@@ -63,7 +65,7 @@ function fmtSeconds(s: number): string {
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 const TABS = [
-  { id: "path",        label: "My Path",       icon: Map },
+  { id: "path",        label: "My Path",       icon: MapIcon },
   { id: "milestones",  label: "Milestones",    icon: Trophy },
   { id: "completion",  label: "Completion",    icon: Award },
 ] as const;
@@ -399,7 +401,7 @@ function PathTab() {
   return (
     <div className="flex flex-col gap-5">
       <SectionHeader
-        icon={Map}
+        icon={MapIcon}
         title="Your Learning Path"
         subtitle="A personalized path recommended based on your baseline assessment."
       />
@@ -880,6 +882,33 @@ function ResetPathSection({
 function MilestonesTab() {
   const [msg, setMsg] = React.useState<{ type: "success" | "error"; text: string } | null>(null);
   const [acting, setActing] = React.useState(false);
+  const [userBadges, setUserBadges] = React.useState<UserBadge[]>([]);
+  const [loadingBadges, setLoadingBadges] = React.useState(true);
+
+  const fetchBadges = React.useCallback(async () => {
+    try {
+      const data = await getUserBadges();
+      setUserBadges(Array.isArray(data) ? data : []);
+    } catch {
+      setUserBadges([]);
+    } finally {
+      setLoadingBadges(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    fetchBadges();
+  }, [fetchBadges]);
+
+  const earnedMap = React.useMemo(() => {
+    const map = new Map<string, UserBadge>();
+    if (Array.isArray(userBadges)) {
+      userBadges.forEach((b) => {
+        if (b && b.badge_id) map.set(b.badge_id, b);
+      });
+    }
+    return map;
+  }, [userBadges]);
 
   async function handleEvalDemo() {
     setActing(true);
@@ -890,13 +919,15 @@ function MilestonesTab() {
         module_id: "mod_b1",
         score: 92,
       });
+      const awarded = r?.awarded_badges || [];
       setMsg({
-        type: r.awarded_badges.length > 0 ? "success" : "info" as any,
+        type: awarded.length > 0 ? "success" : ("info" as any),
         text:
-          r.awarded_badges.length > 0
-            ? `🏅 New badge${r.awarded_badges.length > 1 ? "s" : ""} awarded: ${r.awarded_badges.join(", ")}! ${r.message}`
+          awarded.length > 0
+            ? `🏅 New badge${awarded.length > 1 ? "s" : ""} awarded: ${awarded.join(", ")}! ${r.message}`
             : r.message,
       });
+      await fetchBadges();
     } catch (e) {
       setMsg({ type: "error", text: e instanceof ApiError ? e.message : "Failed." });
     } finally {
@@ -904,72 +935,100 @@ function MilestonesTab() {
     }
   }
 
+  const MILESTONE_BADGES = [
+    {
+      id: "lp_first_module",
+      title: "First Step on the Path",
+      desc: "Complete your first module in any learning path.",
+      icon: "🥇",
+    },
+    {
+      id: "lp_path_halfway",
+      title: "Halfway There",
+      desc: "Complete at least 2 modules in the same path.",
+      icon: "⚡",
+    },
+    {
+      id: "lp_master_score",
+      title: "Master Score",
+      desc: "Score 90+ on any module.",
+      icon: "🌟",
+    },
+  ];
+
+  const earnedCount = MILESTONE_BADGES.filter((b) => earnedMap.has(b.id)).length;
+
   return (
     <div className="flex flex-col gap-5">
       <SectionHeader
         icon={Trophy}
         title="Milestones & Achievements"
-        subtitle="Badges earned through your learning path are displayed on your Progress Dashboard."
+        subtitle="Earn badges as you complete modules and master key communication skills."
       />
-
-      {/* Cross-link to the existing Progress Dashboard badges tab */}
-      <Card className="border-amber-400/30 bg-amber-400/5">
-        <div className="flex items-start gap-4">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-400/20 text-amber-500">
-            <Award className="h-5 w-5" />
-          </span>
-          <div className="flex-1">
-            <h3 className="font-semibold text-sm text-foreground mb-1">
-              Your Full Badge Catalog
-            </h3>
-            <p className="text-xs text-muted-foreground mb-3">
-              All badges earned through learning path milestones (and your streak/confidence milestones) are unified in your Progress Dashboard. No duplicates — one badge system.
-            </p>
-            <Button size="sm" variant="outline" href="/dashboard/progress">
-              <Trophy className="h-3.5 w-3.5" />
-              View All Badges on Progress Dashboard
-              <ChevronRight className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
-      </Card>
 
       {/* Learning Path-specific milestone triggers */}
       <Card>
-        <h3 className="font-semibold text-sm text-foreground mb-4 flex items-center gap-2">
-          <Zap className="h-4 w-4 text-primary" />
-          Path Milestone Badges
+        <h3 className="font-semibold text-sm text-foreground mb-4 flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-primary" />
+            Path Milestone Badges
+            <StatusBadge variant="info">
+              {earnedCount} of {MILESTONE_BADGES.length} Unlocked
+            </StatusBadge>
+          </span>
+          {loadingBadges && <Spinner />}
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {[
-            {
-              id: "lp_first_module",
-              title: "First Step on the Path",
-              desc: "Complete your first module in any learning path.",
-              icon: "🥇",
-            },
-            {
-              id: "lp_path_halfway",
-              title: "Halfway There",
-              desc: "Complete at least 2 modules in the same path.",
-              icon: "⚡",
-            },
-            {
-              id: "lp_master_score",
-              title: "Master Score",
-              desc: "Score 90+ on any module.",
-              icon: "🌟",
-            },
-          ].map((badge) => (
-            <div
-              key={badge.id}
-              className="flex flex-col items-center gap-2 rounded-xl border border-border bg-surface p-4 text-center"
-            >
-              <span className="text-3xl">{badge.icon}</span>
-              <span className="font-semibold text-xs text-foreground">{badge.title}</span>
-              <span className="text-xs text-muted-foreground">{badge.desc}</span>
-            </div>
-          ))}
+          {MILESTONE_BADGES.map((badge) => {
+            const earned = earnedMap.get(badge.id);
+
+            return (
+              <div
+                key={badge.id}
+                className={cn(
+                  "relative flex flex-col items-center gap-2.5 rounded-xl border p-4 text-center transition-all duration-300",
+                  earned
+                    ? "border-amber-400/40 bg-amber-400/5 shadow-sm"
+                    : "border-border bg-surface/50 opacity-75"
+                )}
+              >
+                <div className="relative">
+                  <span className={cn("text-4xl block", !earned && "grayscale opacity-50")}>
+                    {badge.icon}
+                  </span>
+                  {earned && (
+                    <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-success text-white text-[10px] ring-2 ring-background">
+                      ✓
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <span className="font-semibold text-xs text-foreground block">
+                    {badge.title}
+                  </span>
+                  <span className="text-xs text-muted-foreground mt-0.5 block">
+                    {badge.desc}
+                  </span>
+                </div>
+
+                <div className="mt-auto pt-1">
+                  {earned ? (
+                    <StatusBadge variant="success">
+                      <CheckCircle2 className="h-3 w-3" />
+                      {earned.earned_at
+                        ? `Unlocked ${new Date(earned.earned_at).toLocaleDateString()}`
+                        : "Unlocked"}
+                    </StatusBadge>
+                  ) : (
+                    <StatusBadge variant="neutral">
+                      <Lock className="h-3 w-3" /> Locked
+                    </StatusBadge>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </Card>
 
@@ -1165,32 +1224,7 @@ function CompletionTab() {
     a.click();
   }
 
-  function handleDownloadPDF() {
-    if (!cert) return;
-    const userName = user?.name || user?.email || "Speeky Learner";
-    const canvas = drawCertificateCanvas(cert, userName);
-    const dataUrl = canvas.toDataURL("image/png");
 
-    const printWin = window.open("", "_blank");
-    if (!printWin) return;
-    printWin.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Speeky Certificate - ${cert.certificate_id}</title>
-          <style>
-            @page { size: landscape; margin: 0; }
-            body { margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; background: #0f172a; }
-            img { max-width: 100%; max-height: 100vh; object-fit: contain; }
-          </style>
-        </head>
-        <body>
-          <img src="${dataUrl}" onload="window.print(); window.close();" />
-        </body>
-      </html>
-    `);
-    printWin.document.close();
-  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -1311,10 +1345,6 @@ function CompletionTab() {
                 <Button size="sm" onClick={handleDownloadImage}>
                   <Download className="h-3.5 w-3.5" />
                   Download Image (PNG)
-                </Button>
-                <Button size="sm" variant="outline" onClick={handleDownloadPDF}>
-                  <Award className="h-3.5 w-3.5" />
-                  Download PDF Certificate
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
