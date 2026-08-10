@@ -1,23 +1,15 @@
 # TTS voice model
 
-A [Piper](https://github.com/OHF-Voice/piper1-gpl) neural voice (`.onnx` + `.onnx.json`), used by
-`lib/tts_client.py` for AIC-US-16 (TTS playback) and by `live_call/` for the avatar's speech.
+`en_US-lessac-medium.onnx` + `.onnx.json` — a [Piper](https://github.com/OHF-Voice/piper1-gpl)
+neural voice, used by `lib/tts_client.py` for AIC-US-16 (TTS playback).
 
-`tts_client.py` looks for exactly that name and nothing else. It defaults to `en_US-lessac-medium.onnx` only when
-Download both files for your configured voice from
-`https://huggingface.co/rhasspy/piper-voices/resolve/main/en/{lang}/{voice}/{quality}/`, e.g.:
+Not committed to git (63MB binary, `.gitignore`d) — copy it here manually, or download it:
 
 ```
-# en_GB-alba-medium (TTS_VOICE_MODEL=en_GB-alba-medium.onnx)
-https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alba/medium/en_GB-alba-medium.onnx
-https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alba/medium/en_GB-alba-medium.onnx.json
-
-# en_US-lessac-medium (the default when TTS_VOICE_MODEL is unset)
 https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx
 https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
 ```
 
-Not committed to git (63MB binary, `.gitignore`d), so this has to be redone per machine. Without a
-matching file, `lib.tts_client.is_configured()` returns `False`: `/api/conversation/tts` returns
-503 (the client falls back to its own native TTS), and a Live Call agent has no voice — it joins
-the room but cannot speak.
+Override the filename via `TTS_VOICE_MODEL` env var if you use a different voice. Without
+this file, `lib.tts_client.is_configured()` returns `False` and `/api/conversation/tts`
+returns 503 — the client is expected to fall back to its own native TTS in that case.
