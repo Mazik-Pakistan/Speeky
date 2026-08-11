@@ -34,12 +34,13 @@ export const DASHBOARD_NAV_LINKS: DashboardNavLink[] = [
 export interface MasteryMetricDef {
   id: "fluency" | "confidence" | "speech";
   label: string;
+  description: string;
 }
 
 export const MASTERY_METRIC_DEFS: MasteryMetricDef[] = [
-  { id: "fluency", label: "FLUENCY" },
-  { id: "confidence", label: "CONFIDENCE" },
-  { id: "speech", label: "SPEECH" },
+  { id: "fluency", label: "FLUENCY", description: "How smoothly you speak without long pauses or hesitation." },
+  { id: "confidence", label: "CONFIDENCE", description: "How assured you sound across your practice sessions." },
+  { id: "speech", label: "SPEECH", description: "How clear and accurate your pronunciation is." },
 ];
 
 // ── Explore / "Choose Your Mission" catalog ─────────────────────────────────
@@ -60,6 +61,7 @@ export interface ExploreScenario {
   title: string;
   description: string;
   difficulty: string;
+  showAiAvatar?: boolean;
   featured?: boolean;
   href?: string;
 }
@@ -84,6 +86,7 @@ export const EXPLORE_STATIC_SCENARIOS: ExploreScenario[] = [
     description:
       "Practice speeches and presentations with AI feedback on pacing, tone, and delivery.",
     difficulty: "Intermediate",
+    showAiAvatar: true,
     featured: true,
     href: "/dashboard/public-speaking",
   },

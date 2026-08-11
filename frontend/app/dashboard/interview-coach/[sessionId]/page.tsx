@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "react-toastify";
 import {
@@ -8,6 +9,7 @@ import {
   Mic,
   MicOff,
   Pause,
+  Phone,
   Play,
   Share2,
   Sparkles,
@@ -16,6 +18,13 @@ import { Button } from "@/components/ui/button";
 import { AiCoachAvatar } from "@/components/common/AiCoachAvatar";
 import { UserChatAvatar } from "@/components/common/UserChatAvatar";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
+
+// livekit-client is ~150KB — load it only once a user actually opens a call,
+// not on every visit to this page.
+const LiveCallModal = dynamic(
+  () => import("@/components/common/LiveCallModal").then((m) => m.LiveCallModal),
+  { ssr: false },
+);
 import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
 import { Modal } from "@/components/ui/modal";
 import { Input } from "@/components/ui/input";
@@ -69,6 +78,7 @@ export default function InterviewCoachSessionPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [feedback, setFeedback] = React.useState<SessionFeedback | null>(null);
   const [resumeBanner, setResumeBanner] = React.useState<string | null>(null);
+  const [liveCallOpen, setLiveCallOpen] = React.useState(false);
 
   const questionShownAt = React.useRef<number>(Date.now());
   const firstKeystrokeAt = React.useRef<number | null>(null);
@@ -90,6 +100,9 @@ export default function InterviewCoachSessionPage() {
     if (!firstKeystrokeAt.current) firstKeystrokeAt.current = Date.now();
     setAnswer((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
   }, []);
+  // Live-preview text while the user keeps talking — read-only, never touches the
+  // editable answer field. Clears itself once the real transcript lands and appends.
+  const [livePreview, setLivePreview] = React.useState("");
   const {
     isVoiceActive,
     isConnectingVoice,
@@ -98,7 +111,7 @@ export default function InterviewCoachSessionPage() {
     error: voiceError,
     startVoice,
     stopVoice,
-  } = useVoiceSocket(getWsUrl, onTranscript);
+  } = useVoiceSocket(getWsUrl, onTranscript, setLivePreview);
   const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
     featureName: "Interview Coach",
   });
@@ -197,6 +210,27 @@ export default function InterviewCoachSessionPage() {
     };
   }, [sessionId]);
 
+  // Re-fetches from the backend (bypassing the sessionStorage fast-path above, which
+  // would otherwise still show the pre-call state) — used after a Live Call ends so
+  // the exchanges it added via the same _submit_answer path show up here too.
+  const refreshFromServer = React.useCallback(async () => {
+    try {
+      const state = await getInterviewCoachSession(sessionId);
+      setMode(state.mode);
+      setTurns(
+        state.exchanges.map((ex) => ({
+          speaker: ex.speaker,
+          question: ex.question,
+          answer: ex.answer ?? null,
+          flags: ex.flags,
+        })),
+      );
+      if (state.status === "paused") setStatus("paused");
+    } catch {
+      toast.error("Couldn't refresh the transcript.");
+    }
+  }, [sessionId]);
+
   async function finishSession() {
     if (isVoiceActive) await stopVoice();
     setIsEnding(true);
@@ -208,7 +242,9 @@ export default function InterviewCoachSessionPage() {
         session_type: "interview_coach",
         flags_seen: allFlags,
         topic_or_mode: mode,
-        overall_score: result.overall_score,
+        // Omit rather than send null: an ungraded session must not register as a
+        // strength/weakness data point (session_memory treats >= 80 as a strength).
+        overall_score: result.overall_score ?? undefined,
       }).catch(() => {});
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
@@ -300,11 +336,23 @@ export default function InterviewCoachSessionPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
       {gate}
+      {liveCallOpen ? (
+        <LiveCallModal
+          feature="interview_coach"
+          sessionId={sessionId}
+          open={liveCallOpen}
+          onClose={() => setLiveCallOpen(false)}
+          onEndSession={finishSession}
+          onCallEnded={() => void refreshFromServer()}
+        />
+      ) : null}
       <MilestoneCelebrationModal
         milestone={newlyUnlocked[0] ?? null}
-        onClose={() => newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)}
+        onClose={() =>
+          newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)
+        }
       />
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-h2 font-semibold capitalize text-foreground">
           {mode.replace("_", " ")} Interview
         </h1>
@@ -379,7 +427,7 @@ export default function InterviewCoachSessionPage() {
             Session paused — click Resume to continue.
           </p>
         ) : (
-          <div className="flex items-center gap-2 border-t border-border pt-4">
+          <div className="flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-center">
             <input
               type="text"
               value={answer}
@@ -396,38 +444,52 @@ export default function InterviewCoachSessionPage() {
                 }
               }}
               placeholder="Type your answer..."
-              className="h-11 flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
+              className="h-11 min-w-0 sm:flex-1 rounded-xl border border-input bg-surface px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
             />
-            <Button
-              size="md"
-              loading={isSubmitting}
-              disabled={!answer.trim()}
-              onClick={handleSubmitAnswer}
-            >
-              Send
-            </Button>
-            {isVoiceActive ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <Button
                 size="md"
-                variant="outline"
-                className="voice-listening-button"
-                loading={isStoppingVoice}
-                onClick={() => void stopVoice()}
+                loading={isSubmitting}
+                disabled={!answer.trim()}
+                onClick={handleSubmitAnswer}
               >
-                <MicOff className="h-4 w-4" aria-hidden="true" />
-                Stop Voice
+                Send
               </Button>
-            ) : (
-              <Button
-                size="md"
-                variant="outline"
-                loading={isConnectingVoice}
-                onClick={() => void runWithVoiceReadiness(startVoice)}
-              >
-                <Mic className="h-4 w-4" aria-hidden="true" />
-                Start Voice
-              </Button>
-            )}
+              <div className="flex flex-wrap items-center gap-2">
+                {isVoiceActive ? (
+                  <Button
+                    size="md"
+                    variant="outline"
+                    className="voice-listening-button"
+                    loading={isStoppingVoice}
+                    onClick={() => void stopVoice()}
+                  >
+                    <MicOff className="h-4 w-4" aria-hidden="true" />
+                    Stop Voice
+                  </Button>
+                ) : (
+                  <Button
+                    size="md"
+                    variant="outline"
+                    loading={isConnectingVoice}
+                    onClick={() => void runWithVoiceReadiness(startVoice)}
+                  >
+                    <Mic className="h-4 w-4" aria-hidden="true" />
+                    Start Voice
+                  </Button>
+                )}
+                <Button
+                  size="md"
+                  variant="outline"
+                  onClick={() =>
+                    void runWithVoiceReadiness(() => setLiveCallOpen(true))
+                  }
+                >
+                  <Phone className="h-4 w-4" aria-hidden="true" />
+                  Live Call
+                </Button>
+              </div>
+            </div>
           </div>
         )}
         {voiceStatus ? (
@@ -437,6 +499,15 @@ export default function InterviewCoachSessionPage() {
             className="text-sm text-muted-foreground"
           >
             {voiceStatus}
+          </p>
+        ) : null}
+        {livePreview ? (
+          <p
+            role="status"
+            aria-live="polite"
+            className="text-sm italic text-muted-foreground"
+          >
+            {livePreview}
           </p>
         ) : null}
       </div>
@@ -495,8 +566,17 @@ function ResultsView({
       <div className="animate-fade-up rounded-2xl border border-border bg-gradient-to-br from-primary to-primary-hover p-8 text-center text-primary-foreground shadow-sm">
         <Sparkles className="mx-auto h-6 w-6" aria-hidden="true" />
         <h1 className="mt-3 font-serif text-h2 font-semibold">
-          Overall Score: {feedback.overall_score}
+          {feedback.overall_score !== null
+            ? `Overall Score: ${feedback.overall_score}`
+            : "Not scored"}
         </h1>
+        {feedback.overall_score === null && (
+          <p className="mt-2 text-sm text-primary-foreground/85">
+            {feedback.scoring_status === "insufficient_evidence"
+              ? "There weren't enough answers in this session to score it."
+              : "Scoring is temporarily unavailable — your transcript is saved."}
+          </p>
+        )}
         <p className="mt-2 text-sm text-primary-foreground/85">
           {feedback.closing_message}
         </p>

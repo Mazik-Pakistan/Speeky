@@ -22,7 +22,7 @@ from typing import Awaitable, Callable, List, Optional
 
 import numpy as np
 import torch
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 from silero_vad import VADIterator, load_silero_vad
 
 from lib import audio_io, prosody_engine, stt_engine, vad_engine
@@ -49,6 +49,25 @@ def _get_vad_model():
     if _vad_model is None:
         _vad_model = load_silero_vad()
     return _vad_model
+
+
+def _intensity_variation_db(prosody: "prosody_engine.ProsodyData") -> float:
+    """Spread of the intensity contour over audible frames, in dB.
+
+    Dynamic range is the other half of vocal arousal: pitch range says how much the voice moves
+    up and down, this says how much it moves loud and soft. A monotone-but-loud delivery and an
+    animated one are indistinguishable on pitch alone.
+
+    Frames below the 10th percentile are dropped — silence and room tone would otherwise
+    dominate the spread and make every clip look dynamic.
+    """
+    intensity = prosody.intensity_db
+    if intensity is None or len(intensity) < 4:
+        return 0.0
+    audible = intensity[intensity > float(np.percentile(intensity, 10))]
+    if len(audible) < 4:
+        return 0.0
+    return float(np.std(audible))
 
 
 def _transcribe(waveform: np.ndarray, mode: str) -> dict:
@@ -92,6 +111,12 @@ def _transcribe(waveform: np.ndarray, mode: str) -> dict:
                 "avg_db": round(audio_io.rms_dbfs(waveform), 2),
                 "pitch_range_semitones": round(float(prosody.pitch_range_semitones), 2),
                 "snr_db": round(float(snr_db), 1),
+                # Vocal arousal, for scenario-conditioned register scoring (lib/register_scorer.py).
+                # prosody_engine already computed all of this and used to discard it — a wedding
+                # toast and a business pitch want measurably different energy, and pitch RANGE
+                # alone can't tell a low, steady voice from a high, steady one.
+                "mean_pitch_hz": round(float(prosody.mean_pitch_hz), 1),
+                "intensity_variation_db": round(_intensity_variation_db(prosody), 2),
             },
         }
     if mode == "timed":
@@ -108,6 +133,34 @@ def _transcribe_partial(waveform: np.ndarray) -> dict:
     segments, _info = model.transcribe(waveform, beam_size=1, temperature=0, language="en")
     text = " ".join(seg.text.strip() for seg in segments if seg.text.strip()).strip()
     return {"text": text}
+
+
+_TRAILING_SILENCE_WINDOW_S = 0.1
+_TRAILING_SILENCE_DBFS = -40.0  # same speech/silence line as SpeechConfig.min_avg_dbfs
+
+
+def _trim_trailing_silence(waveform: np.ndarray, sample_rate: int) -> np.ndarray:
+    """Drop trailing near-silent windows (a mid-passage pause, a breath, background
+    hum) off the end of a growing buffer. A cheap RMS-per-window scan rather than a VAD
+    pass -- this runs on every partial tick (every 1.2s, over a buffer that can grow to
+    180s), so it needs to be fast, not exact."""
+    window = int(_TRAILING_SILENCE_WINDOW_S * sample_rate)
+    if window <= 0 or len(waveform) <= window:
+        return waveform
+    end = len(waveform)
+    while end > window and audio_io.rms_dbfs(waveform[end - window : end]) < _TRAILING_SILENCE_DBFS:
+        end -= window
+    return waveform[:end]
+
+
+def _transcribe_live_preview(waveform: np.ndarray) -> dict:
+    """Same cheap pass as _transcribe_partial, but first drops a trailing near-silent
+    stretch. LivePreviewSession re-transcribes the whole buffer from t=0 on every
+    partial, so the tail is often silence, a breath, or background noise while the
+    reader pauses mid-passage -- feeding Whisper a buffer that ends in near-silence is
+    exactly when it hallucinates a word to fill the gap, which is what surfaces
+    client-side as the live preview marking words ahead of what was actually said."""
+    return _transcribe_partial(_trim_trailing_silence(waveform, SAMPLE_RATE))
 
 
 class VoiceSession:
@@ -136,10 +189,20 @@ class VoiceSession:
         self._partial_interval_s = partial_interval_s
         self._samples_since_partial = 0
         self._partial_in_flight = False
+        # Latched the first time a send fails because the socket is gone. Everything after that
+        # is wasted work delivered nowhere — see _safe_send.
+        self._send_dead = False
 
     async def push(self, chunk: bytes) -> None:
         """Feed raw int16 PCM bytes off the WebSocket. Buffers to Silero's required
         512-sample window size, then runs VAD inference per window."""
+        # A closed socket still drains: uvicorn queues the PCM frames that were already in
+        # flight when the client vanished, so this loop keeps being fed for a while after the
+        # peer is gone. Without this guard the VAD keeps segmenting and Whisper keeps
+        # transcribing utterances whose transcripts have nowhere to go — several seconds of CPU
+        # per dropped connection, and a wall of send-failure tracebacks in the log.
+        if self._send_dead:
+            return
         samples = np.frombuffer(chunk, dtype=np.int16)
         self._window = np.concatenate([self._window, samples])
         while len(self._window) >= WINDOW_SAMPLES:
@@ -209,13 +272,25 @@ class VoiceSession:
         and close()'s finally-block flushing any in-progress utterance — e.g. the user
         hits Stop mid-utterance, or the browser tab just drops the connection. Sending
         on an already-dead socket must never crash the WS handler, same reasoning as
-        agent.py wrapping publish_data in try/except."""
+        agent.py wrapping publish_data in try/except.
+
+        The first failure latches `_send_dead`, which stops the session doing any further work
+        for a peer that is no longer there. It also keeps the log readable: a single dropped
+        connection used to emit one full traceback per queued utterance *and* per status
+        message, all of them the same expected "client went away" condition."""
+        if self._send_dead:
+            return
         try:
             await self._on_message(message)
         except Exception:
-            # visible by default (INFO) — a silent debug-level swallow here was the bug:
-            # a send failure (dead socket, or anything else) had no way to surface.
-            logger.warning("Voice session message send failed: %s", message.get("type"), exc_info=True)
+            self._send_dead = True
+            # One line, once per connection. Still visible by default — a silent debug-level
+            # swallow here was the original bug — but a traceback per message was the overreaction
+            # to it, since the socket being gone is an ordinary outcome, not a fault.
+            logger.info(
+                "Voice session send failed on %s; peer is gone, ending transcription for this "
+                "connection", message.get("type"),
+            )
         else:
             if message.get("type") == "transcript":
                 logger.info("Sent transcript to frontend: %r", message.get("text"))
@@ -243,9 +318,89 @@ class VoiceSession:
         """Flush whatever utterance was in progress when the socket closed — mirrors
         agent.py's forward_frames() calling vad_stream.end_input(), so speech still in
         progress at Stop time still gets transcribed and sent."""
-        if self._speaking:
+        if self._speaking and not self._send_dead:
             self._speaking = False
             await self._finalize()
+
+
+# Generous cap on how much audio a live-preview session will keep transcribing against —
+# not a product limit (the caller's own upload endpoint enforces the real one via
+# speech_config.max_recording_seconds), just a memory/cost backstop against a forgotten-
+# open recording. Comfortably above any real Pronunciation Coach sentence or Accent
+# Assessment passage read.
+MAX_PREVIEW_SECONDS = 180
+
+
+class LivePreviewSession:
+    """Continuous live-preview transcription with no VAD segmentation — for reading a
+    known target sentence/passage aloud (Pronunciation Coach, Accent Assessment), where
+    natural mid-passage pauses must NOT be treated as end-of-speech the way a
+    push-to-talk VoiceSession's utterance boundaries would. Buffers the whole recording
+    and periodically streams a cheap partial transcript; never sends a "final" — the
+    authoritative, per-word-classified result always comes from the caller's existing
+    MediaRecorder-blob upload endpoint, completely unchanged. The frontend does its own
+    lightweight positional word-compare against text it already has (the target
+    sentence/passage) to decide live colors — this class only supplies growing text."""
+
+    def __init__(self, on_message: Callable[[dict], Awaitable[None]], partial_interval_s: float = 1.2):
+        self._on_message = on_message
+        self._partial_interval_s = partial_interval_s
+        self._buffer: List[np.ndarray] = []
+        self._total_samples = 0
+        self._samples_since_partial = 0
+        self._partial_in_flight = False
+        self._closed = False
+
+    async def push(self, chunk: bytes) -> None:
+        if self._closed or self._total_samples >= MAX_PREVIEW_SECONDS * SAMPLE_RATE:
+            return
+        samples = np.frombuffer(chunk, dtype=np.int16)
+        self._buffer.append(samples)
+        self._total_samples += len(samples)
+        self._samples_since_partial += len(samples)
+
+        if self._partial_in_flight or self._samples_since_partial < self._partial_interval_s * SAMPLE_RATE:
+            return
+        self._samples_since_partial = 0
+        waveform = np.concatenate(self._buffer).astype(np.float32) / 32768.0
+        self._partial_in_flight = True
+        asyncio.create_task(self._run_partial(waveform))
+
+    async def _run_partial(self, waveform: np.ndarray) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            body = await loop.run_in_executor(_executor, _transcribe_live_preview, waveform)
+        except Exception:
+            logger.exception("Live-preview transcription failed")
+            return
+        finally:
+            self._partial_in_flight = False
+        if self._closed or not body["text"]:
+            return
+        try:
+            await self._on_message({"type": "partial", "text": body["text"]})
+        except Exception:
+            logger.warning("Live-preview message send failed", exc_info=True)
+
+    async def close(self) -> None:
+        self._closed = True
+
+
+async def serve_preview(websocket: WebSocket, partial_interval_s: float = 1.2) -> None:
+    """Like serve(), but for a continuous LivePreviewSession — no VAD, no "stop" flush
+    semantics needed, since there's no authoritative transcript on this channel to lose:
+    the real result always comes from the caller's separate upload endpoint."""
+    session = LivePreviewSession(on_message=websocket.send_json, partial_interval_s=partial_interval_s)
+    try:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                return
+            data = message.get("bytes")
+            if data is not None:
+                await session.push(data)
+    finally:
+        await session.close()
 
 
 async def serve(websocket: WebSocket, mode: str, partial_interval_s: Optional[float] = None) -> None:

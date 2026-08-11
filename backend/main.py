@@ -3,8 +3,7 @@ import os
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
-load_dotenv(override=True)  # must run before any os.environ reads below; override so a
-# `--reload` restart picks up .env edits (e.g. GROQ_MODEL) instead of keeping stale values.
+load_dotenv(override=True)  # must run before any os.environ reads below to override them also.
 
 # prisma-client-py's query engine talks to this process over a local HTTP port via httpx, so suppress the INFO noise-logs.
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -25,6 +24,7 @@ from middlewares.error_handler import (
     AuthError,
     app_error_handler,
     auth_error_handler,
+    reject_null_bytes,
     unhandled_exception_handler,
     validation_error_handler,
 )
@@ -38,6 +38,7 @@ from routers.assessment_routes import router as assessment_router
 from routers.coaching_routes import router as coaching_router
 from routers.conversation_routes import router as conversation_router
 from routers.interview_coach_routes import router as interview_coach_router
+from routers.live_call_routes import router as live_call_router
 from routers.pronunciation_routes import router as pronunciation_router
 from routers.pronunciation_coach_routes import router as pronunciation_coach_router
 from routers.accent_routes import router as accent_router
@@ -46,8 +47,8 @@ from routers.notification_routes import router as notification_router
 from routers.overuse_routes import router as overuse_router
 from routers.practice_time_routes import router as practice_time_router
 from routers.progress_dashboard_routes import router as progress_dashboard_router
-from routers.accent_progress_routes import router as accent_progress_router
 from routers.resume_jd_routes import router as resume_jd_router
+from routers.content_intelligence_routes import router as content_intelligence_router
 from routers.scenario_routes import router as scenario_router
 from routers.session_memory_routes import router as session_memory_router
 from routers.vocabulary_progress_routes import router as vocabulary_progress_router
@@ -75,13 +76,18 @@ app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
 
 
+app.middleware("http")(reject_null_bytes)
 app.add_middleware(SlowAPIMiddleware)
+client_origins = [
+    origin.strip()
+    for origin in os.environ.get("CLIENT_ORIGIN", "http://localhost:3000").split(",")
+]
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=[os.environ.get("CLIENT_ORIGIN", "http://localhost:3000")],
-    allow_origins=["*"],
+    allow_origins=client_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST","PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.add_exception_handler(AppError, app_error_handler)
@@ -107,9 +113,11 @@ app.include_router(assessment_router, prefix="/api/assessment")
 app.include_router(coaching_router, prefix="/api/coaching")
 app.include_router(conversation_router, prefix="/api/conversation")
 app.include_router(interview_coach_router, prefix="/api/interview-coach")
+app.include_router(live_call_router, prefix="/api/live-call")
 app.include_router(session_memory_router, prefix="/api/session-memory")
 app.include_router(resume_jd_router, prefix="/api/resume-jd-intake")
 app.include_router(scenario_router, prefix="/api/scenarios")
+app.include_router(content_intelligence_router, prefix="/api/content-intelligence")
 app.include_router(progress_dashboard_router, prefix="/api/progress-dashboard")
 app.include_router(accent_progress_router, prefix="/api/accent-progress")
 app.include_router(pronunciation_coach_router, prefix="/api/pronunciation-coach")

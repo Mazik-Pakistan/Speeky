@@ -6,10 +6,14 @@ import {
   Briefcase,
   CheckCircle2,
   Coffee,
+  MessageCircle,
   Mic,
+  Minus,
   Plane,
-  Plus,
   Sparkles,
+  Target,
+  TrendingDown,
+  TrendingUp,
   Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,7 +24,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ApiError } from "@/lib/api";
 import { MASTERY_METRIC_DEFS } from "@/lib/dashboard-data";
 import { getProgressDashboard, type ProgressDashboardData } from "@/lib/progressDashboard";
-import { getRecentScenarioSessions, type RecentScenarioSession } from "@/lib/scenario";
+import { getRecentActivity, type ActivityType, type RecentActivityItem } from "@/lib/recentActivity";
 import { GOAL_DASHBOARD_COPY, normalizeGoal } from "@/lib/goals";
 
 interface CategoryStyle {
@@ -42,13 +46,13 @@ const CATEGORY_STYLES: Record<string, CategoryStyle> = {
   },
   Social: {
     icon: Coffee,
-    badge: "bg-accent text-accent-foreground",
-    gradient: "bg-gradient-to-br from-accent to-accent/70",
+    badge: "bg-primary text-primary-foreground",
+    gradient: "bg-[radial-gradient(circle_at_85%_18%,hsl(var(--accent)/0.32),transparent_30%),linear-gradient(135deg,hsl(var(--primary)/0.84),hsl(var(--primary)/0.58))]",
   },
   "Daily Life": {
     icon: Users,
-    badge: "bg-accent text-accent-foreground",
-    gradient: "bg-gradient-to-br from-accent to-accent/70",
+    badge: "bg-primary text-primary-foreground",
+    gradient: "bg-[radial-gradient(circle_at_85%_18%,hsl(var(--accent)/0.32),transparent_30%),linear-gradient(135deg,hsl(var(--primary)/0.84),hsl(var(--primary)/0.58))]",
   },
   Travel: {
     icon: Plane,
@@ -69,6 +73,37 @@ function getCategoryStyle(category: string): CategoryStyle {
   return CATEGORY_STYLES[category] ?? DEFAULT_CATEGORY_STYLE;
 }
 
+// Non-scenario activity types don't carry a scenario category, so they get one
+// fixed style per feature instead of going through getCategoryStyle.
+const ACTIVITY_TYPE_STYLES: Record<Exclude<ActivityType, "scenario">, CategoryStyle> = {
+  conversation: {
+    icon: MessageCircle,
+    badge: "bg-primary text-primary-foreground",
+    gradient: "bg-[radial-gradient(circle_at_88%_18%,hsl(var(--accent)/0.30),transparent_30%),radial-gradient(circle_at_10%_105%,hsl(var(--danger)/0.16),transparent_34%),linear-gradient(135deg,hsl(var(--primary)/0.86),hsl(var(--primary)/0.60))]",
+  },
+  pronunciation: {
+    icon: Mic,
+    badge: "bg-primary text-primary-foreground",
+    gradient: "bg-gradient-to-br from-primary to-primary-hover",
+  },
+  interview_coach: {
+    icon: Briefcase,
+    badge: "bg-foreground text-background",
+    gradient: "bg-gradient-to-br from-foreground to-muted-foreground",
+  },
+  accent: {
+    icon: Target,
+    badge: "bg-secondary text-secondary-foreground",
+    gradient: "bg-gradient-to-br from-muted-foreground to-foreground",
+  },
+};
+
+function getActivityStyle(activity: RecentActivityItem): CategoryStyle {
+  return activity.type === "scenario"
+    ? getCategoryStyle(activity.subtitle)
+    : ACTIVITY_TYPE_STYLES[activity.type];
+}
+
 const MASTERY_METRIC_STYLES: Record<
   string,
   { barClassName: string; valueClassName: string }
@@ -78,12 +113,12 @@ const MASTERY_METRIC_STYLES: Record<
     valueClassName: "text-primary",
   },
   confidence: {
-    barClassName: "bg-accent/60 last:bg-accent",
-    valueClassName: "text-accent",
+    barClassName: "bg-primary/45 last:bg-primary/70",
+    valueClassName: "text-primary",
   },
   speech: {
-    barClassName: "bg-foreground/60 last:bg-foreground",
-    valueClassName: "text-foreground",
+    barClassName: "bg-primary/30 last:bg-primary/80",
+    valueClassName: "text-primary",
   },
 };
 
@@ -103,33 +138,33 @@ interface MetricScores {
   pronunciation_score: number | null;
 }
 
-function scenarioMetaLabel(session: RecentScenarioSession): {
+function activityMetaLabel(activity: RecentActivityItem): {
   label: string;
   icon: "users" | "check";
 } {
-  if (session.status === "completed") {
-    return {
-      label:
-        session.met_goal === true
-          ? "Completed · Goal Met"
-          : "Completed" +
-            (session.confidence_score != null
-              ? ` · ${Math.round(session.confidence_score)}% confidence`
-              : ""),
-      icon: "check",
-    };
+  const scoreSuffix =
+    activity.score != null ? ` · ${Math.round(activity.score)}% ${activity.score_label}` : "";
+  if (activity.status === "completed") {
+    return { label: `Completed${scoreSuffix}`, icon: "check" };
   }
-  if (session.status === "ended_early") {
-    return { label: "Ended Early", icon: "users" };
+  if (activity.status === "ended_early") {
+    return { label: `Ended Early${scoreSuffix}`, icon: "users" };
   }
   return { label: "In Progress", icon: "users" };
 }
 
-function scenarioHref(session: RecentScenarioSession): string {
-  if (session.status === "in_progress") {
-    return `/dashboard/scenarios/${session.scenario_key}?resume=${session.session_id}`;
-  }
-  return `/dashboard/scenarios/${session.scenario_key}`;
+// "3h ago" / "Yesterday" / "5d ago" instead of a raw timestamp — scannable at a glance.
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const minutes = Math.round(diffMs / 60_000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 export default function DashboardPage() {
@@ -140,12 +175,12 @@ export default function DashboardPage() {
   // pushes the refreshed user into that context) reorders this dashboard
   // instantly (US-10 AC) without its own network round trip.
   const goal = normalizeGoal(user?.learningGoal);
-  const { subtitle, preferredCategory } = GOAL_DASHBOARD_COPY[goal];
+  const { subtitle } = GOAL_DASHBOARD_COPY[goal];
 
   const [dashboard, setDashboard] = React.useState<ProgressDashboardData | null>(null);
   const [dashboardError, setDashboardError] = React.useState<string | null>(null);
-  const [recentSessions, setRecentSessions] = React.useState<RecentScenarioSession[] | null>(null);
-  const [recentError, setRecentError] = React.useState<string | null>(null);
+  const [activities, setActivities] = React.useState<RecentActivityItem[] | null>(null);
+  const [activitiesError, setActivitiesError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     getProgressDashboard()
@@ -154,26 +189,12 @@ export default function DashboardPage() {
         setDashboardError(err instanceof ApiError ? err.message : "Couldn't load your mastery scores."),
       );
 
-    getRecentScenarioSessions()
-      .then((data) => setRecentSessions(data.scenarios))
+    getRecentActivity()
+      .then((data) => setActivities(data.activities))
       .catch((err) =>
-        setRecentError(err instanceof ApiError ? err.message : "Couldn't load your recent scenarios."),
+        setActivitiesError(err instanceof ApiError ? err.message : "Couldn't load your recent activity."),
       );
   }, []);
-
-  // "Business" preference (from GOAL_DASHBOARD_COPY) is closest to the real
-  // catalog's "Work" category — real scenario categories never say "Business".
-  const scenarios = React.useMemo(() => {
-    if (!recentSessions) return [];
-    if (!preferredCategory) return recentSessions;
-    const matchesPreferred = (category: string) =>
-      preferredCategory === "Business" ? category === "Work" : category === preferredCategory;
-    return [...recentSessions].sort((a, b) => {
-      const aMatch = matchesPreferred(a.category) ? -1 : 0;
-      const bMatch = matchesPreferred(b.category) ? -1 : 0;
-      return aMatch - bMatch;
-    });
-  }, [recentSessions, preferredCategory]);
 
   const hasNoSessions = dashboard?.is_empty_state || dashboard?.summary_metrics.completed_sessions_count === 0;
 
@@ -187,24 +208,24 @@ export default function DashboardPage() {
           </h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground">{subtitle}</p>
         </div>
-        <Button type="button" size="md">
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          Start New Session
-        </Button>
       </div>
 
       <DailyChallengeCard />
 
       <div className="grid grid-cols-1 gap-6">
         <div
-          className="animate-fade-up rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm transition-shadow duration-200 hover:shadow-md"
+          className="relative animate-fade-up overflow-hidden rounded-2xl border border-border bg-[radial-gradient(circle_at_100%_0%,hsl(var(--primary)/0.10),transparent_28%),radial-gradient(circle_at_0%_100%,hsl(var(--accent)/0.08),transparent_30%),hsl(var(--surface-elevated))] p-6 shadow-sm transition-shadow duration-200 hover:shadow-md"
           style={{ animationDelay: "150ms" }}
         >
+          <div
+            aria-hidden="true"
+            className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-accent via-primary to-danger"
+          />
           <div className="flex items-center justify-between">
             <h2 className="font-serif text-xl font-semibold text-foreground">
               Learning Mastery
             </h2>
-            <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
+            <span className="rounded-full border border-primary/15 bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
               This Week
             </span>
           </div>
@@ -231,34 +252,55 @@ export default function DashboardPage() {
                   sourceKey === "confidence_score"
                     ? dashboard.summary_metrics.confidence_score.value
                     : dashboard.summary_metrics[sourceKey];
-                const bars = dashboard.trend_lines
-                  .map((point) => point[sourceKey])
-                  .filter((v): v is number => v != null)
-                  .slice(-5);
+                const points = dashboard.trend_lines
+                  .filter((point) => point[sourceKey] != null)
+                  .slice(-5)
+                  .map((point) => ({ date: point.date, value: point[sourceKey] as number }));
+                // Session-over-session change — the single most motivating number on this
+                // card ("+6% since last session" reads as progress; a bare "72%" doesn't.
+                const delta =
+                  points.length >= 2 ? points[points.length - 1].value - points[points.length - 2].value : null;
+                const DeltaIcon = delta == null || Math.abs(delta) < 0.5 ? Minus : delta > 0 ? TrendingUp : TrendingDown;
+                const deltaClassName =
+                  delta == null || Math.abs(delta) < 0.5
+                    ? "text-muted-foreground"
+                    : delta > 0
+                      ? "text-success"
+                      : "text-danger";
 
                 return (
-                  <div key={metric.id} className="flex flex-col gap-3">
+                  <div key={metric.id} className="flex flex-col gap-2">
                     <div className="flex items-center justify-between text-xs font-medium">
                       <span className="tracking-wide text-muted-foreground">{metric.label}</span>
-                      <span
-                        className={cn(
-                          "font-semibold",
-                          MASTERY_METRIC_STYLES[metric.id]?.valueClassName,
+                      <div className="flex items-center gap-2">
+                        {delta != null && (
+                          <span className={cn("flex items-center gap-0.5", deltaClassName)}>
+                            <DeltaIcon className="h-3 w-3" aria-hidden="true" />
+                            {Math.abs(delta) < 0.5 ? "±0%" : `${delta > 0 ? "+" : ""}${Math.round(delta)}%`}
+                          </span>
                         )}
-                      >
-                        {value != null ? `${Math.round(value)}%` : "—"}
-                      </span>
+                        <span
+                          className={cn(
+                            "font-semibold",
+                            MASTERY_METRIC_STYLES[metric.id]?.valueClassName,
+                          )}
+                        >
+                          {value != null ? `${Math.round(value)}%` : "—"}
+                        </span>
+                      </div>
                     </div>
-                    {bars.length > 0 ? (
+                    <p className="text-[11px] leading-snug text-muted-foreground">{metric.description}</p>
+                    {points.length > 0 ? (
                       <div className="flex h-16 items-end gap-1.5">
-                        {bars.map((height, i) => (
+                        {points.map((point, i) => (
                           <span
                             key={i}
+                            title={`${new Date(point.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}: ${Math.round(point.value)}%`}
                             className={cn(
                               "flex-1 rounded-sm",
                               MASTERY_METRIC_STYLES[metric.id]?.barClassName,
                             )}
-                            style={{ height: `${height}%` }}
+                            style={{ height: `${Math.max(point.value, 4)}%` }}
                           />
                         ))}
                       </div>
@@ -278,42 +320,42 @@ export default function DashboardPage() {
       <div>
         <div className="flex items-center justify-between">
           <h2 className="font-serif text-xl font-semibold text-foreground">
-            Recent Scenarios
+            Recent Activity
           </h2>
         </div>
 
-        {recentError ? (
-          <p className="mt-4 text-sm text-danger">{recentError}</p>
-        ) : !recentSessions ? (
-          <p className="mt-4 text-sm text-muted-foreground">Loading your recent scenarios…</p>
-        ) : scenarios.length === 0 ? (
+        {activitiesError ? (
+          <p className="mt-4 text-sm text-danger">{activitiesError}</p>
+        ) : !activities ? (
+          <p className="mt-4 text-sm text-muted-foreground">Loading your recent activity…</p>
+        ) : activities.length === 0 ? (
           <div className="mt-4 flex min-h-[25vh] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-border p-8 text-center">
             <span className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-primary">
               <Sparkles className="h-5 w-5" aria-hidden="true" />
             </span>
             <div className="flex flex-col gap-1">
               <h3 className="font-serif text-lg font-semibold text-foreground">
-                No scenarios yet
+                No activity yet
               </h3>
               <p className="max-w-sm text-xs text-muted-foreground">
-                Start a scenario to practice real conversations — it'll show up here once you
-                begin.
+                Start a scenario, conversation, or any practice session — it'll show up here once
+                you begin.
               </p>
             </div>
             <Button href="/dashboard/explore" size="sm">
-              Explore Scenarios
+              Explore Practice Modes
             </Button>
           </div>
         ) : (
           <div className="mt-4 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-            {scenarios.map((session, index) => {
-              const style = getCategoryStyle(session.category);
-              const CategoryIcon = style.icon;
-              const meta = scenarioMetaLabel(session);
+            {activities.map((activity, index) => {
+              const style = getActivityStyle(activity);
+              const TypeIcon = style.icon;
+              const meta = activityMetaLabel(activity);
               return (
                 <Link
-                  key={session.session_id}
-                  href={scenarioHref(session)}
+                  key={`${activity.type}-${activity.activity_id}`}
+                  href={activity.href}
                   className="group animate-fade-up overflow-hidden rounded-2xl border border-border bg-surface-elevated shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
                   style={{ animationDelay: `${200 + index * 80}ms` }}
                 >
@@ -323,7 +365,7 @@ export default function DashboardPage() {
                       style.gradient,
                     )}
                   >
-                    <CategoryIcon
+                    <TypeIcon
                       className="h-10 w-10 text-primary-foreground/90 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6"
                       aria-hidden="true"
                     />
@@ -333,15 +375,17 @@ export default function DashboardPage() {
                         style.badge,
                       )}
                     >
-                      {session.category}
+                      {activity.subtitle}
+                    </span>
+                    <span className="absolute right-3 top-3 rounded-md bg-background/80 px-2 py-1 text-[10px] font-medium text-foreground">
+                      {timeAgo(activity.occurred_at)}
                     </span>
                   </div>
                   <div className="flex flex-col gap-2 p-5">
                     <h3 className="font-serif text-lg font-semibold text-foreground">
-                      {session.title}
+                      {activity.title}
                     </h3>
-                    <p className="text-sm text-muted-foreground">{session.description}</p>
-                    <div className="flex items-center gap-1.5 pt-2 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       {meta.icon === "check" ? (
                         <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />
                       ) : (
@@ -356,14 +400,6 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
-
-      <button
-        type="button"
-        aria-label="Start voice session"
-        className="fixed bottom-8 right-8 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-all duration-200 hover:scale-110 hover:bg-primary-hover hover:shadow-lg active:scale-95"
-      >
-        <Mic className="h-5 w-5" aria-hidden="true" />
-      </button>
     </div>
   );
 }

@@ -24,6 +24,13 @@ const CARDS: AdminHubCard[] = [
       "Author Scenario-Based Learning templates: prompt, persona, vocabulary, difficulty — test in the sandbox, evaluate quality and confidence, and manage versions.",
   },
   {
+    href: "/dashboard/admin/content-intelligence",
+    icon: BarChart3,
+    title: "Content Intelligence",
+    description:
+      "Track how published templates perform for learners — completion, confidence, vocabulary success and satisfaction — and get alerted when one starts drifting from its own baseline.",
+  },
+  {
     href: "/dashboard/admin/categories",
     icon: FolderTree,
     title: "Categories",
@@ -81,7 +88,7 @@ export default function AdminHubPage() {
   });
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="mx-auto flex w-full max-w-7xl animate-fade-up flex-col gap-8">
       <div>
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
           Admin Hub
@@ -93,7 +100,12 @@ export default function AdminHubPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      <div
+        className={cn(
+          "grid auto-rows-fr grid-cols-1 gap-6 sm:grid-cols-2",
+          cards.length > 4 ? "xl:grid-cols-3" : "xl:grid-cols-2",
+        )}
+      >
         {cards.map((card) => {
           const Icon = card.icon;
           return (

@@ -31,38 +31,43 @@
     /* #D6E8ED — muted cyan-blue border */
     --input: 196 28% 88%;
     /* #D6E8ED */
-    --ring: 200 100% 22%;
+    --ring: 195 72% 31%;
     /* #004B70 */
 
     /* Royal blue. Hue MUST stay in the 224 family so the focus ring (--ring) and the
        control it rings read as the same colour. Previously --primary sat on hue 200,
        which rendered #004B70 (teal) while every comment and --ring said #00246E. */
-    --primary: 200 100% 22%;
+    --primary: 195 72% 31%;
     /* #004B70 */
-    --primary-hover: 200 66% 33%;
+    --primary-hover: 195 76% 26%;
     /* #006A9C */
     --primary-foreground: 0 0% 100%;
     /* #FFFFFF */
 
-    --secondary: 192 55% 91%;
+    --secondary: 202 62% 92%;
     /* #D5EDF2 — soft steel-cyan wash */
-    --secondary-foreground: 196 82% 18%;
+    --secondary-foreground: 201 61% 27%;
     /* #065368 */
 
-    --accent: 190 82% 31%;
+    --accent: 134 48% 38%;
     /* #0E7490 — Steel Cyan */
-    --accent-hover: 190 78% 37%;
+    --accent-hover: 134 52% 32%;
     /* #1189A8 */
     --accent-foreground: 0 0% 100%;
     /* #FFFFFF */
 
-    --success: 142 72% 29%;
+    /* #147B3F — `text-success` on `bg-success/10` measured 4.43:1 at 29%. */
+    --success: 134 48% 38%;
     /* #15803D */
-    --warning: 32 92% 37%;
+    /* #A25907 — the binding constraint is a Badge's own tint, not the page
+       background: `text-warning` on `bg-warning/10` measured 4.07:1 at the
+       original 37%, still 4.41:1 at 34%. 33% clears AA (4.62:1) on the tint and
+       comfortably on plain surfaces. */
+    --warning: 32 92% 33%;
     /* #B45309 */
-    --danger: 0 74% 42%;
+    --danger: 2 84% 55%;
     /* #BB1F1F — darkened so white text clears AA on the filled danger button. */
-    --info: 224 100% 22%;
+    --info: 205 45% 52%;
     /* #00246E — primary as info */
 
     --radius: 0.75rem;
@@ -75,11 +80,11 @@
     --shadow-color: 222 47% 11%;
     --elevation-1: 0 1px 2px -1px hsl(var(--shadow-color) / 0.08);
     --elevation-2: 0 2px 4px -2px hsl(var(--shadow-color) / 0.08),
-                   0 4px 12px -4px hsl(var(--shadow-color) / 0.06);
+      0 4px 12px -4px hsl(var(--shadow-color) / 0.06);
     --elevation-3: 0 4px 8px -4px hsl(var(--shadow-color) / 0.10),
-                   0 12px 24px -8px hsl(var(--shadow-color) / 0.08);
+      0 12px 24px -8px hsl(var(--shadow-color) / 0.08);
     --elevation-4: 0 8px 16px -8px hsl(var(--shadow-color) / 0.12),
-                   0 24px 48px -12px hsl(var(--shadow-color) / 0.12);
+      0 24px 48px -12px hsl(var(--shadow-color) / 0.12);
     --elevation-ring: 0 0 0 1px hsl(var(--border) / 0.9);
 
     /* ── Motion ───────────────────────────────────────────────────────────
@@ -114,32 +119,32 @@
     /* #222F42 */
     --input: 208 26% 22%;
     /* #222F42 */
-    --ring: 190 42% 58%;
+    --ring: 195 58% 60%;
     /* #52B8CC */
 
-    --primary: 224 55% 72%;
+    --primary: 195 58% 60%;
     /* #849EC8 — muted dusty blue, pastel */
-    --primary-hover: 224 58% 78%;
+    --primary-hover: 195 62% 68%;
     /* #97AED4 */
-    --primary-foreground: 224 60% 12%;
+    --primary-foreground: 222 47% 8%;
     /* #0A1538 */
 
     --secondary: 220 32% 18%;
     /* #1C2840 */
-    --secondary-foreground: 224 55% 72%;
+    --secondary-foreground: 205 45% 70%;
     /* #849EC8 */
 
-    --accent: 190 42% 58%;
+    --accent: 134 40% 56%;
     /* #52B8CC — muted steel cyan for dark */
-    --accent-hover: 190 42% 65%;
+    --accent-hover: 134 44% 64%;
     /* #6BC6D8 */
-    --accent-foreground: 190 82% 9%;
+    --accent-foreground: 136 42% 10%;
     /* #041E28 */
 
-    --success: 142 45% 42%;
+    --success: 134 40% 56%;
     --warning: 32 75% 50%;
-    --danger: 0 62% 46%;
-    --info: 224 55% 72%;
+    --danger: 2 74% 58%;
+    --info: 205 45% 62%;
 
     --radius: 0.75rem;
 
@@ -148,11 +153,11 @@
     --shadow-color: 222 60% 3%;
     --elevation-1: 0 1px 2px -1px hsl(var(--shadow-color) / 0.5);
     --elevation-2: 0 2px 6px -2px hsl(var(--shadow-color) / 0.55),
-                   0 6px 16px -6px hsl(var(--shadow-color) / 0.45);
+      0 6px 16px -6px hsl(var(--shadow-color) / 0.45);
     --elevation-3: 0 6px 12px -6px hsl(var(--shadow-color) / 0.6),
-                   0 16px 32px -12px hsl(var(--shadow-color) / 0.5);
+      0 16px 32px -12px hsl(var(--shadow-color) / 0.5);
     --elevation-4: 0 10px 20px -10px hsl(var(--shadow-color) / 0.7),
-                   0 32px 64px -16px hsl(var(--shadow-color) / 0.6);
+      0 32px 64px -16px hsl(var(--shadow-color) / 0.6);
     --elevation-ring: 0 0 0 1px hsl(0 0% 100% / 0.06);
   }
 
@@ -184,6 +189,7 @@
      a near-instant state change rather than being removed, so anything that
      depends on an animation/transition end event still fires. */
   @media (prefers-reduced-motion: reduce) {
+
     *,
     *::before,
     *::after {
@@ -250,6 +256,29 @@
   transition: all .25s ease-in-out;
 }
 
+.Toastify__toast.Toastify__toast {
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* 
+  The base stylesheet already docks the container edge-to-edge.
+  This just keeps the toast itself from reading as a full desktop-sized card pinned to a phone screen. */
+@media only screen and (max-width: 480px) {
+  .Toastify__toast {
+    margin-bottom: 0.15rem !important;
+    max-width: calc(100vw - 25%);
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .Toastify__toast.Toastify__toast {
+    border-radius: calc(var(--radius) / 2);
+    font-size: 0.83rem;
+  }
+}
+
 .Toastify__toast--success {
   border-color: hsl(var(--success) / 0.22);
   border-left: 3px solid hsl(var(--success));
@@ -288,12 +317,6 @@
     linear-gradient(135deg,
       hsl(var(--info) / 0.12),
       hsl(var(--surface-elevated))) !important;
-}
-
-.Toastify__toast-body {
-  color: hsl(var(--foreground));
-  font-size: 0.875rem;
-  font-weight: 500;
 }
 
 
@@ -393,6 +416,7 @@
 }
 
 @keyframes voice-wave-breathe {
+
   0%,
   100% {
     opacity: 0.42;
@@ -406,6 +430,7 @@
 }
 
 @keyframes voice-status-glow {
+
   0%,
   100% {
     box-shadow: 0 0 0 0 hsl(var(--success) / 0.45);
@@ -417,6 +442,7 @@
 }
 
 @keyframes voice-listening-button-glow {
+
   0%,
   100% {
     box-shadow:
@@ -432,6 +458,7 @@
 }
 
 @keyframes voice-listening-button-ring {
+
   0%,
   100% {
     opacity: 0.18;
@@ -445,6 +472,7 @@
 }
 
 @keyframes voice-listening-button-glow-dark {
+
   0%,
   100% {
     box-shadow:
@@ -460,8 +488,83 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .voice-listening-button,
-  .voice-listening-button::after {
+  .voice-listening-button::after,
+  .speeky-logo-heartbeat {
     animation: none;
+  }
+}
+
+@keyframes flame-flicker {
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.12);
+    opacity: 0.82;
+  }
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.page-enter {
+  animation: page-enter 200ms ease-out;
+}
+
+.flame-active {
+  animation: flame-flicker 1.8s ease-in-out infinite;
+}
+
+@keyframes speeky-logo-heartbeat {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  12% {
+    transform: scale(1.045);
+  }
+
+  24% {
+    transform: scale(1);
+  }
+
+  36% {
+    transform: scale(1.025);
+  }
+
+  48% {
+    transform: scale(1);
+  }
+}
+
+.speeky-logo-heartbeat {
+  animation: speeky-logo-heartbeat 3.2s ease-in-out infinite;
+  transform-origin: center;
+  will-change: transform;
+}
+
+@keyframes speeky-bird-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-3deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(4deg);
   }
 }
