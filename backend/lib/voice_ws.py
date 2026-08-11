@@ -189,10 +189,20 @@ class VoiceSession:
         self._partial_interval_s = partial_interval_s
         self._samples_since_partial = 0
         self._partial_in_flight = False
+        # Latched the first time a send fails because the socket is gone. Everything after that
+        # is wasted work delivered nowhere — see _safe_send.
+        self._send_dead = False
 
     async def push(self, chunk: bytes) -> None:
         """Feed raw int16 PCM bytes off the WebSocket. Buffers to Silero's required
         512-sample window size, then runs VAD inference per window."""
+        # A closed socket still drains: uvicorn queues the PCM frames that were already in
+        # flight when the client vanished, so this loop keeps being fed for a while after the
+        # peer is gone. Without this guard the VAD keeps segmenting and Whisper keeps
+        # transcribing utterances whose transcripts have nowhere to go — several seconds of CPU
+        # per dropped connection, and a wall of send-failure tracebacks in the log.
+        if self._send_dead:
+            return
         samples = np.frombuffer(chunk, dtype=np.int16)
         self._window = np.concatenate([self._window, samples])
         while len(self._window) >= WINDOW_SAMPLES:
@@ -262,13 +272,25 @@ class VoiceSession:
         and close()'s finally-block flushing any in-progress utterance — e.g. the user
         hits Stop mid-utterance, or the browser tab just drops the connection. Sending
         on an already-dead socket must never crash the WS handler, same reasoning as
-        agent.py wrapping publish_data in try/except."""
+        agent.py wrapping publish_data in try/except.
+
+        The first failure latches `_send_dead`, which stops the session doing any further work
+        for a peer that is no longer there. It also keeps the log readable: a single dropped
+        connection used to emit one full traceback per queued utterance *and* per status
+        message, all of them the same expected "client went away" condition."""
+        if self._send_dead:
+            return
         try:
             await self._on_message(message)
         except Exception:
-            # visible by default (INFO) — a silent debug-level swallow here was the bug:
-            # a send failure (dead socket, or anything else) had no way to surface.
-            logger.warning("Voice session message send failed: %s", message.get("type"), exc_info=True)
+            self._send_dead = True
+            # One line, once per connection. Still visible by default — a silent debug-level
+            # swallow here was the original bug — but a traceback per message was the overreaction
+            # to it, since the socket being gone is an ordinary outcome, not a fault.
+            logger.info(
+                "Voice session send failed on %s; peer is gone, ending transcription for this "
+                "connection", message.get("type"),
+            )
         else:
             if message.get("type") == "transcript":
                 logger.info("Sent transcript to frontend: %r", message.get("text"))
@@ -296,7 +318,7 @@ class VoiceSession:
         """Flush whatever utterance was in progress when the socket closed — mirrors
         agent.py's forward_frames() calling vad_stream.end_input(), so speech still in
         progress at Stop time still gets transcribed and sent."""
-        if self._speaking:
+        if self._speaking and not self._send_dead:
             self._speaking = False
             await self._finalize()
 

@@ -30,19 +30,23 @@ const WASM_DIR = path.join(PUBLIC_DIR, "wasm");
 const MODELS_DIR = path.join(PUBLIC_DIR, "models");
 
 /**
- * Only the SIMD, single-threaded, non-module build.
+ * Both single-threaded builds: SIMD, and the no-SIMD fallback.
+ *
+ * FilesetResolver probes the browser and requests exactly one of these pairs, so serving both
+ * costs ~11MB of disk on the server and zero bandwidth for any individual visitor. Shipping only
+ * the SIMD pair meant a browser without wasm SIMD was refused outright with "unsupported_browser"
+ * — a hard "this feature does not exist for you" traded against a directory listing.
  *
  * Skipped on purpose:
  *   vision_wasm_module_internal.*  needs SharedArrayBuffer, which needs COOP/COEP headers we
  *                                  deliberately do not set (see next.config.mjs).
- *   vision_wasm_nosimd_internal.*  ~11MB fallback for browsers without wasm SIMD. Rather than
- *                                  ship it speculatively, mediapipeLoader checks
- *                                  FilesetResolver.isSimdSupported() and refuses with
- *                                  "unsupported_browser".
- *
- * Keeping just this pair takes public/mediapipe/wasm from ~34MB to ~12MB.
  */
-const WASM_FILES = ["vision_wasm_internal.js", "vision_wasm_internal.wasm"];
+const WASM_FILES = [
+  "vision_wasm_internal.js",
+  "vision_wasm_internal.wasm",
+  "vision_wasm_nosimd_internal.js",
+  "vision_wasm_nosimd_internal.wasm",
+];
 
 /**
  * Pinned by sha256, not just by URL: these are longitudinal inputs. Blendshape and landmark

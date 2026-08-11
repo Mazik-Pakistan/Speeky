@@ -65,6 +65,10 @@ SPEECH_TYPES = {
         "ideal_wpm_range": (130, 160),
         "prioritize_structure": True,
         "prioritize_persuasiveness": True,
+        # A pitch that cannot survive one follow-up question is not a pitch, so the Q&A is part
+        # of the exercise rather than an optional coda — see submit_qa_response for how it folds
+        # back into overall_score.
+        "qa_enabled": True,
         # Measured and credible. Some animation reads as conviction; a monotone pitch reads as
         # not believing your own numbers, so the floor is not zero.
         "register": {
@@ -80,6 +84,9 @@ SPEECH_TYPES = {
         "ideal_wpm_range": (120, 150),
         "disable_corporate_tone": True,
         "prioritize_warmth": True,
+        # Nobody interrogates a best man. An "audience follow-up question" here is a format
+        # error, not a missing feature.
+        "qa_enabled": False,
         # A toast is the one format where warmth is the point. Deadpan is a failure here even
         # if every other metric is strong.
         "register": {
@@ -96,6 +103,9 @@ SPEECH_TYPES = {
         "ideal_wpm_range": (130, 160),
         "prioritize_energy": True,
         "prioritize_tone_variation": True,
+        # A rallying speech ends on its call to action. Stopping to take a question undercuts
+        # the one thing the format is for.
+        "qa_enabled": False,
         # Highest expected energy of any format — this is the one place where a wide pitch
         # range and big dynamics are the target rather than a risk.
         "register": {
@@ -111,6 +121,7 @@ SPEECH_TYPES = {
         "ideal_wpm_range": (130, 150),
         "check_transitions": True,
         "track_filler_words": True,
+        "qa_enabled": True,
         # A teacher who locks onto one spot is a problem, so this is the one format where a
         # HIGHER gaze-shift rate scores better. See video_scorer._presence_weights.
         "reward_gaze_scan": True,
@@ -128,6 +139,7 @@ SPEECH_TYPES = {
         "ideal_wpm_range": (130, 150),
         "prioritize_storytelling": True,
         "prioritize_engagement": True,
+        "qa_enabled": True,
         # Storytelling wants range: the dynamic band is deliberately wide, because a good talk
         # moves between quiet and emphatic rather than sitting at one level.
         "register": {
@@ -154,6 +166,12 @@ SLOW_WPM_THRESHOLD = 110
 # Audio quality thresholds
 MIC_QUIET_DB = -45.0
 CLIPPING_DB = -3.0
+
+# How much of the headline score a scenario's Q&A phase is worth. The speech itself keeps the
+# other 70%: fielding one question well cannot rescue a poorly delivered pitch, but freezing on
+# it should visibly cost you. Only applies to scenarios with "qa_enabled": True — everywhere
+# else overall_score is the speech alone.
+QA_WEIGHT = 0.30
 
 
 class _AgentProsody:
@@ -205,6 +223,10 @@ async def start_session(
         "input_mode": request.input_mode,
         "structure_elements": speech_config["structure_elements"],
         "ideal_wpm_range": speech_config["ideal_wpm_range"],
+        # The client describes the session's flow on its setup card before this call exists, so
+        # it keeps its own copy of the flag — but once a session is live this is the authority,
+        # so a scenario's flow can be changed here without a frontend release going out first.
+        "qa_enabled": speech_config.get("qa_enabled", False),
         "topic": request.topic,
         "status": "in_progress",
     }
@@ -295,7 +317,8 @@ async def submit_turn(
     )
     
     should_trigger_qa = (
-        turn.is_final and 
+        speech_config.get("qa_enabled", False) and
+        turn.is_final and
         len(text_content) > 100 and
         not _is_nonsense_content(text_content)
     )
@@ -351,23 +374,28 @@ async def submit_qa_response(
         user_response=text_content,
         audio_features=audio_features,
     )
-    
+
+    # The merged card is written back to the `scorecard` column, not just returned. It used to be
+    # merged in memory and thrown away, so qa_handling reached the results screen and nothing
+    # else — the progress dashboard, which reads that column, never saw a Q&A number at all.
+    merged_scorecard = _blend_qa_into_scorecard(session.scorecard, qa_score)
+
     await db.publicspeakingsession.update(
         where={"id": session_id},
         data={
             "userQaResponse": text_content,
             "status": "completed",
             "completedAt": datetime.now(timezone.utc),
+            # Kept as its own column: this is the raw Q&A record, qa_handling is the copy the
+            # scorecard readers see.
             "qaScore": Json(qa_score),
+            "scorecard": Json(merged_scorecard),
         }
     )
-    
-    updated_scorecard = session.scorecard or {}
-    updated_scorecard["qa_handling"] = qa_score
-    
+
     return {
         "qa_score": qa_score,
-        "updated_scorecard": updated_scorecard,
+        "updated_scorecard": merged_scorecard,
         "session_id": session_id,
     }
 
@@ -594,6 +622,11 @@ async def _generate_scorecard(
         "scoring_status": relevance.STATUS_SCORED,
         "topic_relevance": topic_relevance,
         "overall_score": scores["overall"],
+        # The speech half, frozen. On a qa_enabled scenario overall_score is later rewritten as a
+        # 70/30 blend with the Q&A (see _blend_qa_into_scorecard); blending from this fixed base
+        # rather than from overall_score keeps that operation idempotent and leaves the delivery
+        # figure readable after the fact.
+        "speech_only_score": scores["overall"],
         "confidence": scores["confidence"],
         "pacing": scores["pacing"],
         "tone_variation": scores["tone_variation"],
@@ -615,9 +648,10 @@ async def _generate_scorecard(
         "delivery": scored.delivery if audio_features else None,
         "emotional_register": scored_register.emotional_register,
         "register_detail": scored_register.to_dict(),
-        # Bumped when register began modulating tone_variation/audience_engagement, so a row
-        # scored before that change stays interpretable rather than looking like drift.
-        "scoring_version": 2,
+        # 2: register began modulating tone_variation/audience_engagement. 3: on qa_enabled
+        # scenarios overall_score/confidence are a blend of the speech and the Q&A rather than
+        # the speech alone. Rows scored earlier stay interpretable rather than looking like drift.
+        "scoring_version": 3,
         "visual_presence": scored_video.visual_presence,
         "video": scored_video.to_dict() if video_features else None,
         # Echoed straight back for the results sparklines. Not scored from — the aggregates
@@ -1049,9 +1083,11 @@ def _append_presence_sentence(summary: str, scored: "video_scorer.ScoredVideo") 
     so without this the video work would only ever surface as flags and tiles.
 
     Says nothing when the measurement is not trustworthy enough to state as fact, which is the
-    same bar prompts.build_video_presence_note applies before letting numbers reach an LLM.
+    same bar prompts.build_video_presence_note applies before letting numbers reach an LLM. The
+    results tiles now show their numbers regardless, with the offending metric named — but prose
+    asserting "your presence was strong" carries no such caveat, so it stays gated.
     """
-    if scored.rejection is not None or scored.visual_presence is None:
+    if scored.warnings or scored.visual_presence is None:
         return summary
     if scored.confidence_weight < 0.5:
         return summary
@@ -1105,6 +1141,54 @@ Generate a specific, thoughtful question related to the content. Return only the
     except Exception as e:
         logger.error(f"Q&A question generation failed: {e}")
         return "Can you elaborate on your main point?"
+
+
+def _blend_qa_into_scorecard(scorecard: Optional[Dict], qa_score: Dict) -> Dict:
+    """Fold the Q&A result into the speech scorecard: 70% delivery, 30% Q&A.
+
+    Only ever called for qa_enabled scenarios, because only those reach qa_phase. The blend
+    rewrites `overall_score` in place rather than adding a parallel headline — a session's one
+    reported number should mean the same thing everywhere it is read, and the pre-blend figure
+    stays available as `speech_only_score`.
+    """
+    merged = dict(scorecard) if isinstance(scorecard, dict) else {}
+    merged["qa_handling"] = qa_score
+
+    composure = qa_score.get("composure")
+    relevance_score = qa_score.get("relevance")
+    # No grader, no blend. _evaluate_qa_response returns None scores when the LLM is unavailable,
+    # and an ungraded answer must not quietly drag a delivered speech down 30%.
+    if composure is None or relevance_score is None:
+        return merged
+
+    base = merged.get("speech_only_score")
+    if base is None:
+        # scoring_version < 3 — those rows predate speech_only_score, and their overall_score has
+        # never been blended, so it IS the speech-only figure.
+        base = merged.get("overall_score")
+    if base is None:
+        return merged
+
+    qa_component = (float(composure) + float(relevance_score)) / 2
+    blended = round((1 - QA_WEIGHT) * float(base) + QA_WEIGHT * qa_component, 1)
+
+    # confidence is derived from overall in _calculate_overall_scores, and the progress dashboard
+    # charts `confidence ?? overall_score`. Shifting it by the same delta is what actually carries
+    # the Q&A off the results page and onto the dashboard.
+    #
+    # It gets its own anchor for the same reason overall_score has one: applying the delta to
+    # whatever confidence currently holds compounds on a second call, so a retried Q&A submission
+    # would walk the number down every attempt while overall_score stayed put.
+    if merged.get("confidence") is not None:
+        base_confidence = float(merged.get("speech_only_confidence", merged["confidence"]))
+        merged["speech_only_confidence"] = base_confidence
+        merged["confidence"] = round(
+            max(0.0, min(100.0, base_confidence + (blended - float(base)))), 1
+        )
+
+    merged["speech_only_score"] = float(base)
+    merged["overall_score"] = blended
+    return merged
 
 
 async def _evaluate_qa_response(

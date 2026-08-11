@@ -273,10 +273,31 @@ export function useVideoAnalysis(
 
       const frameSize = { width: video.videoWidth, height: video.videoHeight };
 
+      // What actually built, not what was asked for. A browser can manage the face graph and
+      // fail on pose or hands (mediapipeLoader degrades rather than throwing), and scheduling a
+      // model that does not exist would burn frame slots on a no-op while still counting the
+      // attempt — inflating that family's denominator so it reads as "never detected" rather
+      // than "never ran".
+      const availableModels = SESSION_MODELS.filter(
+        (kind) =>
+          kind === "face" ||
+          (kind === "pose" && landmarkers.pose) ||
+          (kind === "hand" && landmarkers.hand),
+      );
+
       const scheduler = createFrameScheduler({
         video,
-        available: SESSION_MODELS,
-        track: stream.getVideoTracks()[0] ?? null,
+        available: availableModels,
+        // `track` is deliberately NOT passed, which keeps the ladder cadence-only (the option is
+        // documented as optional for exactly this). With a track the ladder calls
+        // track.applyConstraints() on every tier change, including the one allowed promotion
+        // after PROMOTE_DWELL_MS = 30s — a live capture-resolution renegotiation ~36-40s into a
+        // session. On Windows UVC webcams that restarts the device: a stall fires "mute" (frozen
+        // preview), a failure fires "ended" and takes the whole session down.
+        //
+        // Little is lost. Cadence throttling is what actually reduces load; MediaPipe rescales
+        // its input to a fixed model resolution internally, so shrinking the capture barely
+        // moves inference cost.
         onInference: (kind, timestampMs) => {
           const atMs = performance.now() - startedAtRef.current;
 
@@ -348,10 +369,19 @@ export function useVideoAnalysis(
           );
         },
         onUnviable: () => {
-          // The device never kept up. Stop rather than submit numbers built from a handful of
-          // frames; the aggregate will report insufficient_data on its own.
+          // Flag, do NOT stop. This used to call stopVideo(), which is why the camera died
+          // 40-60s into every speech: the ladder can reach "unviable" as early as 29s on an
+          // ordinary machine (see frameScheduler.evaluateLoad), and it did so silently.
+          //
+          // Killing capture buys nothing. The aggregate already reports insufficient_data from
+          // its own coverage counts and the backend re-derives the verdict from frames_analyzed,
+          // so the payload is labelled either way — while a camera that switches itself off
+          // mid-sentence reads as a crash. Rates also recover often, once whatever was stealing
+          // the CPU stops.
           unviableRef.current = true;
-          void stopVideoRef.current?.();
+          console.warn(
+            "[vision] analysis rate unviable — continuing capture, payload flagged as partial",
+          );
         },
       });
       schedulerRef.current = scheduler;
@@ -361,6 +391,9 @@ export function useVideoAnalysis(
       // partial rather than losing the session.
       stream.getVideoTracks().forEach((track) => {
         track.addEventListener("ended", () => {
+          // Logged because this and the ladder are the only two ways capture ends by itself, and
+          // without a line here they are indistinguishable from a debugger.
+          console.warn("[vision] camera track ended — stopping analysis early");
           earlyStopRef.current = true;
           void stopVideoRef.current?.();
         });
@@ -372,6 +405,7 @@ export function useVideoAnalysis(
         // records on. These recover on their own, so hold the session open and say so; the
         // aggregate already discounts itself by the coverage it actually got.
         track.addEventListener("mute", () => {
+          console.warn("[vision] camera track muted — frames paused, session held open");
           setVideoStatus("Camera interrupted — your speech is still recording.");
         });
         track.addEventListener("unmute", () => {

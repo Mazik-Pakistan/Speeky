@@ -48,10 +48,15 @@ export class VisionLoadError extends Error {
 
 export interface Landmarkers {
   face: FaceLandmarker;
+  /** Null when this browser could not build the graph — the session degrades to the families it
+   *  can measure rather than failing outright. */
   pose: PoseLandmarker | null;
   hand: HandLandmarker | null;
   /** Pinned model revisions, surfaced through video_features.quality.model_versions. */
   versions: Partial<Record<ModelKind, string>>;
+  /** Which backend actually built these. "CPU" means the WebGL2 path was unavailable or threw —
+   *  expect a lower achieved frame rate and a busier degradation ladder. */
+  delegate: "GPU" | "CPU";
 }
 
 export interface EnsureOptions {
@@ -64,6 +69,75 @@ export interface EnsureOptions {
 
 let landmarkersPromise: Promise<Landmarkers> | null = null;
 let cached: Landmarkers | null = null;
+
+type Delegate = "GPU" | "CPU";
+
+/**
+ * Which delegates to attempt, in order.
+ *
+ * MediaPipe's "GPU" delegate is WebGL2, and its support is an engine-by-engine lottery rather
+ * than a capability you can reliably feature-detect: Firefox in particular advertises WebGL2 and
+ * still fails inside `createFromOptions` for some task graphs, which is why this feature appeared
+ * broken there while working in Chrome. Hardcoding "GPU" meant one throw took the whole pipeline
+ * down with an opaque `load_failed`.
+ *
+ * So the WebGL2 probe only decides whether GPU is worth *trying* — the real safety net is the
+ * per-attempt fallback in `createLandmarker`. CPU is slower but universally available, and a
+ * slower analysis beats a feature that does not exist on your browser.
+ */
+function delegateOrder(): Delegate[] {
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl2");
+    // Release immediately — browsers cap live WebGL contexts, and MediaPipe wants its own.
+    const lose = gl?.getExtension("WEBGL_lose_context");
+    lose?.loseContext();
+    return gl ? ["GPU", "CPU"] : ["CPU"];
+  } catch {
+    return ["CPU"];
+  }
+}
+
+/**
+ * Build one landmarker, falling back down the delegate list on failure.
+ *
+ * Each attempt gets its OWN copy of the model bytes. MediaPipe takes ownership of the buffer it
+ * is handed and the underlying ArrayBuffer can come back detached, so retrying with the same
+ * view would hand the CPU attempt an empty model — a far more confusing failure than the one
+ * being recovered from.
+ */
+async function createLandmarker<T>(
+  kind: ModelKind,
+  buffer: Uint8Array,
+  make: (baseOptions: { modelAssetBuffer: Uint8Array; delegate: Delegate }) => Promise<T>,
+): Promise<{ landmarker: T; delegate: Delegate }> {
+  const order = delegateOrder();
+  let lastError: unknown;
+
+  for (const delegate of order) {
+    try {
+      const landmarker = await make({
+        modelAssetBuffer: new Uint8Array(buffer),
+        delegate,
+      });
+      return { landmarker, delegate };
+    } catch (error) {
+      lastError = error;
+      console.warn(
+        `[vision] ${kind} landmarker failed on the ${delegate} delegate${
+          delegate === order[order.length - 1] ? "" : "; retrying on CPU"
+        }`,
+        error,
+      );
+    }
+  }
+
+  throw new VisionLoadError(
+    "load_failed",
+    `Could not create the ${kind} landmarker on any available backend.`,
+    { cause: lastError },
+  );
+}
 
 function assertClient() {
   if (typeof window === "undefined") {
@@ -151,14 +225,12 @@ async function load(options: EnsureOptions): Promise<Landmarkers> {
   const vision = await import("@mediapipe/tasks-vision");
   const { FilesetResolver, FaceLandmarker, PoseLandmarker, HandLandmarker } = vision;
 
-  // Only the SIMD wasm is shipped (see scripts/fetch-mediapipe-assets.mjs). Without SIMD,
-  // FilesetResolver would request the _nosimd_ pair and 404, so fail with a reason the UI can
-  // explain rather than an opaque fetch error.
+  // Both the SIMD and no-SIMD wasm pairs are served (see scripts/fetch-mediapipe-assets.mjs),
+  // and forVisionTasks picks the right one per browser. This used to hard-refuse without SIMD
+  // because only the SIMD pair was shipped; serving both costs disk on the server and nothing in
+  // bandwidth, since each browser fetches exactly one variant.
   if (!(await FilesetResolver.isSimdSupported())) {
-    throw new VisionLoadError(
-      "unsupported_browser",
-      "This browser lacks WebAssembly SIMD, which the vision pipeline requires.",
-    );
+    console.warn("[vision] no WebAssembly SIMD — falling back to the slower no-SIMD runtime");
   }
 
   const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
@@ -186,34 +258,51 @@ async function load(options: EnsureOptions): Promise<Landmarkers> {
 
   report(0.9, "Starting analysis");
 
-  const face = await FaceLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetBuffer: buffers.face, delegate: "GPU" },
-    runningMode: "VIDEO",
-    numFaces: 1,
-    // The two flags that make separate emotion and gaze models unnecessary: blendshapes are
-    // the FACS-style signals, and the transform matrix is head pose.
-    outputFaceBlendshapes: true,
-    outputFacialTransformationMatrixes: true,
-  });
+  const { landmarker: face, delegate } = await createLandmarker("face", buffers.face, (baseOptions) =>
+    FaceLandmarker.createFromOptions(fileset, {
+      baseOptions,
+      runningMode: "VIDEO",
+      numFaces: 1,
+      // The two flags that make separate emotion and gaze models unnecessary: blendshapes are
+      // the FACS-style signals, and the transform matrix is head pose.
+      outputFaceBlendshapes: true,
+      outputFacialTransformationMatrixes: true,
+    }),
+  );
 
+  // Pose and hands are enrichment: face carries eye contact and expression, which is most of the
+  // score. If a browser can build the face graph but chokes on one of these, degrade to what it
+  // can do rather than losing the session — video_scorer already nulls families it has no data
+  // for, and _weighted_presence renormalises over the ones that survived.
   const pose = models.includes("pose")
-    ? await PoseLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetBuffer: buffers.pose, delegate: "GPU" },
-        runningMode: "VIDEO",
-        numPoses: 1,
-      })
+    ? await createLandmarker("pose", buffers.pose, (baseOptions) =>
+        PoseLandmarker.createFromOptions(fileset, {
+          baseOptions,
+          runningMode: "VIDEO",
+          numPoses: 1,
+        }),
+      )
+        .then((result) => result.landmarker)
+        .catch(() => null)
     : null;
 
   const hand = models.includes("hand")
-    ? await HandLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetBuffer: buffers.hand, delegate: "GPU" },
-        runningMode: "VIDEO",
-        numHands: 2,
-      })
+    ? await createLandmarker("hand", buffers.hand, (baseOptions) =>
+        HandLandmarker.createFromOptions(fileset, {
+          baseOptions,
+          runningMode: "VIDEO",
+          numHands: 2,
+        }),
+      )
+        .then((result) => result.landmarker)
+        .catch(() => null)
     : null;
 
   report(1, "Ready");
-  return { face, pose, hand, versions };
+  console.info(
+    `[vision] landmarkers ready on the ${delegate} delegate (face${pose ? ", pose" : ""}${hand ? ", hand" : ""})`,
+  );
+  return { face, pose, hand, versions, delegate };
 }
 
 /**

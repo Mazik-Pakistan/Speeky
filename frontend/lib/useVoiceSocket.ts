@@ -161,11 +161,27 @@ export function useVoiceSocket(
       // Logged unconditionally (not just on an unexpected code) so an early/abnormal
       // disconnect shows up in devtools instead of silently doing nothing.
       socket.onclose = (event) => {
-        if (event.code !== 1000) {
+        const expected = event.code === 1000;
+        if (!expected) {
           console.warn("[voice] socket closed unexpectedly — code:", event.code, "reason:", event.reason || "(none)");
+          // Tear the capture side down too. Without this the socket was cleared from the UI's
+          // point of view but not from the hook's: socketRef still held the dead socket, so
+          // startVoice()'s `if (socketRef.current) return` guard made "Tap to Record" a no-op
+          // and the session could not be restarted. The AudioWorklet also kept pushing PCM into
+          // a closed socket, and the mic indicator stayed lit.
+          if (socketRef.current === socket) {
+            socketRef.current = null;
+            teardownAudio();
+          }
+          utteranceInFlightRef.current = false;
+          // stopVoice() may be parked on this; release it rather than making it serve the full
+          // 15s timeout for a transcript that is never coming.
+          pendingStopResolveRef.current?.();
         }
         setIsVoiceActive(false);
-        setVoiceStatus("Voice disconnected.");
+        setVoiceStatus(
+          expected ? "Voice disconnected." : "Voice disconnected — tap the mic to start again.",
+        );
       };
 
       let micStream: MediaStream;
