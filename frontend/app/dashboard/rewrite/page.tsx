@@ -149,6 +149,44 @@ export default function RewriteLabPage() {
         </div>
       </div>
 
+      {!gen && !loading ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="flex items-start gap-3 rounded-2xl border border-border bg-surface-elevated/75 p-4 shadow-sm">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary">
+              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Preserves your meaning</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Your facts and intent stay intact.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3 rounded-2xl border border-border bg-surface-elevated/75 p-4 shadow-sm">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary">
+              <Sparkles className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Adapts to your level</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                The wording matches your learning stage.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3 rounded-2xl border border-border bg-surface-elevated/75 p-4 shadow-sm">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary">
+              <Info className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Explains every change</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Learn why the revised version works better.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {error ? (
         <div className="flex items-start gap-2.5 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-foreground">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
