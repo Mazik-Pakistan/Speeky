@@ -273,9 +273,21 @@ export function useVideoAnalysis(
 
       const frameSize = { width: video.videoWidth, height: video.videoHeight };
 
+      // What actually built, not what was asked for. A browser can manage the face graph and
+      // fail on pose or hands (mediapipeLoader degrades rather than throwing), and scheduling a
+      // model that does not exist would burn frame slots on a no-op while still counting the
+      // attempt — inflating that family's denominator so it reads as "never detected" rather
+      // than "never ran".
+      const availableModels = SESSION_MODELS.filter(
+        (kind) =>
+          kind === "face" ||
+          (kind === "pose" && landmarkers.pose) ||
+          (kind === "hand" && landmarkers.hand),
+      );
+
       const scheduler = createFrameScheduler({
         video,
-        available: SESSION_MODELS,
+        available: availableModels,
         // `track` is deliberately NOT passed, which keeps the ladder cadence-only (the option is
         // documented as optional for exactly this). With a track the ladder calls
         // track.applyConstraints() on every tier change, including the one allowed promotion

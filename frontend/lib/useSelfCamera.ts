@@ -11,18 +11,47 @@
 import * as React from "react";
 
 export interface UseSelfCameraResult {
-  videoRef: React.RefObject<HTMLVideoElement>;
+  /**
+   * A callback ref, not a RefObject, and that is the whole point.
+   *
+   * The consumer's <video> can mount long after getUserMedia resolves — Public Speaking's Q&A
+   * renders it inside a dynamically-imported modal that first shows a connecting spinner, so the
+   * element does not exist for hundreds of milliseconds after the camera opens. The old
+   * RefObject version read `videoRef.current` once, found null, and silently gave up: the stream
+   * stayed live (camera light on) with nothing displaying it.
+   *
+   * A callback ref is notified when the element actually arrives, so attachment works in either
+   * order.
+   */
+  videoRef: (node: HTMLVideoElement | null) => void;
   error: string | null;
 }
 
 export function useSelfCamera(enabled: boolean): UseSelfCameraResult {
-  const videoRef = React.useRef<HTMLVideoElement>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const nodeRef = React.useRef<HTMLVideoElement | null>(null);
+  const streamRef = React.useRef<MediaStream | null>(null);
+
+  /** Idempotent: runs whenever either half (element, stream) becomes available. */
+  const attach = React.useCallback(() => {
+    const video = nodeRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream || video.srcObject === stream) return;
+    video.srcObject = stream;
+    void video.play();
+  }, []);
+
+  const videoRef = React.useCallback(
+    (node: HTMLVideoElement | null) => {
+      nodeRef.current = node;
+      if (node) attach();
+    },
+    [attach],
+  );
 
   React.useEffect(() => {
     if (!enabled) return;
 
-    let stream: MediaStream | null = null;
     let cancelled = false;
 
     // Undefined rather than a rejected promise when the page is not on localhost or HTTPS —
@@ -41,11 +70,8 @@ export function useSelfCamera(enabled: boolean): UseSelfCameraResult {
           result.getTracks().forEach((track) => track.stop());
           return;
         }
-        stream = result;
-        const video = videoRef.current;
-        if (!video) return;
-        video.srcObject = result;
-        void video.play();
+        streamRef.current = result;
+        attach();
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -57,10 +83,11 @@ export function useSelfCamera(enabled: boolean): UseSelfCameraResult {
       cancelled = true;
       // A camera indicator left on after the panel closes reads as a privacy breach, so release
       // the device rather than just detaching the element.
-      stream?.getTracks().forEach((track) => track.stop());
-      if (videoRef.current) videoRef.current.srcObject = null;
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      if (nodeRef.current) nodeRef.current.srcObject = null;
     };
-  }, [enabled]);
+  }, [enabled, attach]);
 
   return { videoRef, error };
 }

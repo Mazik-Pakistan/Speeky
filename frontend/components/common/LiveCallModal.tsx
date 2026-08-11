@@ -496,6 +496,16 @@ function LiveCallControls({
         {statusLabel}
         {jumpInButton}
       </div>
+      {/* Also shown here, not only in the video layout. `videoTrack` is the *agent's* camera, so
+          gating the self-view on it meant that whenever the avatar was unavailable — no
+          BEY_API_KEY, provider down, avatar start failed — the caller's own feed vanished too,
+          even though it has nothing to do with the agent publishing. */}
+      {selfView ? (
+        <div className="mt-3 aspect-video w-full max-w-[240px] shrink-0 self-center overflow-hidden rounded-2xl bg-black shadow-lg">
+          {selfView}
+        </div>
+      ) : null}
+
       <div className="mt-3 flex min-h-[4.5rem] flex-1 flex-col items-center justify-center overflow-y-auto">
         <LiveCallLastLines localIdentity={localParticipant.identity} />
       </div>
