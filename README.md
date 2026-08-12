@@ -22,6 +22,7 @@ This README is written for both humans and LLMs: it gives a high-signal map of w
 - Pronunciation coach (sentence-level upload + word-level feedback)
 - Accent assessment + accent profile + targeted exercises
 - Public speaking practice sessions
+- Video input analysis using MediaPipe (eye contact, hand gestures, body framing/posture, and lightweight expression signals)
 - Rewrite lab features (rewrite + vocabulary)
 - Progress dashboards, streak/notifications, and admin surfaces
 
@@ -33,6 +34,7 @@ This README is written for both humans and LLMs: it gives a high-signal map of w
 - Context-based client state (`AuthContext`, `AssessmentContext`, `ActiveSessionsContext`, `ThemeContext`)
 - API wrapper with automatic refresh-token retry handling (`lib/api.ts`)
 - Live features use browser media APIs plus LiveKit/WebSocket integrations
+- MediaPipe Tasks Vision pipeline (`@mediapipe/tasks-vision`) for camera-based coaching metrics
 
 ### Backend (`/backend`)
 - FastAPI + Uvicorn
@@ -120,6 +122,18 @@ From `/home/runner/work/Speeky/Speeky/frontend`:
    - `npm run lint`
    - `npm run build`
    - `npm run test:unit`
+
+MediaPipe runtime note:
+- Camera analysis expects runtime assets under `/home/runner/work/Speeky/Speeky/frontend/public/mediapipe`.
+- These assets are intentionally gitignored to avoid storing large binaries.
+- Rehydrate assets with:
+  - `npm run fetch:mediapipe`
+- Source script:
+  - `/home/runner/work/Speeky/Speeky/frontend/scripts/fetch-mediapipe-assets.mjs`
+
+Video-analysis interpretation note:
+- The system reliably measures eye contact, gesture activity, and framing/posture quality.
+- Expression analysis is intentionally minimal: smile vs neutral intensity/time signals are used as a lightweight warmth-vs-seriousness proxy, not full emotion classification.
 
 ## AI/LLM Handoff Notes
 

@@ -10,6 +10,7 @@ Speeky is a two-tier web application:
 - **Backend**: FastAPI app in `/home/runner/work/Speeky/Speeky/backend`
 - **Primary DB**: PostgreSQL via Prisma schema/client
 - **External/optional AI services**: Groq (LLM), LiveKit (live call transport), Bey avatar plugin, Piper model assets
+- **Client-side vision stack**: MediaPipe Tasks Vision face/pose/hand landmarkers for camera-based analysis
 
 ## 2. Runtime Topology
 
@@ -18,6 +19,8 @@ Browser (Next.js client)
   ├─ HTTP(S) JSON -> FastAPI /api/*
   ├─ multipart/form-data -> FastAPI upload endpoints
   ├─ WebSocket PCM audio -> feature voice-ws endpoints
+  ├─ Camera frames -> MediaPipe face/pose/hand analysis (frontend)
+  ├─ Aggregated video_features -> FastAPI scoring endpoints
   └─ reads avatar/media -> /uploads/*
 
 FastAPI app (main.py)
@@ -187,6 +190,28 @@ Used heavily by pronunciation and accent-assessment endpoints.
 ## 5.3 Real-time voice mode
 
 Backend supports voice WebSocket flows where client streams raw PCM audio and backend segments/transcribes utterances. Client keeps user-in-the-loop before message send (transcribed text is reviewable).
+
+## 5.4 Video input analysis pipeline (MediaPipe)
+
+Frontend camera analysis is implemented in `frontend/lib/vision/*` and integrated into public speaking/session flows.
+
+Model/runtime assets:
+- Runtime loader: `frontend/lib/vision/mediapipeLoader.ts`
+- Asset sync script: `frontend/scripts/fetch-mediapipe-assets.mjs`
+- Models used:
+  - `face_landmarker.task`
+  - `pose_landmarker_lite.task`
+  - `hand_landmarker.task`
+- Asset directory: `frontend/public/mediapipe` (gitignored; regenerated locally)
+
+What is measured reliably:
+- Eye-contact/gaze behavior (on-camera vs away episodes, consistency)
+- Hand gesture activity and symmetry
+- Body framing/posture suitability for coaching (good/too close/too far/off-center/shoulders cropped)
+
+Minimal expression signal:
+- Smile/neutral blendshape-derived metrics are tracked as lightweight social-signal proxies.
+- Product interpretation may map these to warmth-vs-serious tone, but the underlying system is intentionally limited to measurement features (not full emotion classification).
 
 ## 6. Request Lifecycles (Canonical)
 
