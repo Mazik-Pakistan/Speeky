@@ -87,7 +87,12 @@ class AssessmentQuestionBank:
 
     @staticmethod
     def get_question_mode(question: AssessmentQuestion) -> str:
-        return "audio" if question.category in {"fluency", "pronunciation"} else "text"
+        # "audio_pronunciation" is its own mode (not just "audio"): only pronunciation
+        # questions get the question itself spoken via TTS with a hidden prompt — fluency
+        # questions are still answered by voice, but read on screen like any other question.
+        if question.category == "pronunciation":
+            return "audio_pronunciation"
+        return "audio" if question.category == "fluency" else "text"
 
     def get_by_id(self, question_id: str) -> Optional[AssessmentQuestion]:
         return self._by_id.get(question_id)
@@ -239,17 +244,16 @@ async def _score_confidence(user_id: str, new_session: SessionScore) -> float:
 
 # ── Controllers ───────────────────────────────────────────────────────────────
 async def start_assessment(user_id: str = Depends(require_auth)):
-    # Public baseline entry: refuse a second baseline once one is already completed —
-    # repeat runs must go through /reassessment/start so the 30-day cycle + early-retake
-    # cooldown apply. Re-assessment calls _begin_assessment directly to bypass this guard.
-    completed = await db.baselineassessment.count(
-        where={"userId": user_id, "completedAt": {"not": None}}
-    )
-    if completed:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "Baseline already completed. Use re-assessment to retake."},
+    existing = await db.baselineassessment.find_first(where={"userId": user_id, "completedAt": None})
+    if not existing:
+        completed = await db.baselineassessment.count(
+            where={"userId": user_id, "completedAt": {"not": None}}
         )
+        if completed:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Baseline already completed. Use re-assessment to retake."},
+            )
     return await _begin_assessment(user_id)
 
 

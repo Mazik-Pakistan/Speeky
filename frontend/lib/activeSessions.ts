@@ -33,3 +33,9 @@ export interface ResumablePublicSpeaking {
 export function getResumablePublicSpeaking() {
   return api<ResumablePublicSpeaking>("/public-speaking/resume");
 }
+
+// Mirrors dismissOpenExploreSession — ends the unfinished session server-side (same
+// effect a fresh start already has) so the banner doesn't come back after dismissing.
+export function cancelResumablePublicSpeaking() {
+  return api<{ dismissed: boolean }>("/public-speaking/resume/cancel", { method: "POST" });
+}

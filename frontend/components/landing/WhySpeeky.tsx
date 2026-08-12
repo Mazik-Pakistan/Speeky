@@ -1,6 +1,7 @@
 import { Check, X } from "lucide-react";
 import { SectionTitle } from "@/components/common/SectionTitle";
 import { COMPARISON_POINTS } from "@/lib/mock-data";
+import { ScrollReveal } from "@/components/ui/scroll-reveal";
 
 /**
  * Explains the core philosophy: confidence over grammar. Contrasts
@@ -11,7 +12,7 @@ export function WhySpeeky() {
   return (
     <section id="why-speeky" className="py-24">
       <div className="container">
-        <div className="relative overflow-hidden rounded-[2rem] border border-border bg-surface/80 px-5 py-12 shadow-[0_22px_70px_hsl(var(--foreground)/0.07)] backdrop-blur sm:px-8 lg:px-10">
+        <ScrollReveal className="relative overflow-hidden rounded-[2rem] border border-border bg-surface/80 px-5 py-12 shadow-[0_22px_70px_hsl(var(--foreground)/0.07)] backdrop-blur sm:px-8 lg:px-10">
           <div
             aria-hidden="true"
             className="absolute -left-16 top-16 h-44 w-44 rounded-br-[6rem] rounded-tr-[6rem] bg-secondary/80"
@@ -58,7 +59,7 @@ export function WhySpeeky() {
               </div>
             </div>
           </div>
-        </div>
+        </ScrollReveal>
       </div>
     </section>
   );

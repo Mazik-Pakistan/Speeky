@@ -5,6 +5,7 @@ Maintains a tamper-evident, append-only audit log of who viewed sensitive
 analytics data, applied filters, or exported reports — for compliance and post-incident investigation.
 """
 
+import asyncio
 import hashlib
 import json
 import uuid
@@ -35,6 +36,18 @@ from schemas.admin_analytics_schemas import (
     ExportDataResponse,
 )
 from utils.app_error import AppError
+
+
+# log_action does read-tail-then-append with no DB-level transaction/lock (kv_store has
+# none — see lib/kv_store.py). Two concurrent calls — e.g. two analytics endpoints each
+# firing their own asyncio.ensure_future(_log_view(...)) within the same request burst —
+# both read the same tail and both chain from the same prev_hash, forking the hash chain
+# into two entries that claim the same seq/prev_hash. verify_audit_log_integrity then
+# (correctly) reports that fork as tampering, even though nothing was actually tampered
+# with. This lock serializes the whole read-modify-write within this process, which is
+# enough here: this app has one process, no distributed workers (see analytics_service's
+# own docstring on why there's no job-queue infra either).
+_LOG_LOCK = asyncio.Lock()
 
 
 def _now() -> datetime:
@@ -121,52 +134,53 @@ async def log_action(
     Only log meaningful actions (exports, restricted-module access) in full detail.
     """
     scope_data = scope or {}
-    
-    # E-02 Routine filter change debouncing check
-    if action_type == ACTION_FILTER and module not in RESTRICTED_ANALYTICS_MODULES:
-        # Check if routine filter with no restricted data
-        if scope_data.get("routine_filter") is True or scope_data.get("is_minor") is True:
-            # Skip routine non-sensitive filter entries to reduce log clutter
-            existing_entries = await _get_all_raw_entries()
-            last_entry = existing_entries[-1] if existing_entries else None
-            if last_entry and last_entry.get("module") == module and last_entry.get("action_type") == ACTION_FILTER:
-                # Debounced: skip duplicate minor filter write
-                return AuditLogEntry(**last_entry)
 
-    entries = await _get_all_raw_entries()
-    prev_hash = entries[-1]["entry_hash"] if entries else GENESIS_HASH
-    seq = (entries[-1].get("seq", 0) + 1) if entries else 1
+    async with _LOG_LOCK:
+        # E-02 Routine filter change debouncing check
+        if action_type == ACTION_FILTER and module not in RESTRICTED_ANALYTICS_MODULES:
+            # Check if routine filter with no restricted data
+            if scope_data.get("routine_filter") is True or scope_data.get("is_minor") is True:
+                # Skip routine non-sensitive filter entries to reduce log clutter
+                existing_entries = await _get_all_raw_entries()
+                last_entry = existing_entries[-1] if existing_entries else None
+                if last_entry and last_entry.get("module") == module and last_entry.get("action_type") == ACTION_FILTER:
+                    # Debounced: skip duplicate minor filter write
+                    return AuditLogEntry(**last_entry)
 
-    entry_id = _new_id()
-    now_dt = _now()
-    timestamp_str = now_dt.isoformat()
+        entries = await _get_all_raw_entries()
+        prev_hash = entries[-1]["entry_hash"] if entries else GENESIS_HASH
+        seq = (entries[-1].get("seq", 0) + 1) if entries else 1
 
-    entry_hash = compute_entry_hash(
-        prev_hash=prev_hash,
-        entry_id=entry_id,
-        actor_id=actor_id,
-        actor_role=actor_role,
-        timestamp_str=timestamp_str,
-        action_type=action_type,
-        module=module,
-        scope=scope_data,
-    )
+        entry_id = _new_id()
+        now_dt = _now()
+        timestamp_str = now_dt.isoformat()
 
-    entry_data = {
-        "id": entry_id,
-        "seq": seq,
-        "actor_id": actor_id,
-        "actor_role": actor_role,
-        "timestamp": timestamp_str,
-        "action_type": action_type,
-        "module": module,
-        "scope": scope_data,
-        "prev_hash": prev_hash,
-        "entry_hash": entry_hash,
-    }
+        entry_hash = compute_entry_hash(
+            prev_hash=prev_hash,
+            entry_id=entry_id,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            timestamp_str=timestamp_str,
+            action_type=action_type,
+            module=module,
+            scope=scope_data,
+        )
 
-    # Write to append-only kv store
-    await kv_store.store.create(AUDIT_LOG_NS, entry_id, entry_data)
+        entry_data = {
+            "id": entry_id,
+            "seq": seq,
+            "actor_id": actor_id,
+            "actor_role": actor_role,
+            "timestamp": timestamp_str,
+            "action_type": action_type,
+            "module": module,
+            "scope": scope_data,
+            "prev_hash": prev_hash,
+            "entry_hash": entry_hash,
+        }
+
+        # Write to append-only kv store
+        await kv_store.store.create(AUDIT_LOG_NS, entry_id, entry_data)
 
     return AuditLogEntry(
         id=entry_id,
@@ -209,7 +223,7 @@ async def export_with_audit_fail_closed(
     )
 
     # Step 2: Generate content after audit log write succeeds
-    content = content_generator_func()
+    content = await content_generator_func()
 
     export_id = f"exp_{uuid.uuid4().hex[:12]}"
     return ExportDataResponse(
@@ -323,10 +337,10 @@ async def http_export_data(
     if hasattr(actor_role, "value"):
         actor_role = actor_role.value
 
-    def _generate() -> str:
-        # Stub: real implementation would call the appropriate analytics function.
-        # The important contract is that this runs AFTER the audit log write succeeds.
-        return f"module={payload.module},filters={payload.filters},format={payload.export_format}\n"
+    async def _generate() -> str:
+        # Runs AFTER the audit log write succeeds (fail-closed contract below).
+        from services.analytics_service import generate_export_csv
+        return await generate_export_csv(payload.module, payload.filters)
 
     return await export_with_audit_fail_closed(
         actor_id=admin_id,

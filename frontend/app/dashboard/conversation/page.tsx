@@ -6,6 +6,7 @@ import { toast } from "react-toastify";
 import { Lock, MessagesSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ContextMemoryNotice } from "@/components/dashboard/ContextMemoryNotice";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { listTopics, startConversation, type ConversationTopic } from "@/lib/conversation";
@@ -59,7 +60,8 @@ export default function ConversationPage() {
           AI Conversation Practice
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Have an open-ended conversation with your AI coach on any topic.
+          Chat freely on any topic and get real-time feedback on your fluency, vocabulary,
+          and pronunciation — no pressure, no judgment, just practice that sticks.
         </p>
       </div>
 
@@ -70,6 +72,11 @@ export default function ConversationPage() {
             "Complete your baseline assessment to unlock AI Conversation Practice."}
         </div>
       ) : (
+        <>
+        <ContextMemoryNotice
+          storageKey="speeky:conversation-memory-notice-seen"
+          message="Speeky remembers a few facts from your past conversations to keep things feeling continuous."
+        />
         <div className="rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm">
           <p className="text-sm font-medium text-foreground">Choose a topic</p>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -136,6 +143,7 @@ export default function ConversationPage() {
             Start Conversation
           </Button>
         </div>
+        </>
       )}
     </div>
   );

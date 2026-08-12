@@ -66,7 +66,7 @@ type Step =
     }
   | { name: "results"; result: CoachingResult };
 
-export default function CoachingSessionPage() {
+function CoachingSessionPageInner() {
   const params = useParams<{ scenario: string }>();
   const router = useRouter();
   const [step, setStep] = React.useState<Step>({ name: "loading" });
@@ -733,5 +733,24 @@ export default function CoachingSessionPage() {
         Back to Coaching
       </Button>
     </div>
+  );
+}
+
+// useSearchParams() in CoachingSessionPageInner needs a Suspense boundary,
+// otherwise the whole route deopts to client-only rendering with no fallback.
+export default function CoachingSessionPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <span
+            className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent text-muted-foreground"
+            aria-hidden="true"
+          />
+        </div>
+      }
+    >
+      <CoachingSessionPageInner />
+    </React.Suspense>
   );
 }

@@ -37,8 +37,8 @@ const STATE_LABELS: Record<string, string> = {
 const ORB_BANDS = 4;
 
 // Transcript panel (video mode) caps to the last N messages overall
-const MAX_TRANSCRIPT_MESSAGES = 2;
-const TRANSCRIPT_OPACITY_STEPS = [1, 0.5];
+const MAX_TRANSCRIPT_MESSAGES = 4;
+const TRANSCRIPT_OPACITY_STEPS = [1, 0.78, 0.56, 0.34];
 
 interface LiveCallModalProps {
   feature: LiveCallFeature;
@@ -61,6 +61,11 @@ interface LiveCallModalProps {
    *  "self" side is the orb driven by the local mic — Public Speaking passes a camera, because
    *  watching your own delivery while being questioned is most of what its Q&A is for. */
   selfView?: React.ReactNode;
+  /** Interview Coach only, for now: a visual-only countdown shown while it's the user's turn
+   *  ("listening" state), mirroring real interview time pressure. Purely a nudge — it does not
+   *  cut the user off or submit anything. Omit (default) to show no timer, unchanged for every
+   *  other feature. */
+  answerTimerSeconds?: number;
 }
 
 /**
@@ -77,6 +82,7 @@ export function LiveCallModal({
   onCallEnded,
   title = "Live Call",
   selfView,
+  answerTimerSeconds,
 }: LiveCallModalProps) {
   const [connection, setConnection] = React.useState<{
     token: string;
@@ -135,6 +141,21 @@ export function LiveCallModal({
     };
   }, [open, feature, sessionId]);
 
+  // Entrance-only transition (backdrop fade + panel slide/scale up), mirroring
+  // components/ui/modal.tsx's enter pattern. No delayed-unmount exit here —
+  // this component's own open-effect above already resets connection/error
+  // the instant `open` flips false, so lingering mounted would show a stray
+  // "Connecting…" flash mid-close instead of a clean fade-out.
+  const [entered, setEntered] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) {
+      setEntered(false);
+      return;
+    }
+    const raf = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(raf);
+  }, [open]);
+
   const isConnectingSound =
     open && !error && (connecting || !connection || agentConnecting);
   React.useEffect(() => {
@@ -173,18 +194,22 @@ export function LiveCallModal({
   return (
     <div
       className={cn(
-        "fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center",
+        "fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm transition-opacity duration-200 sm:items-center",
         !hasAvatarVideo && "sm:p-4",
+        entered ? "opacity-100" : "opacity-0",
       )}
     >
       <div
         className={cn(
-          "flex h-[100vh] w-full flex-col overflow-hidden bg-[radial-gradient(ellipse_at_50%_10%,hsl(var(--primary)/0.28),hsl(var(--background))_65%)]",
+          "flex h-[100vh] w-full flex-col overflow-hidden bg-[radial-gradient(ellipse_at_50%_10%,hsl(var(--primary)/0.28),hsl(var(--background))_65%)] transition-all duration-200",
           // Video mode fills the whole viewport at every size — no cap, no card
           // chrome (rounded corners/border/shadow would show the backdrop peeking
           // rather than just resized). Audio-only keeps today's small centered card.
           !hasAvatarVideo &&
             "sm:h-[85vh] sm:max-h-[85vh] sm:w-[90vw] sm:max-w-md sm:rounded-2xl sm:border sm:border-border sm:shadow-xl md:w-3/5 md:max-w-2xl lg:w-1/2 lg:max-w-3xl",
+          entered
+            ? "translate-y-0 opacity-100 sm:scale-100"
+            : "translate-y-4 opacity-0 sm:scale-95",
         )}
       >
         <div className="flex shrink-0 items-center justify-between px-4 py-3 sm:px-5">
@@ -251,12 +276,15 @@ export function LiveCallModal({
             <RoomAudioRenderer />
             <LiveCallControls
               endingSession={endingSession}
-              onEndSession={onEndSession ? () => void handleEndSession() : undefined}
+              onEndSession={
+                onEndSession ? () => void handleEndSession() : undefined
+              }
               onEndCall={handleEndCall}
               onConnectingChange={setAgentConnecting}
               onVideoChange={setHasAvatarVideo}
               transcriptCollapsed={transcriptCollapsed}
               selfView={selfView}
+              answerTimerSeconds={answerTimerSeconds}
             />
           </LiveKitRoom>
         )}
@@ -273,6 +301,7 @@ function LiveCallControls({
   onVideoChange,
   transcriptCollapsed,
   selfView,
+  answerTimerSeconds,
 }: {
   endingSession: boolean;
   /** Undefined when the feature has no client-side finaliser; the button is then omitted. */
@@ -286,6 +315,7 @@ function LiveCallControls({
   onVideoChange: (hasVideo: boolean) => void;
   transcriptCollapsed: boolean;
   selfView?: React.ReactNode;
+  answerTimerSeconds?: number;
 }) {
   const { state, audioTrack, videoTrack, agent } = useVoiceAssistant();
   const { localParticipant, isMicrophoneEnabled, microphoneTrack } =
@@ -296,7 +326,7 @@ function LiveCallControls({
 
   React.useEffect(() => {
     onConnectingChange(isConnectingState);
-  }, [isConnectingState, onConnectingChange]);
+  }, [isConnectingState]);
 
   // Synced during render, not in an effect: the parent's `hasAvatarVideo` sizes the
   // outer card (small audio modal vs. full-viewport video layout), while this
@@ -331,13 +361,22 @@ function LiveCallControls({
       role="status"
       aria-live="polite"
       className={cn(
-        "text-sm text-muted-foreground",
-        isConnectingState && "animate-pulse",
+        "text-sm text-muted-foreground animate-pulse",
+        videoTrack &&
+          (state === "speaking"
+            ? "sm:mt-4"
+            : state === "listening"
+              ? "sm:mt-16"
+              : ""),
       )}
     >
       {STATE_LABELS[state] ?? "Connected"}
     </p>
   );
+
+  const answerTimer = answerTimerSeconds ? (
+    <AnswerPressureTimer state={state} totalSeconds={answerTimerSeconds} />
+  ) : null;
 
   const jumpInButton =
     state === "speaking" ? (
@@ -406,8 +445,8 @@ function LiveCallControls({
     // (all controls) ~28%, centered. Below sm, both bands fall back to today's
     // flexible, content-sized stacking (mobile keeps its own proportions on purpose;
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col sm:h-[72%] sm:flex-none sm:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col sm:h-[72%] sm:flex-[7] sm:flex-row">
           <div
             className={cn(
               "flex min-h-0 items-center justify-center p-4 sm:p-6",
@@ -438,7 +477,9 @@ function LiveCallControls({
                 trackRef={videoTrack}
                 className={cn(
                   "rounded-2xl object-cover shadow-lg",
-                  transcriptCollapsed && !selfView ? "h-full w-full" : "aspect-video w-full",
+                  transcriptCollapsed && !selfView
+                    ? "h-full w-full"
+                    : "aspect-video w-full",
                   selfView && "min-w-0 flex-1",
                 )}
               />
@@ -463,9 +504,10 @@ function LiveCallControls({
             />
           </div>
         </div>
-        <div className="flex shrink-0 flex-col items-center justify-center gap-3 border-t-2 border-border p-4 sm:h-[28%] sm:p-6">
+        <div className="flex min-h-0 shrink-0 flex-col items-center justify-center gap-3 border-t-2 border-border p-4 sm:flex-[3] sm:p-6">
           <div className="flex w-full max-w-xs flex-col items-center gap-3 sm:max-w-sm">
             {statusLabel}
+            {answerTimer}
             {jumpInButton}
             {!isAgentTurn ? (
               <LiveCallOrb
@@ -494,6 +536,7 @@ function LiveCallControls({
           localMicTrack={localMicTrack}
         />
         {statusLabel}
+        {answerTimer}
         {jumpInButton}
       </div>
       {/* Also shown here, not only in the video layout. `videoTrack` is the *agent's* camera, so
@@ -515,6 +558,49 @@ function LiveCallControls({
         {endSessionButton}
       </div>
     </div>
+  );
+}
+
+/** Counts down from `totalSeconds` while `state === "listening"` (the user's turn to
+ *  answer), resetting the moment their turn ends — real interview time pressure, not an
+ *  enforced cutoff. Nothing here submits or ends the turn; it's a visual nudge only,
+ *  matching how the public-speaking timer flips to text-warning under its own threshold. */
+function AnswerPressureTimer({
+  state,
+  totalSeconds,
+}: {
+  state: string;
+  totalSeconds: number;
+}) {
+  const [remaining, setRemaining] = React.useState(totalSeconds);
+
+  React.useEffect(() => {
+    if (state !== "listening") {
+      setRemaining(totalSeconds);
+      return;
+    }
+    const startedAt = Date.now();
+    const id = setInterval(() => {
+      setRemaining(
+        Math.max(0, totalSeconds - Math.floor((Date.now() - startedAt) / 1000)),
+      );
+    }, 250);
+    return () => clearInterval(id);
+  }, [state, totalSeconds]);
+
+  if (state !== "listening") return null;
+
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  return (
+    <p
+      className={cn(
+        "font-mono text-xs font-semibold tabular-nums",
+        remaining <= 15 ? "text-danger" : "text-muted-foreground",
+      )}
+    >
+      {minutes}:{String(seconds).padStart(2, "0")}
+    </p>
   );
 }
 
@@ -848,6 +934,11 @@ function LiveCallTranscriptPanel({ localIdentity }: { localIdentity: string }) {
     transcriptions,
     MAX_TRANSCRIPT_MESSAGES,
   );
+  // exiting rows render alongside visible ones during their 320ms fade-out, so
+  // exiting.length + visible.length can exceed the cap unless trimmed to whatever
+  // room visible didn't already fill.
+  const exitingRoom = Math.max(0, MAX_TRANSCRIPT_MESSAGES - visible.length);
+  const shownExiting = exitingRoom > 0 ? exiting.slice(-exitingRoom) : [];
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -868,7 +959,7 @@ function LiveCallTranscriptPanel({ localIdentity }: { localIdentity: string }) {
           </p>
         ) : (
           <>
-            {exiting.map((segment) => {
+            {shownExiting.map((segment) => {
               const meta = speakerMeta(segment, localIdentity);
               return (
                 <div

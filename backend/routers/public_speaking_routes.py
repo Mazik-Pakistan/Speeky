@@ -21,6 +21,7 @@ from services.public_speaking_service import (
     voice_socket,
     get_filler_words_for_session,
     find_resumable_session,
+    cancel_resumable_session,
 )
 
 router = APIRouter()
@@ -42,6 +43,13 @@ async def api_find_resumable_session(user_id: str = Depends(require_auth)):
     """Find the user's latest unfinished session, if any (mirrors the pronunciation
     coach's GET /resume) — the landing page checks this before offering a fresh start."""
     return await find_resumable_session(user_id)
+
+
+@router.post("/resume/cancel")
+async def api_cancel_resumable_session(user_id: str = Depends(require_auth)):
+    """Dismiss action for the resume banner — ends the unfinished session, same effect
+    a fresh start already has (mirrors /active-sessions/explore/dismiss)."""
+    return await cancel_resumable_session(user_id)
 
 
 @router.post("/{session_id}/turn")

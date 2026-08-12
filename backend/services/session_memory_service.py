@@ -19,6 +19,7 @@ from schemas.session_memory_schemas import (
     InterruptionStatus,
     InterruptionStatusResponse,
     LogInterruptionRequest,
+    MemoryOptOutSchema,
     MemoryProfile,
     PersonalizedOpeningResponse,
     RecordSessionRequest,
@@ -124,7 +125,11 @@ async def _resume_session(user_id: str, session_id: str) -> ResumeResponse:
 # ── US-28 cross-session personalization memory ────────────────────────────────
 async def _record_session(user_id: str, req: RecordSessionRequest) -> MemoryProfile:
     existing = await kv_store.store.get(MEMORY_NS, user_id)
-    profile = existing if existing is not None else {"user_id": user_id, "sessions": []}
+    profile = existing if existing is not None else {"user_id": user_id, "sessions": [], "opted_out": False}
+    # Mirrors conversation_service._extract_and_store_facts: opted out means don't add
+    # anything new to what's carried forward, full stop.
+    if profile.get("opted_out"):
+        return await _build_memory_profile(user_id)
     profile["sessions"].append({
         "session_id": req.session_id, "session_type": req.session_type,
         "flags_seen": req.flags_seen, "topic_or_mode": req.topic_or_mode,
@@ -137,12 +142,29 @@ async def _record_session(user_id: str, req: RecordSessionRequest) -> MemoryProf
     return await _build_memory_profile(user_id)
 
 
+async def _set_session_memory_opt_out(user_id: str, enabled: bool) -> Dict:
+    """Mirrors conversation_service._set_memory_opt_out: opting out purges recorded session
+    history immediately (no async purge job exists in this codebase — same reasoning as the
+    conversation-memory opt-out), so the next scenario/interview-coach greeting has nothing
+    left to draw a "welcome back" line from."""
+    existing = await kv_store.store.get(MEMORY_NS, user_id)
+    profile = existing if existing is not None else {"user_id": user_id, "sessions": []}
+    profile["opted_out"] = enabled
+    if enabled:
+        profile["sessions"] = []
+    if existing is None:
+        await kv_store.store.create(MEMORY_NS, user_id, profile)
+    else:
+        await kv_store.store.update(MEMORY_NS, user_id, profile)
+    return {"opted_out": enabled}
+
+
 async def _build_memory_profile(user_id: str) -> MemoryProfile:
     raw = await kv_store.store.get(MEMORY_NS, user_id)
     if raw is None:
         return MemoryProfile(
             user_id=user_id, sessions_recorded=0, recurring_weaknesses=[],
-            recurring_strengths=[], recent_topics=[], last_updated=_now(),
+            recurring_strengths=[], recent_topics=[], last_updated=_now(), opted_out=False,
         )
     sessions = raw["sessions"]
     recent = sessions[-10:]  # most recent sessions weighted more
@@ -166,6 +188,7 @@ async def _build_memory_profile(user_id: str) -> MemoryProfile:
         user_id=user_id, sessions_recorded=len(sessions),
         recurring_weaknesses=recurring_weaknesses, recurring_strengths=recurring_strengths,
         recent_topics=recent_topics[-5:], last_updated=_now(),
+        opted_out=raw.get("opted_out", False),
     )
 
 
@@ -211,6 +234,10 @@ async def record_session(payload: RecordSessionRequest, user_id: str = Depends(r
 
 async def get_memory_profile(user_id: str = Depends(require_auth)):
     return await _build_memory_profile(user_id)
+
+
+async def set_memory_opt_out(payload: MemoryOptOutSchema, user_id: str = Depends(require_auth)):
+    return await _set_session_memory_opt_out(user_id, payload.enabled)
 
 
 async def get_personalized_opening(user_id: str = Depends(require_auth)):

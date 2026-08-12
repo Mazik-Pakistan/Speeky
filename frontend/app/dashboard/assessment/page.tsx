@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Sparkles,
   TriangleAlert,
+  Volume2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
@@ -27,7 +28,15 @@ import {
   type SkipAttemptResult,
 } from "@/lib/assessment";
 import { buildVoiceWsUrl, useVoiceSocket } from "@/lib/useVoiceSocket";
+import { playText, stopCurrent } from "@/lib/tts";
+import { cn } from "@/lib/utils";
 import { useAssessmentAccess } from "@/contexts/AssessmentContext";
+
+/** Fluency and pronunciation questions are both answered by voice — only pronunciation
+ *  also has its prompt spoken via TTS with the text hidden (see questionMode below). */
+function isSpokenAnswerMode(mode: "text" | "audio" | "audio_pronunciation"): boolean {
+  return mode === "audio" || mode === "audio_pronunciation";
+}
 
 type Step =
   | { name: "loading" }
@@ -40,7 +49,7 @@ type Step =
       questionIndex: number;
       totalQuestions: number;
       question: string;
-      questionMode: "text" | "audio";
+      questionMode: "text" | "audio" | "audio_pronunciation";
     }
   | { name: "analyzing"; assessmentId: string }
   | { name: "results"; summary: AssessmentSummary };
@@ -52,6 +61,7 @@ export default function AssessmentPage() {
   const [answer, setAnswer] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [isPlayingQuestion, setIsPlayingQuestion] = React.useState(false);
 
   // BAS-US-01: Delay timer for >10s processing notification
   const [analysisDuration, setAnalysisDuration] = React.useState(0);
@@ -279,6 +289,50 @@ export default function AssessmentPage() {
     }
   }
 
+  function handleAnswerKeyDown(
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+  ) {
+    if (event.key !== "Enter" || event.shiftKey) return;
+
+    event.preventDefault();
+
+    if (step.name !== "question" || !answer.trim() || isSubmitting) {
+      return;
+    }
+
+    void handleSubmitAnswer();
+  }
+
+  // First play of a question is normal pace; every replay after that is slower, so a
+  // missed word has a second, easier-to-catch pass instead of just hearing it again
+  // at the same speed.
+  const questionPlayCountRef = React.useRef(0);
+  const handlePlayQuestion = React.useCallback(async () => {
+    if (step.name !== "question") return;
+    setIsPlayingQuestion(true);
+    const lengthScale = questionPlayCountRef.current % 2 === 0 ? 1.0 : 1.4;
+    questionPlayCountRef.current += 1;
+    try {
+      await playText(step.question, lengthScale);
+    } finally {
+      setIsPlayingQuestion(false);
+    }
+  }, [step]);
+
+  // Only pronunciation questions get their prompt spoken (and its text hidden) — fluency
+  // is still answered by voice, but read on screen like any other question.
+  const pronunciationQuestionKey =
+    step.name === "question" && step.questionMode === "audio_pronunciation"
+      ? step.questionIndex
+      : null;
+  React.useEffect(() => {
+    questionPlayCountRef.current = 0;
+    if (pronunciationQuestionKey === null) return;
+    void handlePlayQuestion();
+    return () => stopCurrent();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pronunciationQuestionKey]);
+
   async function handleSubmitAnswer() {
     if (step.name !== "question" || !answer.trim()) return;
     setError(null);
@@ -287,7 +341,7 @@ export default function AssessmentPage() {
       const result = await submitAssessmentResponse(step.assessmentId, {
         text_data: answer.trim(),
         audio_features:
-          step.questionMode === "audio" && voiceAnswerUsed.current
+          isSpokenAnswerMode(step.questionMode) && voiceAnswerUsed.current
             ? {
                 // Wall-clock stays as the fallback for the case where no utterance
                 // carried timings; `turns` is what the scorer actually prefers.
@@ -332,7 +386,7 @@ export default function AssessmentPage() {
   async function handleStartVoice() {
     if (
       step.name !== "question" ||
-      step.questionMode !== "audio" ||
+      !isSpokenAnswerMode(step.questionMode) ||
       isVoiceActive
     )
       return;
@@ -528,19 +582,51 @@ export default function AssessmentPage() {
         </div>
 
         <div className="rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm sm:p-8">
-          <p className="font-serif text-lg leading-relaxed text-foreground">
-            {step.question}
-          </p>
+          {step.questionMode === "audio_pronunciation" ? (
+            <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border bg-secondary/20 p-6 text-center">
+              <button
+                type="button"
+                onClick={() => void handlePlayQuestion()}
+                disabled={isPlayingQuestion}
+                aria-label={isPlayingQuestion ? "Playing question" : "Play question"}
+                className={cn(
+                  "flex h-16 w-16 items-center justify-center rounded-full text-white transition-all disabled:opacity-70",
+                  isPlayingQuestion ? "animate-pulse bg-primary" : "bg-primary hover:scale-110",
+                )}
+              >
+                <Volume2 className="h-7 w-7" aria-hidden="true" />
+              </button>
+              <div>
+                <p className="font-medium text-foreground">
+                  {isPlayingQuestion ? "Listening..." : "Listen, then say what you hear"}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handlePlayQuestion()}
+                  disabled={isPlayingQuestion}
+                  className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline disabled:opacity-50"
+                >
+                  <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                  Play again
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="font-serif text-lg leading-relaxed text-foreground">
+              {step.question}
+            </p>
+          )}
           <div className="mt-6">
             <Textarea
               label="Your answer"
               value={answer}
               onChange={(event) => setAnswer(event.target.value)}
+              onKeyDown={handleAnswerKeyDown}
               rows={5}
               placeholder="Type your response here..."
             />
           </div>
-          {step.questionMode === "audio" ? (
+          {isSpokenAnswerMode(step.questionMode) ? (
             <div className="mt-3 flex items-center gap-2">
               <Button
                 size="sm"

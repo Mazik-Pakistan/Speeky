@@ -23,9 +23,16 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { ApiError } from "@/lib/api";
 import { MASTERY_METRIC_DEFS } from "@/lib/dashboard-data";
-import { getProgressDashboard, type ProgressDashboardData } from "@/lib/progressDashboard";
-import { getRecentActivity, type ActivityType, type RecentActivityItem } from "@/lib/recentActivity";
-import { GOAL_DASHBOARD_COPY, normalizeGoal } from "@/lib/goals";
+import {
+  getProgressDashboard,
+  type ProgressDashboardData,
+} from "@/lib/progressDashboard";
+import {
+  getRecentActivity,
+  type ActivityType,
+  type RecentActivityItem,
+} from "@/lib/recentActivity";
+import { normalizeGoal } from "@/lib/goals";
 
 interface CategoryStyle {
   icon: typeof Briefcase;
@@ -47,12 +54,14 @@ const CATEGORY_STYLES: Record<string, CategoryStyle> = {
   Social: {
     icon: Coffee,
     badge: "bg-primary text-primary-foreground",
-    gradient: "bg-[radial-gradient(circle_at_85%_18%,hsl(var(--accent)/0.32),transparent_30%),linear-gradient(135deg,hsl(var(--primary)/0.84),hsl(var(--primary)/0.58))]",
+    gradient:
+      "bg-[radial-gradient(circle_at_85%_18%,hsl(var(--accent)/0.32),transparent_30%),linear-gradient(135deg,hsl(var(--primary)/0.84),hsl(var(--primary)/0.58))]",
   },
   "Daily Life": {
     icon: Users,
     badge: "bg-primary text-primary-foreground",
-    gradient: "bg-[radial-gradient(circle_at_85%_18%,hsl(var(--accent)/0.32),transparent_30%),linear-gradient(135deg,hsl(var(--primary)/0.84),hsl(var(--primary)/0.58))]",
+    gradient:
+      "bg-[radial-gradient(circle_at_85%_18%,hsl(var(--accent)/0.32),transparent_30%),linear-gradient(135deg,hsl(var(--primary)/0.84),hsl(var(--primary)/0.58))]",
   },
   Travel: {
     icon: Plane,
@@ -75,11 +84,15 @@ function getCategoryStyle(category: string): CategoryStyle {
 
 // Non-scenario activity types don't carry a scenario category, so they get one
 // fixed style per feature instead of going through getCategoryStyle.
-const ACTIVITY_TYPE_STYLES: Record<Exclude<ActivityType, "scenario">, CategoryStyle> = {
+const ACTIVITY_TYPE_STYLES: Record<
+  Exclude<ActivityType, "scenario">,
+  CategoryStyle
+> = {
   conversation: {
     icon: MessageCircle,
     badge: "bg-primary text-primary-foreground",
-    gradient: "bg-[radial-gradient(circle_at_88%_18%,hsl(var(--accent)/0.30),transparent_30%),radial-gradient(circle_at_10%_105%,hsl(var(--danger)/0.16),transparent_34%),linear-gradient(135deg,hsl(var(--primary)/0.86),hsl(var(--primary)/0.60))]",
+    gradient:
+      "bg-[radial-gradient(circle_at_88%_18%,hsl(var(--accent)/0.30),transparent_30%),radial-gradient(circle_at_10%_105%,hsl(var(--danger)/0.16),transparent_34%),linear-gradient(135deg,hsl(var(--primary)/0.86),hsl(var(--primary)/0.60))]",
   },
   pronunciation: {
     icon: Mic,
@@ -143,7 +156,9 @@ function activityMetaLabel(activity: RecentActivityItem): {
   icon: "users" | "check";
 } {
   const scoreSuffix =
-    activity.score != null ? ` · ${Math.round(activity.score)}% ${activity.score_label}` : "";
+    activity.score != null
+      ? ` · ${Math.round(activity.score)}% ${activity.score_label}`
+      : "";
   if (activity.status === "completed") {
     return { label: `Completed${scoreSuffix}`, icon: "check" };
   }
@@ -164,7 +179,10 @@ function timeAgo(iso: string): string {
   const days = Math.round(hours / 24);
   if (days === 1) return "Yesterday";
   if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export default function DashboardPage() {
@@ -175,28 +193,44 @@ export default function DashboardPage() {
   // pushes the refreshed user into that context) reorders this dashboard
   // instantly (US-10 AC) without its own network round trip.
   const goal = normalizeGoal(user?.learningGoal);
-  const { subtitle } = GOAL_DASHBOARD_COPY[goal];
 
-  const [dashboard, setDashboard] = React.useState<ProgressDashboardData | null>(null);
-  const [dashboardError, setDashboardError] = React.useState<string | null>(null);
-  const [activities, setActivities] = React.useState<RecentActivityItem[] | null>(null);
-  const [activitiesError, setActivitiesError] = React.useState<string | null>(null);
+  const [dashboard, setDashboard] =
+    React.useState<ProgressDashboardData | null>(null);
+  const [dashboardError, setDashboardError] = React.useState<string | null>(
+    null,
+  );
+  const [activities, setActivities] = React.useState<
+    RecentActivityItem[] | null
+  >(null);
+  const [activitiesError, setActivitiesError] = React.useState<string | null>(
+    null,
+  );
 
   React.useEffect(() => {
     getProgressDashboard()
       .then(setDashboard)
       .catch((err) =>
-        setDashboardError(err instanceof ApiError ? err.message : "Couldn't load your mastery scores."),
+        setDashboardError(
+          err instanceof ApiError
+            ? err.message
+            : "Couldn't load your mastery scores.",
+        ),
       );
 
     getRecentActivity()
       .then((data) => setActivities(data.activities))
       .catch((err) =>
-        setActivitiesError(err instanceof ApiError ? err.message : "Couldn't load your recent activity."),
+        setActivitiesError(
+          err instanceof ApiError
+            ? err.message
+            : "Couldn't load your recent activity.",
+        ),
       );
   }, []);
 
-  const hasNoSessions = dashboard?.is_empty_state || dashboard?.summary_metrics.completed_sessions_count === 0;
+  const hasNoSessions =
+    dashboard?.is_empty_state ||
+    dashboard?.summary_metrics.completed_sessions_count === 0;
 
   return (
     <div className="flex flex-col gap-8">
@@ -204,9 +238,8 @@ export default function DashboardPage() {
       <div className="flex animate-fade-up flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div>
           <h1 className="font-serif text-h1 font-semibold text-foreground">
-            Hi, {firstName}!
+            Hi, {firstName.charAt(0).toUpperCase() + firstName.slice(1)}!
           </h1>
-          <p className="mt-2 max-w-xl text-sm text-muted-foreground">{subtitle}</p>
         </div>
       </div>
 
@@ -233,15 +266,18 @@ export default function DashboardPage() {
           {dashboardError ? (
             <p className="mt-6 text-sm text-danger">{dashboardError}</p>
           ) : !dashboard ? (
-            <p className="mt-6 text-sm text-muted-foreground">Loading your mastery scores…</p>
+            <p className="mt-6 text-sm text-muted-foreground">
+              Loading your mastery scores…
+            </p>
           ) : hasNoSessions ? (
             <div className="mt-6 flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border p-8 text-center">
               <p className="text-sm font-medium text-foreground">
-                {dashboard.empty_state_prompt ?? "Complete your first session to see your progress!"}
+                {dashboard.empty_state_prompt ??
+                  "Complete your first session to see your progress!"}
               </p>
               <p className="max-w-sm text-xs text-muted-foreground">
-                Your Fluency, Confidence, and Speech scores will show up here once you finish a
-                session.
+                Your Fluency, Confidence, and Speech scores will show up here
+                once you finish a session.
               </p>
             </div>
           ) : (
@@ -255,12 +291,23 @@ export default function DashboardPage() {
                 const points = dashboard.trend_lines
                   .filter((point) => point[sourceKey] != null)
                   .slice(-5)
-                  .map((point) => ({ date: point.date, value: point[sourceKey] as number }));
+                  .map((point) => ({
+                    date: point.date,
+                    value: point[sourceKey] as number,
+                  }));
                 // Session-over-session change — the single most motivating number on this
                 // card ("+6% since last session" reads as progress; a bare "72%" doesn't.
                 const delta =
-                  points.length >= 2 ? points[points.length - 1].value - points[points.length - 2].value : null;
-                const DeltaIcon = delta == null || Math.abs(delta) < 0.5 ? Minus : delta > 0 ? TrendingUp : TrendingDown;
+                  points.length >= 2
+                    ? points[points.length - 1].value -
+                      points[points.length - 2].value
+                    : null;
+                const DeltaIcon =
+                  delta == null || Math.abs(delta) < 0.5
+                    ? Minus
+                    : delta > 0
+                      ? TrendingUp
+                      : TrendingDown;
                 const deltaClassName =
                   delta == null || Math.abs(delta) < 0.5
                     ? "text-muted-foreground"
@@ -271,12 +318,21 @@ export default function DashboardPage() {
                 return (
                   <div key={metric.id} className="flex flex-col gap-2">
                     <div className="flex items-center justify-between text-xs font-medium">
-                      <span className="tracking-wide text-muted-foreground">{metric.label}</span>
+                      <span className="tracking-wide text-muted-foreground">
+                        {metric.label}
+                      </span>
                       <div className="flex items-center gap-2">
                         {delta != null && (
-                          <span className={cn("flex items-center gap-0.5", deltaClassName)}>
+                          <span
+                            className={cn(
+                              "flex items-center gap-0.5",
+                              deltaClassName,
+                            )}
+                          >
                             <DeltaIcon className="h-3 w-3" aria-hidden="true" />
-                            {Math.abs(delta) < 0.5 ? "±0%" : `${delta > 0 ? "+" : ""}${Math.round(delta)}%`}
+                            {Math.abs(delta) < 0.5
+                              ? "±0%"
+                              : `${delta > 0 ? "+" : ""}${Math.round(delta)}%`}
                           </span>
                         )}
                         <span
@@ -289,7 +345,9 @@ export default function DashboardPage() {
                         </span>
                       </div>
                     </div>
-                    <p className="text-[11px] leading-snug text-muted-foreground">{metric.description}</p>
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      {metric.description}
+                    </p>
                     {points.length > 0 ? (
                       <div className="flex h-16 items-end gap-1.5">
                         {points.map((point, i) => (
@@ -306,7 +364,9 @@ export default function DashboardPage() {
                       </div>
                     ) : (
                       <div className="flex h-16 items-center">
-                        <p className="text-xs text-muted-foreground">Not enough data yet</p>
+                        <p className="text-xs text-muted-foreground">
+                          Not enough data yet
+                        </p>
                       </div>
                     )}
                   </div>
@@ -327,7 +387,9 @@ export default function DashboardPage() {
         {activitiesError ? (
           <p className="mt-4 text-sm text-danger">{activitiesError}</p>
         ) : !activities ? (
-          <p className="mt-4 text-sm text-muted-foreground">Loading your recent activity…</p>
+          <p className="mt-4 text-sm text-muted-foreground">
+            Loading your recent activity…
+          </p>
         ) : activities.length === 0 ? (
           <div className="mt-4 flex min-h-[25vh] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-border p-8 text-center">
             <span className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-primary">
@@ -338,8 +400,8 @@ export default function DashboardPage() {
                 No activity yet
               </h3>
               <p className="max-w-sm text-xs text-muted-foreground">
-                Start a scenario, conversation, or any practice session — it'll show up here once
-                you begin.
+                Start a scenario, conversation, or any practice session — it'll
+                show up here once you begin.
               </p>
             </div>
             <Button href="/dashboard/explore" size="sm">
@@ -387,7 +449,10 @@ export default function DashboardPage() {
                     </h3>
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       {meta.icon === "check" ? (
-                        <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" />
+                        <CheckCircle2
+                          className="h-3.5 w-3.5 text-success"
+                          aria-hidden="true"
+                        />
                       ) : (
                         <Users className="h-3.5 w-3.5" aria-hidden="true" />
                       )}

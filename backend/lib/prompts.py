@@ -94,8 +94,15 @@ EXTRA_RULES = {
 
 # GAP-01: Custom / User-Defined Topic Input
 CUSTOM_TOPIC_RULES = """Topic-specific rules:
-- This is a user-defined custom topic. Treat it naturally like any other conversation topic.
-- Stay strictly on {topic} — if the user drifts, gently steer back same as other topics.
+- This is a user-defined custom topic or instruction: "{topic}"
+- If it describes a persona, relationship, or tone for YOU to adopt (e.g. "talk to me
+  like my sibling", "act as my mentor", "be a strict interviewer") — FULLY BECOME that
+  persona for the whole conversation: match its tone, warmth, and manner of speaking,
+  don't just discuss it as a subject. Open in that persona from your very first message,
+  not a generic greeting.
+- If it names the user, address them by that name naturally.
+- Otherwise, treat it as a conversation subject and stay strictly on it — if the user
+  drifts, gently steer back, same as any other topic.
 - Tag feedback/category internally as "Custom" (not shown mid-conversation)."""
 
 TOPIC_VALIDATION_PROMPT = """You are a content and topic classifier for an English-practice app.
@@ -123,6 +130,21 @@ User's topic: "{topic}"
 
 def build_topic_validation_prompt(topic: str) -> str:
     return TOPIC_VALIDATION_PROMPT.format(topic=topic)
+
+
+TOPIC_TITLE_PROMPT = """Compress the following custom conversation-practice topic or
+instruction into a short display title, {max_words} words maximum. Capture its essence —
+if it names a persona or relationship (e.g. "talk to me like my sibling"), reflect that
+in the title rather than describing it literally. No quotation marks, no trailing
+punctuation, Title Case. Respond with the title only, nothing else.
+
+Topic: "{topic}"
+
+Title:"""
+
+
+def build_topic_title_prompt(topic: str, max_words: int = 8) -> str:
+    return TOPIC_TITLE_PROMPT.format(topic=topic, max_words=max_words)
 
 
 # GAP-03: Proficiency-Level Adaptive Conversation Difficulty
@@ -314,7 +336,7 @@ def build_interview_prompt(stage: str) -> str:
 WORKPLACE_SCENARIOS: Dict[str, Dict] = {
     "email_writing": {
         "label": "Email Writing",
-        "story": "WEC-US-09",
+        "story": "Draft a professional email — apologize for a mistake, push back on a deadline, or deliver bad news the right way.",
         "input_mode": "text",
         "roleplay": False,
         "prompts": [
@@ -326,7 +348,7 @@ WORKPLACE_SCENARIOS: Dict[str, Dict] = {
     },
     "client_communication": {
         "label": "Client Communication",
-        "story": "WEC-US-10",
+        "story": "A client is upset, doubtful, or about to walk. Talk them down and rebuild trust in real time.",
         "input_mode": "audio",
         "roleplay": True,
         "prompts": [
@@ -337,7 +359,7 @@ WORKPLACE_SCENARIOS: Dict[str, Dict] = {
     },
     "meeting_communication": {
         "label": "Meeting Communication",
-        "story": "WEC-US-11",
+        "story": "Jump into a live meeting, push back on a bad idea, and get your point across without stepping on anyone.",
         "input_mode": "audio",
         "roleplay": True,
         "prompts": [
@@ -348,7 +370,7 @@ WORKPLACE_SCENARIOS: Dict[str, Dict] = {
     },
     "presentation_prep": {
         "label": "Presentation Preparation",
-        "story": "WEC-US-12",
+        "story": "Prepare and deliver a project or results update the way you would to real stakeholders.",
         "input_mode": "audio",
         "roleplay": False,
         "prompts": [
@@ -359,7 +381,7 @@ WORKPLACE_SCENARIOS: Dict[str, Dict] = {
     },
     "general_workplace": {
         "label": "Workplace English Practice",
-        "story": "WEC-US-08",
+        "story": "No script — pick your own workplace situation and practice however you communicate day to day.",
         "input_mode": "text",
         "roleplay": False,
         "prompts": [

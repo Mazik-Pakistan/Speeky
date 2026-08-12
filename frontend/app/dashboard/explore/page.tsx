@@ -32,7 +32,7 @@ function toExploreScenario(scenario: ScenarioListItem, categories: Category[]): 
     difficulty:
       scenario.goal_type === "negotiation" ? "Negotiation" : "Roleplay",
     showAiAvatar: true,
-    href: `/dashboard/scenarios/${scenario.key}`,
+    href: `/dashboard/scenarios/${encodeURIComponent(scenario.key)}`,
   };
 }
 
@@ -93,11 +93,12 @@ export default function ExplorePage() {
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="font-serif text-h1 font-semibold text-foreground">
+        <h1 className="text-balance font-serif text-h1 font-semibold text-foreground">
           Select Your Scenario
         </h1>
-        <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-          Choose a real-world situation to practice your English with Speeky.
+        <p className="mt-2 text-sm text-muted-foreground">
+          Every scenario drops you into a real situation — a job interview, a tough client
+          call, a night out — so you build the English you&apos;ll actually use.
         </p>
       </div>
 
@@ -125,7 +126,7 @@ export default function ExplorePage() {
               icon: MessagesSquare,
               title: "AI Conversation Practice",
               description:
-                "Open-ended conversation practice on any topic, with your AI coach.",
+                "Chat freely on any topic and get real-time feedback on your fluency, vocabulary, and pronunciation.",
               gated: true,
               showAiAvatar: true,
             },
@@ -229,6 +230,10 @@ export default function ExplorePage() {
         <h2 className="font-serif text-xl font-semibold text-foreground">
           Choose Your Mission
         </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Pick a scenario below and start speaking — each one is scored on fluency,
+          vocabulary, and how naturally you handle the moment.
+        </p>
       </div>
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">

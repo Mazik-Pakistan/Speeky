@@ -246,11 +246,13 @@ export default function AdminAnalyticsPage() {
         ) : null}
       </div>
 
-      {tab === "overview" ? <OverviewTab days={days} /> : null}
-      {tab === "funnel" ? <FunnelTab days={days} /> : null}
-      {tab === "usage" ? <FeatureUsageTab days={days} /> : null}
-      {tab === "cross-filter" ? <CrossFilterTab days={days} /> : null}
-      {tab === "revenue" && isSuperAdmin ? <RevenueTab days={days} /> : null}
+      <div key={tab} className="page-enter">
+        {tab === "overview" ? <OverviewTab days={days} /> : null}
+        {tab === "funnel" ? <FunnelTab days={days} /> : null}
+        {tab === "usage" ? <FeatureUsageTab days={days} /> : null}
+        {tab === "cross-filter" ? <CrossFilterTab days={days} /> : null}
+        {tab === "revenue" && isSuperAdmin ? <RevenueTab days={days} /> : null}
+      </div>
     </div>
   );
 }

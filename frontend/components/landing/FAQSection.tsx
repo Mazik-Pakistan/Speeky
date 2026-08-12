@@ -1,6 +1,7 @@
 import { SectionTitle } from "@/components/common/SectionTitle";
 import { Accordion } from "@/components/ui/accordion";
 import { FAQ_ITEMS } from "@/lib/mock-data";
+import { ScrollReveal } from "@/components/ui/scroll-reveal";
 
 export function FAQSection() {
   const items = FAQ_ITEMS.map((item) => ({
@@ -12,7 +13,7 @@ export function FAQSection() {
   return (
     <section id="faq" className="py-24">
       <div className="container">
-        <div className="relative overflow-hidden rounded-[2rem] border border-border bg-surface/80 px-5 py-12 shadow-[0_22px_70px_hsl(var(--foreground)/0.07)] backdrop-blur sm:px-8 lg:px-10">
+        <ScrollReveal className="relative overflow-hidden rounded-[2rem] border border-border bg-surface/80 px-5 py-12 shadow-[0_22px_70px_hsl(var(--foreground)/0.07)] backdrop-blur sm:px-8 lg:px-10">
           <div
             aria-hidden="true"
             className="absolute -right-12 top-10 h-44 w-44 rounded-full bg-primary/10"
@@ -24,7 +25,7 @@ export function FAQSection() {
               <Accordion items={items} />
             </div>
           </div>
-        </div>
+        </ScrollReveal>
       </div>
     </section>
   );

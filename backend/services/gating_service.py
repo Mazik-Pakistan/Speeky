@@ -153,7 +153,14 @@ def _assessment_prompt_message(prompt_count: int) -> str:
 
 async def should_show_assessment_prompt(user_id: str) -> bool:
     user = await db.user.find_unique(where={"id": user_id})
-    if not user or user.assessmentStatus != AssessmentStatus.UNASSESSED:
+    # Gate stays up through IN_PROGRESS too — started isn't finished. Only COMPLETED/
+    # PLATEAUED (get_access_level's FULL_ACCESS case) turns it off; previously it
+    # dropped the instant assessmentStatus left UNASSESSED, so starting the assessment
+    # and leaving mid-way silently unlocked wandering the rest of the dashboard.
+    if not user or user.assessmentStatus not in (
+        AssessmentStatus.UNASSESSED,
+        AssessmentStatus.IN_PROGRESS,
+    ):
         return False
 
     last_prompt = await db.promptlog.find_first(

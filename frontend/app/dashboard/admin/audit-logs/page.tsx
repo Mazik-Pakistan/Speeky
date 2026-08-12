@@ -27,6 +27,37 @@ import {
 } from "@/lib/analytics";
 import { ApiError } from "@/lib/api";
 
+/** Turns the raw scope JSON into one plain-English sentence — the shapes here match
+ *  exactly what analytics_service.py's _log_view/export_with_audit_fail_closed calls
+ *  actually write (days, feature, show_archived, filters{...}, export_format); anything
+ *  else falls back to a generic but still readable line instead of raw JSON. */
+function summarizeScope(entry: AuditLogEntry): string {
+  const { action_type, module, scope } = entry;
+  const days = typeof scope.days === "number" ? scope.days : null;
+  const period = days ? `the last ${days} day${days === 1 ? "" : "s"}` : null;
+
+  if (action_type === "EXPORT") {
+    const filters = (scope.filters ?? {}) as Record<string, unknown>;
+    const filterDays = typeof filters.days === "number" ? filters.days : days;
+    const format = typeof scope.export_format === "string" ? scope.export_format.toUpperCase() : "CSV";
+    return `Exported ${module} data as ${format}${filterDays ? ` covering the last ${filterDays} days` : ""}.`;
+  }
+
+  if (action_type === "VIEW_RESTRICTED") {
+    const details: string[] = [];
+    if (typeof scope.feature === "string") details.push(`feature: ${scope.feature.replace(/_/g, " ")}`);
+    if (scope.show_archived === true) details.push("including archived scenarios");
+    const extra = details.length ? ` (${details.join(", ")})` : "";
+    return `Viewed restricted ${module} analytics${period ? ` for ${period}` : ""}${extra}.`;
+  }
+
+  if (action_type === "FILTER") {
+    return `Changed filters on ${module}${period ? ` (viewing ${period})` : ""}.`;
+  }
+
+  return `${action_type.replace(/_/g, " ").toLowerCase()} on ${module}.`;
+}
+
 const ACTION_TYPE_OPTIONS = [
   { value: "", label: "All Action Types" },
   { value: "EXPORT", label: "Export (Data Export)" },
@@ -210,7 +241,7 @@ export default function AuditLogsPage() {
           description="No administrative actions match your current filter settings."
         />
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 page-enter">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>Showing {logsData.entries.length} of {logsData.total} recorded events</span>
             <span className="font-mono">Tamper Status: {logsData.tamper_detected ? "CORRUPTED" : "CLEAN"}</span>
@@ -292,6 +323,10 @@ export default function AuditLogsPage() {
           title={`Scope Details — ${selectedEntry.action_type} (${selectedEntry.module})`}
         >
           <div className="flex flex-col gap-4">
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-sm text-foreground">
+              {summarizeScope(selectedEntry)}
+            </div>
+
             <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
               <div>
                 <span className="text-muted-foreground">Entry ID:</span>{" "}
@@ -312,7 +347,9 @@ export default function AuditLogsPage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-foreground">Exact Scope JSON</label>
+              <label className="text-xs font-semibold text-muted-foreground">
+                Raw scope data (technical / for investigation)
+              </label>
               <pre className="max-h-60 overflow-y-auto rounded-xl bg-surface border border-border p-3 text-xs font-mono text-foreground">
                 {JSON.stringify(selectedEntry.scope, null, 2)}
               </pre>

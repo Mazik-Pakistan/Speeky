@@ -47,15 +47,34 @@ logging.getLogger("livekit").setLevel(logging.INFO)
 _db_connected = False
 _db_lock = asyncio.Lock()
 
+_SETUP_TIMEOUT_S = 15
+# pooled.db.prisma.io connection blips (P1001, engine cold-start) are common, so retry before giving up and apologizing to the caller.
+_DB_CONNECT_RETRIES = 2
+_DB_CONNECT_RETRY_DELAY_S = 1.5
+
 
 async def _ensure_db_connected() -> None:
     global _db_connected
     if _db_connected:
         return
     async with _db_lock:
-        if not _db_connected:
-            await db.connect()
-            _db_connected = True
+        if _db_connected:
+            return
+        for attempt in range(_DB_CONNECT_RETRIES + 1):
+            try:
+                await asyncio.wait_for(db.connect(), timeout=_SETUP_TIMEOUT_S)
+                _db_connected = True
+                return
+            except Exception:
+                if attempt == _DB_CONNECT_RETRIES:
+                    raise
+                logger.warning(
+                    "DB connect failed (attempt %d/%d), retrying",
+                    attempt + 1, _DB_CONNECT_RETRIES + 1,
+                )
+                with contextlib.suppress(Exception):
+                    await db.disconnect()
+                await asyncio.sleep(_DB_CONNECT_RETRY_DELAY_S)
 
 
 async def _reset_db_connection() -> None:
@@ -65,9 +84,6 @@ async def _reset_db_connection() -> None:
         _db_connected = False
         with contextlib.suppress(Exception):
             await db.disconnect()
-
-
-_SETUP_TIMEOUT_S = 15
 
 
 def _prewarm(proc: agents.JobProcess) -> None:
@@ -155,7 +171,7 @@ async def _run_idle_audience(ctx: agents.JobContext, session_id: str, user_id: s
     audio-only fallback.
     """
     try:
-        await asyncio.wait_for(_ensure_db_connected(), timeout=_SETUP_TIMEOUT_S)
+        await _ensure_db_connected()
         setup = await asyncio.wait_for(
             dispatch.build_idle_setup(session_id, user_id), timeout=_SETUP_TIMEOUT_S
         )
@@ -232,7 +248,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         return
 
     try:
-        await asyncio.wait_for(_ensure_db_connected(), timeout=_SETUP_TIMEOUT_S)
+        await _ensure_db_connected()
         setup = await asyncio.wait_for(
             dispatch.build_setup(feature, session_id, user_id), timeout=_SETUP_TIMEOUT_S
         )
@@ -341,4 +357,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
 
 if __name__ == "__main__":
-    agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=_prewarm))
+    agents.cli.run_app(
+        agents.WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            prewarm_fnc=_prewarm,
+        )
+    )

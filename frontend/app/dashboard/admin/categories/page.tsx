@@ -127,8 +127,14 @@ export default function AdminCategoriesPage() {
 
       {error ? <p className="text-sm text-danger">{error}</p> : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {(categories ?? []).map((category) => {
+      {categories === null ? (
+        <p className="text-sm text-muted-foreground">Loading categories…</p>
+      ) : (
+      <div
+        key="loaded"
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 page-enter"
+      >
+        {categories.map((category) => {
           const Icon = resolveIcon(category.icon);
           return (
             <div
@@ -179,10 +185,11 @@ export default function AdminCategoriesPage() {
             </div>
           );
         })}
-        {categories && categories.length === 0 ? (
+        {categories.length === 0 ? (
           <p className="text-sm text-muted-foreground">No categories yet.</p>
         ) : null}
       </div>
+      )}
 
       <Modal
         open={modalOpen}

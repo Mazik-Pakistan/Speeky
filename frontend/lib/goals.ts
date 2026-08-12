@@ -46,26 +46,39 @@ export const LEARNING_GOALS: LearningGoalOption[] = [
 
 export const GOAL_DASHBOARD_COPY: Record<
   LearningGoal,
-  { subtitle: string; preferredCategory?: "Business" | "Social" | "Travel" }
+  { fluencyScope: string; cta: string; preferredCategory?: "Business" | "Social" | "Travel" }
 > = {
   improve_english: {
-    subtitle: "You've reached 85% fluency overall. Ready for today's challenge?",
+    fluencyScope: "overall",
+    cta: "Ready for today's challenge?",
   },
   job_interviews: {
-    subtitle:
-      "You've reached 85% fluency in interview scenarios. Ready to practice?",
+    fluencyScope: "in interview scenarios",
+    cta: "Ready to sharpen your interview answers?",
     preferredCategory: "Business",
   },
   workplace_communication: {
-    subtitle:
-      "You've reached 85% fluency in workplace scenarios. Ready for today's meeting practice?",
+    fluencyScope: "in workplace scenarios",
+    cta: "Ready for today's meeting practice?",
     preferredCategory: "Business",
   },
   public_speaking: {
-    subtitle:
-      "You've reached 85% fluency in presentation scenarios. Ready to build confidence on stage?",
+    fluencyScope: "in presentation scenarios",
+    cta: "Ready to build confidence on stage?",
   },
 };
+
+/** Dashboard header line, driven by the user's real fluency score instead of a fixed number. */
+export function goalDashboardSubtitle(
+  goal: LearningGoal,
+  fluencyScore: number | null | undefined,
+): string {
+  const { fluencyScope, cta } = GOAL_DASHBOARD_COPY[goal];
+  if (fluencyScore == null) {
+    return `Practice to build your fluency ${fluencyScope}. ${cta}`;
+  }
+  return `You've reached ${Math.round(fluencyScore)}% fluency ${fluencyScope}. ${cta}`;
+}
 
 // E-03 (Goal Selection Abandonment): the column defaults to "improve_english",
 // so an abandoned goal step still leaves a usable profile rather than an unset one.

@@ -451,7 +451,8 @@ export default function PronunciationCoachPage() {
             Pronunciation Coach
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Read the sentence aloud, then record yourself saying it.
+            Hear it, say it, get instant feedback on exactly which sounds to fix — the
+            fastest way to sharpen your pronunciation.
           </p>
         </div>
         <div className="rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm">

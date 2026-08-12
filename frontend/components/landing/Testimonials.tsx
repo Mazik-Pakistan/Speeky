@@ -1,6 +1,7 @@
 import { SectionTitle } from "@/components/common/SectionTitle";
 import { TestimonialCard } from "@/components/landing/TestimonialCard";
 import { TESTIMONIALS } from "@/lib/mock-data";
+import { ScrollReveal } from "@/components/ui/scroll-reveal";
 
 export function Testimonials() {
   return (
@@ -22,8 +23,10 @@ export function Testimonials() {
             />
 
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              {TESTIMONIALS.map((testimonial) => (
-                <TestimonialCard key={testimonial.id} testimonial={testimonial} />
+              {TESTIMONIALS.map((testimonial, index) => (
+                <ScrollReveal key={testimonial.id} delay={index * 100}>
+                  <TestimonialCard testimonial={testimonial} />
+                </ScrollReveal>
               ))}
             </div>
           </div>

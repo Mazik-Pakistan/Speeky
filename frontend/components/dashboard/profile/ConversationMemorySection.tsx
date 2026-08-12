@@ -20,7 +20,10 @@ export function ConversationMemorySection() {
 
   React.useEffect(() => {
     listMemoryFacts()
-      .then((data) => setFacts(data.facts))
+      .then((data) => {
+        setFacts(data.facts);
+        setOptedOut(data.opted_out);
+      })
       .catch(() => {
         setFacts([]);
         toast.error("Couldn't load conversation memory.");

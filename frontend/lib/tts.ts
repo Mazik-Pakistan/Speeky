@@ -24,13 +24,18 @@ export function stopCurrent() {
  * native speech synthesis if the server TTS is unavailable (see backend
  * lib/tts_client.py). Stops any audio already playing first, so repeated
  * clicks or a burst of new messages never overlap. Resolves once playback
- * ends (or fails, or gets superseded by a newer call). */
-export async function playText(text: string): Promise<void> {
+ * ends (or fails, or gets superseded by a newer call).
+ *
+ * `lengthScale` mirrors Piper's own knob: 1.0 normal speed, >1.0 slower — for a
+ * second, easier-to-catch replay of the same line (e.g. the baseline assessment's
+ * pronunciation questions). The browser fallback has no length_scale concept, so it
+ * gets the inverse as `rate` (SpeechSynthesisUtterance: lower rate = slower). */
+export async function playText(text: string, lengthScale = 1.0): Promise<void> {
   stopCurrent();
   const myGeneration = generation;
 
   try {
-    const blob = await synthesizeSpeech(text);
+    const blob = await synthesizeSpeech(text, lengthScale);
     if (myGeneration !== generation) return; // superseded while fetching
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
@@ -47,6 +52,7 @@ export async function playText(text: string): Promise<void> {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     await new Promise<void>((resolve) => {
       const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1 / lengthScale;
       utterance.onend = () => resolve();
       utterance.onerror = () => resolve();
       window.speechSynthesis.speak(utterance);

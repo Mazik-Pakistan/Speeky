@@ -47,6 +47,8 @@ export interface EndConversationResult {
   vocabulary_score: number;
   pronunciation_score: number | null;
   level: string;
+  /** Short coaching sentence based on this session's actual scores — not just the raw numbers. */
+  feedback: string;
   new_memory_facts: { category: string; value: string }[];
 }
 
@@ -128,7 +130,7 @@ export function getConversationTranscript(sessionId: string) {
 }
 
 export function listMemoryFacts() {
-  return api<{ facts: MemoryFact[] }>("/conversation/memory");
+  return api<{ facts: MemoryFact[]; opted_out: boolean }>("/conversation/memory");
 }
 
 export function deleteMemoryFact(factId: string) {

@@ -69,9 +69,14 @@ class MemoryProfile(BaseModel):
     recurring_strengths: List[str]
     recent_topics: List[str]
     last_updated: datetime
+    opted_out: bool = False
 
 
 class PersonalizedOpeningResponse(BaseModel):
     user_id: str
     has_history: bool
     opening_message: str
+
+
+class MemoryOptOutSchema(BaseModel):
+    enabled: bool

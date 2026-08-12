@@ -27,6 +27,7 @@ const LiveCallModal = dynamic(
   { ssr: false },
 );
 import { MilestoneCelebrationModal } from "@/components/dashboard/MilestoneCelebrationModal";
+import { ContextMemoryNotice } from "@/components/dashboard/ContextMemoryNotice";
 import { ApiError } from "@/lib/api";
 import {
   endScenarioSession,
@@ -69,7 +70,7 @@ type Step =
     }
   | { name: "results"; result: ScenarioEndResult };
 
-export default function ScenarioSessionPage() {
+function ScenarioSessionPageInner() {
   const params = useParams<{ key: string }>();
   const router = useRouter();
   const [step, setStep] = React.useState<Step>({ name: "loading" });
@@ -366,6 +367,10 @@ export default function ScenarioSessionPage() {
             Roleplay persona: {detail.persona}
           </p>
         </div>
+        <ContextMemoryNotice
+          storageKey="speeky:scenario-memory-notice-seen"
+          message="Speeky carries patterns from your past scenario and interview sessions into a welcome-back greeting like the one below."
+        />
         {greeting ? (
           <div className="flex items-start gap-2.5 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
             <Sparkles
@@ -736,5 +741,24 @@ export default function ScenarioSessionPage() {
         Back to Explore
       </Button>
     </div>
+  );
+}
+
+// useSearchParams() in ScenarioSessionPageInner needs a Suspense boundary,
+// otherwise the whole route deopts to client-only rendering with no fallback.
+export default function ScenarioSessionPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <span
+            className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent text-muted-foreground"
+            aria-hidden="true"
+          />
+        </div>
+      }
+    >
+      <ScenarioSessionPageInner />
+    </React.Suspense>
   );
 }

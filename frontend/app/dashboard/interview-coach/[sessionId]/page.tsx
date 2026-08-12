@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { AiCoachAvatar } from "@/components/common/AiCoachAvatar";
 import { UserChatAvatar } from "@/components/common/UserChatAvatar";
 import { useVoiceReadinessGate } from "@/components/common/VoiceReadinessGate";
+import { useSelfCamera } from "@/lib/useSelfCamera";
 
 // livekit-client is ~150KB — load it only once a user actually opens a call,
 // not on every visit to this page.
@@ -115,6 +116,11 @@ export default function InterviewCoachSessionPage() {
   const { gate, runWithVoiceReadiness } = useVoiceReadinessGate({
     featureName: "Interview Coach",
   });
+  // Plain self-view for Live Call — same pattern as Public Speaking's Q&A
+  // (useSelfCamera, not the scored useVideoAnalysis pipeline): nothing about eye
+  // contact/posture is measured here, it's just presence, so being seen while
+  // answering feels like a real interview.
+  const { videoRef: selfVideoRef, error: selfCameraError } = useSelfCamera(liveCallOpen);
   React.useEffect(() => {
     if (voiceError) setError(voiceError);
   }, [voiceError]);
@@ -344,6 +350,22 @@ export default function InterviewCoachSessionPage() {
           onClose={() => setLiveCallOpen(false)}
           onEndSession={finishSession}
           onCallEnded={() => void refreshFromServer()}
+          title="Live Interview"
+          answerTimerSeconds={60}
+          selfView={
+            selfCameraError ? (
+              <div className="flex h-full w-full items-center justify-center px-4 text-center text-xs text-white/80">
+                {selfCameraError}
+              </div>
+            ) : (
+              <video
+                ref={selfVideoRef}
+                muted
+                playsInline
+                className="h-full w-full -scale-x-100 object-cover"
+              />
+            )
+          }
         />
       ) : null}
       <MilestoneCelebrationModal

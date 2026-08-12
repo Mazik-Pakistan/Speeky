@@ -60,8 +60,23 @@ export function ProfileSettingsModal({ open, onClose }: ProfileSettingsModalProp
   const { user } = useAuth();
   const [mounted, setMounted] = React.useState(false);
   const [activeSection, setActiveSection] = React.useState("public-profile");
+  // Mirrors components/ui/modal.tsx's enter/exit pattern: stay mounted 200ms
+  // after close so the panel/backdrop can fade out instead of snapping shut.
+  const [rendered, setRendered] = React.useState(open);
+  const [entered, setEntered] = React.useState(false);
 
   React.useEffect(() => setMounted(true), []);
+
+  React.useEffect(() => {
+    if (open) {
+      setRendered(true);
+      const raf = requestAnimationFrame(() => setEntered(true));
+      return () => cancelAnimationFrame(raf);
+    }
+    setEntered(false);
+    const timeout = setTimeout(() => setRendered(false), 200);
+    return () => clearTimeout(timeout);
+  }, [open]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -81,7 +96,7 @@ export function ProfileSettingsModal({ open, onClose }: ProfileSettingsModalProp
     };
   }, [open, onClose]);
 
-  if (!mounted || !open || !user) return null;
+  if (!mounted || !rendered || !user) return null;
 
   const sections: ProfileSettingsSection[] = [
     {
@@ -176,7 +191,10 @@ export function ProfileSettingsModal({ open, onClose }: ProfileSettingsModalProp
       <button
         type="button"
         aria-label="Close profile settings"
-        className="absolute inset-0 bg-primary/18 backdrop-blur-md dark:bg-background/70"
+        className={cn(
+          "absolute inset-0 bg-primary/18 backdrop-blur-md transition-opacity duration-200 dark:bg-background/70",
+          entered ? "opacity-100" : "opacity-0",
+        )}
         onClick={onClose}
       />
 
@@ -184,7 +202,12 @@ export function ProfileSettingsModal({ open, onClose }: ProfileSettingsModalProp
         role="dialog"
         aria-modal="true"
         aria-labelledby="profile-settings-title"
-        className="relative grid h-[86dvh] max-h-[790px] w-full max-w-[86rem] animate-fade-up overflow-hidden rounded-[2rem] border border-border bg-surface-elevated shadow-[0_28px_90px_hsl(var(--foreground)/0.20)] md:grid-cols-[19rem_1fr]"
+        className={cn(
+          "relative grid h-[86dvh] max-h-[790px] w-full max-w-[86rem] overflow-hidden rounded-[2rem] border border-border bg-surface-elevated shadow-[0_28px_90px_hsl(var(--foreground)/0.20)] transition-all duration-200 md:grid-cols-[19rem_1fr]",
+          entered
+            ? "translate-y-0 scale-100 opacity-100"
+            : "translate-y-2 scale-95 opacity-0",
+        )}
       >
         <aside className="flex min-h-0 flex-col border-b border-border bg-surface/85 p-4 md:border-b-0 md:border-r md:p-5">
           <div className="flex items-center gap-3 rounded-2xl border border-border bg-surface-elevated p-3 shadow-sm">

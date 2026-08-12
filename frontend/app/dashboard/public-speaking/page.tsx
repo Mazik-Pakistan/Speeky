@@ -10,9 +10,14 @@ import {
   Sparkles,
   User,
   Video,
+  X,
 } from "lucide-react";
+import { toast } from "react-toastify";
+import { Button } from "@/components/ui/button";
 import { useAssessmentAccess } from "@/contexts/AssessmentContext";
 import { useActiveSessions } from "@/contexts/ActiveSessionsContext";
+import { cancelResumablePublicSpeaking } from "@/lib/activeSessions";
+import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const SPEECH_TYPES = [
@@ -55,8 +60,27 @@ const SPEECH_TYPES = [
 
 export default function PublicSpeakingPage() {
   const { access } = useAssessmentAccess();
-  const { publicSpeaking } = useActiveSessions();
+  const { publicSpeaking, refresh } = useActiveSessions();
   const isUnlocked = access?.access_level === "full_access";
+  const [dismissed, setDismissed] = React.useState(false);
+  const [dismissing, setDismissing] = React.useState(false);
+
+  React.useEffect(() => {
+    setDismissed(false);
+  }, [publicSpeaking?.session_id]);
+
+  async function handleDismiss() {
+    setDismissing(true);
+    try {
+      await cancelResumablePublicSpeaking();
+      setDismissed(true);
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Couldn't dismiss this session.");
+    } finally {
+      setDismissing(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -70,11 +94,30 @@ export default function PublicSpeakingPage() {
         </p>
       </div>
 
-      {publicSpeaking?.found ? (
-        <div className="flex items-start gap-2.5 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-foreground">
-          <History className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-          You have an unfinished {publicSpeaking.label ?? "speech"} session — starting a new
-          one below will end it.
+      {publicSpeaking?.found && !dismissed ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-2.5 text-sm text-foreground">
+            <History className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            You have an unfinished {publicSpeaking.label ?? "speech"} session — starting a new
+            one below will end it.
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              size="sm"
+              href={`/dashboard/public-speaking/${publicSpeaking.speech_type}?resume=${publicSpeaking.session_id}`}
+            >
+              Resume
+            </Button>
+            <button
+              type="button"
+              onClick={handleDismiss}
+              disabled={dismissing}
+              aria-label="Dismiss — ends the unfinished session"
+              className="rounded-lg p-2 text-muted-foreground hover:bg-surface hover:text-foreground disabled:opacity-50"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       ) : null}
 

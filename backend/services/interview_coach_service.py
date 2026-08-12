@@ -547,10 +547,18 @@ async def voice_socket(websocket: WebSocket, session_id: str):
 
 
 async def _generate_next_question(session: dict, speaker: str, instruction: str) -> str:
+    # Every follow-up in every mode (text, voice, and Live Call — dispatch.py's
+    # turn_handler routes into _submit_answer, which calls here) is generated through
+    # this one function, so the "be a real interviewer, not a script" instruction only
+    # needs to live here once rather than in each of the ~8 call sites' own `instruction`.
     system_prompt = (
         f"You are conducting {_persona_description(session)}. You are '{speaker}'. "
         "Read the conversation so far and ask ONE natural follow-up question that responds "
         f"specifically to the candidate's last answer. {instruction} "
+        "Interview like a real, engaged interviewer, not a script: if the answer was vague, "
+        "generic, or sounded rehearsed, push back and ask for a specific example, number, or "
+        "outcome before moving on — don't just nod and advance to a safe next topic. A strong, "
+        "detailed answer earns a harder follow-up next, not a softer one. "
         "Keep it to 1-2 sentences, no preamble, just the question."
     )
     return await ai_client.generate(system_prompt=system_prompt, user_message=_transcript_text(session), max_tokens=600)

@@ -103,9 +103,7 @@ export default function CoachingPage() {
                   {scenario.label}
                 </h3>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  {scenario.roleplay
-                    ? "Interactive roleplay — respond turn by turn."
-                    : "Write your response and get graded feedback."}
+                  {scenario.story}
                 </p>
               </div>
               <div className="relative z-10 mt-6 text-sm font-medium text-primary">

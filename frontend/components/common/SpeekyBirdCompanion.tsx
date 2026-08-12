@@ -1,48 +1,62 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import * as React from "react";
+import { useEffect, useRef, useState } from "react";
+
+const BIRD_OFFSET_X = 14;
+const BIRD_OFFSET_Y = 24;
 
 export function SpeekyBirdCompanion() {
   const pathname = usePathname();
-  const [position, setPosition] = React.useState({ x: 28, y: 32 });
-  const [target, setTarget] = React.useState({ x: 28, y: 32 });
+  const [position, setPosition] = useState({ x: 28, y: 32 });
+  const targetRef = useRef({ x: 28, y: 32 }); // Used ref (mouse-position) to reduce re-renders.
+  const [loaded, setLoaded] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
-      const nextX = Math.min(92, Math.max(8, (event.clientX / window.innerWidth) * 100));
-      const nextY = Math.min(88, Math.max(12, (event.clientY / window.innerHeight) * 100));
-      setTarget({ x: nextX, y: nextY });
+      targetRef.current = {
+        x: Math.min(92, Math.max(8, (event.clientX / window.innerWidth) * 100)),
+        y: Math.min(
+          88,
+          Math.max(12, (event.clientY / window.innerHeight) * 100),
+        ),
+      };
     }
-
+    
     window.addEventListener("pointermove", handlePointerMove, { passive: true });
-    return () => window.removeEventListener("pointermove", handlePointerMove);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+    };
   }, []);
 
-  React.useEffect(() => {
-    let frame = 0;
+  useEffect(() => {
+    let frame: number = 0;
 
     function tick() {
+      const target = targetRef.current;
+
       setPosition((current) => ({
-        x: current.x + (target.x - current.x) * 0.045,
-        y: current.y + (target.y - current.y) * 0.045,
+        x: current.x + (target.x - current.x) * 0.065,
+        y: current.y + (target.y - current.y) * 0.065,
       }));
-      frame = window.requestAnimationFrame(tick);
+
+      frame = requestAnimationFrame(tick);
     }
 
-    frame = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(frame);
-  }, [target]);
+    tick();
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   if (pathname === "/") return null;
 
   return (
     <div
-      className="pointer-events-none fixed z-[60] hidden h-12 w-12 -translate-x-1/2 -translate-y-1/2 select-none opacity-80 transition-opacity duration-300 motion-reduce:hidden lg:block"
+      className={cn("pointer-events-none fixed z-[60] hidden h-12 w-12 -translate-x-1/2 -translate-y-1/2 select-none lg:block transition-opacity", loaded ? "opacity-80" : "opacity-0")}
       style={{
-        left: `${position.x}%`,
-        top: `${position.y}%`,
+        left: `calc(${position.x}% + ${BIRD_OFFSET_X}px)`,
+        top: `calc(${position.y}% + ${BIRD_OFFSET_Y}px)`,
       }}
       aria-hidden="true"
     >
@@ -52,8 +66,8 @@ export function SpeekyBirdCompanion() {
           alt=""
           width={32}
           height={32}
-          className="h-8 w-8 object-contain"
-          priority={false}
+          className="object-contain"
+          onLoad = {() => setTimeout(() => setLoaded(true), 200)}
         />
       </div>
     </div>

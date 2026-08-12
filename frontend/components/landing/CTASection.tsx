@@ -1,11 +1,12 @@
 import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ScrollReveal } from "@/components/ui/scroll-reveal";
 
 export function CTASection() {
   return (
     <section id="cta" className="py-24">
       <div className="container">
-        <div className="relative overflow-hidden rounded-[2rem] border border-border bg-surface/85 px-8 py-16 text-center shadow-[0_22px_70px_hsl(var(--foreground)/0.08)] backdrop-blur sm:px-16">
+        <ScrollReveal className="relative overflow-hidden rounded-[2rem] border border-border bg-surface/85 px-8 py-16 text-center shadow-[0_22px_70px_hsl(var(--foreground)/0.08)] backdrop-blur sm:px-16">
           <div
             aria-hidden="true"
             className="absolute -left-10 bottom-0 h-36 w-36 rounded-full bg-danger/55 dark:bg-danger/25"
@@ -41,7 +42,7 @@ export function CTASection() {
               </Button>
             </div>
           </div>
-        </div>
+        </ScrollReveal>
       </div>
     </section>
   );

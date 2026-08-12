@@ -141,7 +141,8 @@ export default function InterviewCoachSetupPage() {
           Interview Coach
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Practice behavioral, panel, and case-study interviews with an AI interviewer.
+          Walk into your next interview ready. Practice real behavioral, panel, and
+          case-study formats and see exactly what to improve after every answer.
         </p>
       </div>
 

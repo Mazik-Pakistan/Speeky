@@ -112,32 +112,32 @@
     {
       "question_id": "pron_1",
       "category": "pronunciation",
-      "text": "Please write out this sentence carefully: 'The quick brown fox jumps over the lazy dog.'"
+      "text": "The quick brown fox jumps over the lazy dog."
     },
     {
       "question_id": "pron_2",
       "category": "pronunciation",
-      "text": "Write these words: 'beautiful', 'comfortable', 'extraordinary', 'unfortunately'."
+      "text": "Beautiful, comfortable, extraordinary, unfortunately."
     },
     {
       "question_id": "pron_3",
       "category": "pronunciation",
-      "text": "Try writing this: 'She sells seashells by the seashore.'"
+      "text": "She sells seashells by the seashore."
     },
     {
       "question_id": "pron_4",
       "category": "pronunciation",
-      "text": "Read aloud: 'How much wood would a woodchuck chuck if a woodchuck could chuck wood?'"
+      "text": "How much wood would a woodchuck chuck if a woodchuck could chuck wood?"
     },
     {
       "question_id": "pron_5",
       "category": "pronunciation",
-      "text": "For practice, try writing this: 'Peter Piper picked a peck of pickled peppers.'"
+      "text": "Peter Piper picked a peck of pickled peppers."
     },
     {
       "question_id": "pron_6",
       "category": "pronunciation",
-      "text": "Write with focus: 'Practice makes perfect, but nobody is perfect.'"
+      "text": "Practice makes perfect, but nobody is perfect."
     }
   ]
 }

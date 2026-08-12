@@ -434,8 +434,14 @@ export default function AdminScenariosPage() {
         </p>
       ) : null}
 
+      {scenarios === null ? (
+        <p className="text-sm text-muted-foreground">Loading scenarios…</p>
+      ) : (
       <div className="overflow-x-auto rounded-2xl border border-border bg-surface-elevated">
-        <table className="w-full text-left text-sm">
+        <table
+          key="loaded"
+          className="w-full text-left text-sm page-enter"
+        >
           <thead className="border-b border-border bg-surface text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-4 py-3">Title</th>
@@ -519,7 +525,7 @@ export default function AdminScenariosPage() {
                 </td>
               </tr>
             ))}
-            {scenarios && scenarios.length === 0 ? (
+            {scenarios.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                   No custom scenarios yet.
@@ -529,6 +535,7 @@ export default function AdminScenariosPage() {
           </tbody>
         </table>
       </div>
+      )}
 
       <Modal
         open={modalOpen}

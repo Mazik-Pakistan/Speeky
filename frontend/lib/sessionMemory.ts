@@ -33,6 +33,7 @@ export interface MemoryProfile {
   recurring_strengths: string[];
   recent_topics: string[];
   last_updated: string;
+  opted_out: boolean;
 }
 
 export interface PersonalizedOpening {
@@ -83,4 +84,14 @@ export function getMemoryProfile() {
 
 export function getPersonalizedOpening() {
   return api<PersonalizedOpening>("/session-memory/profile/personalized-opening");
+}
+
+/** Opting out purges recorded session history server-side immediately — mirrors
+ *  conversation.ts's setMemoryOptOut, separate toggle/system (Scenarios & Interview
+ *  Coach's "welcome back" greeting, not AI Conversation's remembered facts). */
+export function setSessionMemoryOptOut(enabled: boolean) {
+  return api<{ opted_out: boolean }>("/session-memory/profile/opt-out", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
 }

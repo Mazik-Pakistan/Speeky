@@ -187,17 +187,32 @@ class _AgentAnalysis:
         self.rejection = None
 
 
+async def _supersede_open_sessions(user_id: str) -> int:
+    """Marks any other open Public Speaking session abandoned — mirrors
+    pronunciation_coach_service._start_session's guard. Shared by start_session (a fresh
+    start implicitly supersedes) and cancel_resumable_session (supersede without starting
+    anything, for the resume banner's dismiss action)."""
+    result = await db.publicspeakingsession.update_many(
+        where={"userId": user_id, "status": {"in": ["in_progress", "qa_phase"]}},
+        data={"status": "abandoned"},
+    )
+    return result
+
+
+async def cancel_resumable_session(user_id: str) -> Dict:
+    """Dismiss action for the resume banner — ends the unfinished session without
+    starting a new one, same effect a fresh start already has (mirrors
+    active_session_routes.py's Explore dismiss)."""
+    count = await _supersede_open_sessions(user_id)
+    return {"dismissed": count > 0}
+
+
 async def start_session(
     user_id: str,
     request: StartPublicSpeakingSchema,
 ) -> Dict:
     """Start a new public speaking session"""
-    # A fresh start supersedes any other open Public Speaking session this user
-    # has running — mirrors pronunciation_coach_service._start_session's guard.
-    await db.publicspeakingsession.update_many(
-        where={"userId": user_id, "status": {"in": ["in_progress", "qa_phase"]}},
-        data={"status": "abandoned"},
-    )
+    await _supersede_open_sessions(user_id)
 
     session_id = str(uuid.uuid4())
 

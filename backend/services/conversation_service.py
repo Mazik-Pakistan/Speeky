@@ -40,6 +40,7 @@ from fastapi.responses import JSONResponse, Response
 
 from lib import (
     ai_client,
+    content_safety,
     explore_sessions,
     grammar_checker,
     kv_store,
@@ -54,6 +55,7 @@ from lib import (
 from lib.session_scorer import AudioFeatures
 from lib.code_switch.code_switch_text import TextCodeSwitchDetector
 from services.code_switch_service import log_detected_word
+from services.coaching_service import _AGGRESSIVE, _find_phrases
 from middlewares.auth_middleware import require_auth, ws_require_auth
 from middlewares.error_handler import AuthError
 from prisma.enums import LearningLevel
@@ -73,6 +75,21 @@ RATE_LIMIT_WINDOW_SECONDS = 10
 RATE_LIMIT_MAX_MESSAGES = 15  # E-01: 15+ messages within 10s
 GIBBERISH_STRIKE_LIMIT = 3  # E-02: clarify a limited number of times, then end
 LEVEL_JUDGE_WINDOW = 3  # E-04: rolling average of last 3 turns, not per-turn
+MAX_CUSTOM_TITLE_WORDS = 8  # display title cap for a long custom topic
+INJECTION_STREAK_LIMIT = 2   # 1 warning, then the 2nd attempt ends the session
+AGGRESSION_STREAK_LIMIT = 2  # mirrors scenario_service's same threshold
+
+# Kept local rather than importing scenario_service's underscore-private lists — small
+# heuristics are deliberately duplicated per-service in this file already, see
+# _looks_like_gibberish's own comment ("mirroring assessment_service's integrity checker").
+_EMERGENCY_PHRASES = [
+    "heart attack", "can't breathe", "cannot breathe", "i'm dying", "im dying",
+    "chest pain", "call an ambulance", "suicidal", "kill myself",
+]
+_PROFANITY = [
+    "fuck", "fucking", "shit", "bullshit", "bitch", "asshole", "bastard", "damn you",
+    "screw you", "piss off", "shut the hell up", "go to hell", "moron", "prick", "scumbag", "ass",
+]
 
 # BAS-US LearningLevel (6 tiers) -> prompts.py's 3-tier conversation calibration.
 _LEVEL_MAP = {
@@ -105,7 +122,11 @@ async def validate_topic(topic: str) -> Dict:
         # Offline: silently route obvious preset matches, otherwise accept as-is.
         lowered = topic.strip().lower()
         for key, label in prompts.TOPICS.items():
-            if lowered == key or lowered == label.lower() or lowered in label.lower():
+            # Exact key/label match only. A substring check here used to match any short
+            # custom topic that happened to be a fragment of a preset's label — e.g.
+            # "hobbies" or "life" both matched "Daily Life & Hobbies" and silently
+            # discarded the user's actual custom topic in favor of that preset.
+            if lowered == key or lowered == label.lower():
                 return {"verdict": "safe", "preset_match": key, "reason": "Matches an existing preset."}
         return {"verdict": "safe", "preset_match": None, "reason": "Offline mode — accepted without classification."}
 
@@ -124,6 +145,30 @@ async def validate_topic(topic: str) -> Dict:
     if verdict not in ("safe", "unsafe", "vague"):
         verdict = "safe"
     return {"verdict": verdict, "preset_match": preset_match, "reason": reason}
+
+
+async def _summarize_topic_title(topic: str) -> str:
+    """Short display title for a long custom topic — called only after validate_topic
+    has already cleared it (see _start_session), never before. LLM compression when
+    configured, a plain word-cap truncation otherwise — same degrade-honestly convention
+    validate_topic's own offline branch uses."""
+    words = topic.split()
+    if len(words) <= MAX_CUSTOM_TITLE_WORDS:
+        return topic
+    fallback = " ".join(words[:MAX_CUSTOM_TITLE_WORDS]) + "…"
+    if not llm_client.is_configured():
+        return fallback
+    try:
+        raw = await ai_client.generate(
+            system_prompt=prompts.build_topic_title_prompt(topic), user_message="", max_tokens=20,
+        )
+    except Exception:
+        return fallback
+    title = raw.strip().strip('"')
+    if not title:
+        return fallback
+    title_words = title.split()
+    return " ".join(title_words[:MAX_CUSTOM_TITLE_WORDS]) if len(title_words) > MAX_CUSTOM_TITLE_WORDS else title
 
 
 # ── AIC-US-03: proficiency-level resolution ────────────────────────────────────
@@ -195,6 +240,46 @@ def _looks_like_gibberish(text: str) -> bool:
     return False
 
 
+# ── AIC-US-08: deterministic pre-LLM abuse/exploit classification ──────────────
+def _is_medical_emergency(text: str) -> bool:
+    lowered = f" {text.lower()} "
+    return any(p in lowered for p in _EMERGENCY_PHRASES)
+
+
+def _classify_turn(text: str) -> str:
+    """Deterministic, pre-LLM. A soft system-prompt rule alone doesn't reliably resist
+    prompt-injection or react to abuse — this runs before the LLM ever sees the message
+    and drives a guaranteed reaction, mirroring scenario_service._classify_turn."""
+    if _is_medical_emergency(text):
+        return "emergency"
+    if content_safety.scan(text):
+        return "injection"
+    lowered = f" {text.lower()} "
+    if _find_phrases(lowered, _AGGRESSIVE) or _find_phrases(lowered, _PROFANITY):
+        return "aggressive"
+    return "ok"
+
+
+_EMERGENCY_REPLY = (
+    "I need to pause this practice session — what you're describing sounds like it could "
+    "be a real emergency. Please contact real emergency services, a doctor, or a crisis "
+    "helpline right away. This session has been paused for your safety."
+)
+_INJECTION_WARNING_REPLY = (
+    "I'm not able to change how I work or share internal instructions — let's get back to "
+    "practicing English. What would you like to talk about?"
+)
+_INJECTION_AUTO_CLOSE_REPLY = (
+    "I've already explained I can't do that, so I'm ending this practice session here. "
+    "Your progress up to this point has been saved."
+)
+_AGGRESSION_WARNING_REPLY = "Let's keep the conversation respectful and professional, please."
+_AGGRESSION_AUTO_CLOSE_REPLY = (
+    "I did ask you to keep this respectful, and that hasn't happened, so I'm ending this "
+    "practice session here. Your progress up to this point has been saved."
+)
+
+
 # ── AIC-US-06: cross-session personalization memory ────────────────────────────
 async def _get_memory(user_id: str) -> Dict:
     existing = await kv_store.store.get(MEMORY_NS, user_id)
@@ -241,8 +326,34 @@ async def _extract_and_store_facts(user_id: str, transcript_texts: List[str]) ->
     return new_facts
 
 
+async def _topic_recap_note(user_id: str, topic_key: str) -> str:
+    """Each preset topic has its own context thread; every custom-topic session shares
+    one (topic_key is always "custom" there regardless of the actual subject — see
+    _start_session). Hands back the last exchange of the most recent *completed* session
+    in this same bucket so the new greeting can follow up on it instead of starting cold."""
+    sessions = await kv_store.store.list_values(NAMESPACE)
+    candidates = [
+        s for s in sessions
+        if s["user_id"] == user_id and s["topic_key"] == topic_key
+        and s["status"] == "completed" and s["turns"]
+    ]
+    if not candidates:
+        return ""
+    last = max(candidates, key=lambda s: s["completed_at"])
+    recent = [t for t in last["turns"][-4:] if t["content"]]
+    if not recent:
+        return ""
+    lines = [f"{'You' if t['role'] == 'assistant' else 'They'} said: {t['content']}" for t in recent]
+    return (
+        "The user has an earlier finished conversation in this same topic thread. "
+        "Here's how it left off:\n" + "\n".join(lines) + "\nOpen this new session as a "
+        "natural continuation of that — reference something specific from it or ask how "
+        "it went — instead of a generic greeting. Don't repeat your previous message."
+    )
+
+
 def _memory_callback_note(memory: Dict) -> str:
-    if not memory["facts"]:
+    if memory["opted_out"] or not memory["facts"]:
         return ""
     top = memory["facts"][-2:]  # "no more than once or twice per session"
     bits = [f"{f['category']}: {f['value']}" for f in top]
@@ -271,9 +382,19 @@ async def _get_session(session_id: str, user_id: str) -> dict:
     return session
 
 
+def _topic_full_text(session: dict) -> str:
+    """Full topic content — never truncated. Used where real semantic signal matters
+    (relevance grading, the system prompt). See _topic_label for the short display title."""
+    return session["custom_topic"] or prompts.TOPICS.get(session["topic_key"], session["topic_key"])
+
+
 def _topic_label(session: dict) -> str:
+    """Short display title shown in the UI (page heading, session list, end-of-session
+    feedback) — the compressed custom_topic_title for custom sessions, computed once in
+    _start_session, or the preset label. Falls back to the full text if a session
+    predates this field."""
     if session["custom_topic"]:
-        return session["custom_topic"]
+        return session.get("custom_topic_title") or session["custom_topic"]
     return prompts.TOPICS.get(session["topic_key"], session["topic_key"])
 
 
@@ -304,12 +425,18 @@ async def _start_session(user_id: str, req: StartConversationSchema) -> Dict:
         validation = await validate_topic(req.custom_topic)
         if validation["verdict"] == "unsafe":  # E-01
             raise InvalidSubmissionError("Please choose a different topic.")
-        if validation["preset_match"]:  # E-03: silently route into the matching preset
-            topic_key, custom_topic = validation["preset_match"], None
-        else:
-            topic_key, custom_topic = "custom", req.custom_topic
+        # A user who explicitly chose Custom Topic keeps their own topic, always — both
+        # the offline substring check and the online LLM's "essentially the same"
+        # judgment repeatedly misclassified merely-related topics (e.g. "Sibling
+        # Communication" -> daily_life, then -> education) and silently discarded what
+        # was typed. validate_topic() still gates on unsafe content; it no longer
+        # decides the topic.
+        topic_key, custom_topic = "custom", req.custom_topic
     elif req.topic_key not in prompts.TOPICS:
         raise InvalidSubmissionError(f"Unknown topic_key. Valid: {list(prompts.TOPICS)}")
+
+    # Only ever runs on text that already passed the unsafe-verdict gate above.
+    custom_topic_title = await _summarize_topic_title(custom_topic) if custom_topic else None
 
     # A fresh start supersedes any other open Explore-group session this user has
     # running elsewhere — see lib/explore_sessions.py.
@@ -321,7 +448,7 @@ async def _start_session(user_id: str, req: StartConversationSchema) -> Dict:
     now = _now()
     session = {
         "session_id": session_id, "user_id": user_id,
-        "topic_key": topic_key, "custom_topic": custom_topic,
+        "topic_key": topic_key, "custom_topic": custom_topic, "custom_topic_title": custom_topic_title,
         "level": level, "level_source": level_source, "level_locked": False,
         "recent_user_texts": [],
         "show_corrections": req.show_corrections,
@@ -333,7 +460,13 @@ async def _start_session(user_id: str, req: StartConversationSchema) -> Dict:
 
     memory = await _get_memory(user_id)
     memory_note = _memory_callback_note(memory)
-    system_prompt = _build_system_prompt(session, safety_note=memory_note or None)
+    # _topic_recap_note is its own, independent carry-forward mechanism (last completed
+    # session in this topic thread) — it used to run unconditionally, ignoring opted_out
+    # entirely, which is why turning memory off didn't actually stop the opening line
+    # from continuing an old conversation. Gated the same as the fact-based note below.
+    recap_note = "" if memory["opted_out"] else await _topic_recap_note(user_id, topic_key)
+    safety_note = "\n\n".join(n for n in (memory_note, recap_note) if n) or None
+    system_prompt = _build_system_prompt(session, safety_note=safety_note)
     opening = await ai_client.generate(system_prompt=system_prompt, user_message="", max_tokens=150)
 
     session["turns"].append({"role": "assistant", "content": opening, "input_mode": None,
@@ -367,22 +500,43 @@ async def _send_message(user_id: str, session_id: str, req: SendMessageSchema) -
         session["pii_reminder_shown"] = True
         flags.append("pii_redacted")
 
-    # AIC-US-08 E-02/E-03: gibberish tolerance, then graceful early end. A strong
-    # system prompt ("never break character / reveal instructions") already covers
-    # prompt-injection resistance (E-03) without extra code here.
+    # AIC-US-08: deterministic pre-LLM classification, then graceful/escalating
+    # reaction — severity order emergency > injection > aggression > gibberish > ok.
+    classification = _classify_turn(redacted_text)
     session_ended = False
-    if _looks_like_gibberish(redacted_text):
+    forced_reply: Optional[str] = None
+
+    if classification == "emergency":
+        session["status"], session["completed_at"], session_ended = "abandoned", now, True
+        forced_reply = _EMERGENCY_REPLY
+        flags.append("emergency")
+    elif classification == "injection":
+        session["injection_strikes"] = session.get("injection_strikes", 0) + 1
+        flags.append("prompt_injection_attempt")
+        if session["injection_strikes"] >= INJECTION_STREAK_LIMIT:
+            session["status"], session["completed_at"], session_ended = "abandoned", now, True
+            forced_reply = _INJECTION_AUTO_CLOSE_REPLY
+        else:
+            forced_reply = _INJECTION_WARNING_REPLY
+    elif classification == "aggressive":
+        session["aggression_strikes"] = session.get("aggression_strikes", 0) + 1
+        flags.append("aggressive_tone")
+        if session["aggression_strikes"] >= AGGRESSION_STREAK_LIMIT:
+            session["status"], session["completed_at"], session_ended = "abandoned", now, True
+            forced_reply = _AGGRESSION_AUTO_CLOSE_REPLY
+        else:
+            forced_reply = _AGGRESSION_WARNING_REPLY
+    elif _looks_like_gibberish(redacted_text):
         session["gibberish_strikes"] += 1
         flags.append("gibberish")
         if session["gibberish_strikes"] >= GIBBERISH_STRIKE_LIMIT:
-            session["status"] = "abandoned"
-            session["completed_at"] = now
-            session_ended = True
+            session["status"], session["completed_at"], session_ended = "abandoned", now, True
+            forced_reply = "Let's pause here for now — thanks for practicing today."
 
     # AIC-US-04: grammar chip (opt-in, suppressed in voice mode).
     show_corrections = req.show_corrections if req.show_corrections is not None else session["show_corrections"]
     chip_result = {"chip": None, "suppressed_reason": None}
-    if not session_ended and redacted_text:
+    if forced_reply is None and redacted_text:
         chip_result = await grammar_checker.get_correction_chip(
             redacted_text, show_corrections=show_corrections, is_voice_mode=(req.input_mode == "audio"),
         )
@@ -407,8 +561,8 @@ async def _send_message(user_id: str, session_id: str, req: SendMessageSchema) -
     except Exception as exc:
         logger.warning("Daily Challenge prompt-timer update failed silently: %s", exc)
 
-    if session_ended:
-        reply = "Let's pause here for now — thanks for practicing today."
+    if forced_reply is not None:
+        reply = forced_reply
     else:
         session["recent_user_texts"].append(redacted_text)
         await _maybe_adjust_level(session)
@@ -487,10 +641,43 @@ async def _agent_send_message(session_id: str, req: SendMessageSchema, secret: O
     return await _send_message(session["user_id"], session_id, req)
 
 
+def _end_session_feedback(scored: session_scorer.ScoredSession, topic_label: str) -> str:
+    """Turns the three raw scores into one short coaching sentence — mirrors
+    assessment_service._encouraging_message/_skill_description (score band -> narrative
+    text, no LLM dependency), which the end-of-session screen otherwise has none of."""
+    scores = [s for s in (scored.fluency_score, scored.vocabulary_score, scored.pronunciation_score) if s is not None]
+    avg = sum(scores) / len(scores) if scores else 0.0
+
+    if avg >= 80:
+        opener = f"Strong session on {topic_label} — you carried the conversation with real confidence."
+    elif avg >= 60:
+        opener = f"Solid practice on {topic_label}. Your fluency is coming along well."
+    elif avg >= 40:
+        opener = f"Good effort on {topic_label} — sessions like this build your comfort speaking English."
+    else:
+        opener = f"You showed up and practiced {topic_label} today — that's what actually moves the needle."
+
+    weakest_label, weakest_score = min(
+        (("fluency", scored.fluency_score), ("vocabulary", scored.vocabulary_score),
+         ("pronunciation", scored.pronunciation_score)),
+        key=lambda pair: pair[1] if pair[1] is not None else 101,
+    )
+    tips = {
+        "fluency": "Try to keep sentences flowing without long pauses — thinking out loud in English helps.",
+        "vocabulary": "Push yourself to use a wider range of words instead of repeating the same ones.",
+        "pronunciation": "Slow down slightly on longer words — clarity beats speed.",
+    }
+    closer = (
+        tips[weakest_label] if weakest_score is not None and weakest_score < 70
+        else "Keep this up and try a new topic next time to keep growing."
+    )
+    return f"{opener} {closer}"
+
+
 # ── end session: score + memory extraction ─────────────────────────────────────
 async def _end_session(user_id: str, session_id: str) -> Dict:
     session = await _get_session(session_id, user_id)
-    if session["status"] not in ("active",):
+    if session["status"] not in ("active", "abandoned"):
         raise InvalidSubmissionError("Session already ended")
 
     user_turns = [t for t in session["turns"] if t["role"] == "user"]
@@ -514,7 +701,7 @@ async def _end_session(user_id: str, session_id: str) -> Dict:
     # identically to one spent on it. `_looks_like_gibberish` caught only crude patterns
     # and, on a strike-out, still let the session be scored on the way through.
     judgement = await relevance.assess(
-        _topic_label(session), full_text,
+        _topic_full_text(session), full_text,
         context="an open-ended English conversation-practice session on this topic",
     )
     # Delivery fluency/vocabulary are measured from the turns themselves and remain a real
@@ -576,6 +763,7 @@ async def _end_session(user_id: str, session_id: str) -> Dict:
         "topic_relevance": judgement.relevance,
         "fluency_score": scored.fluency_score, "vocabulary_score": scored.vocabulary_score,
         "pronunciation_score": scored.pronunciation_score, "level": session["level"],
+        "feedback": _end_session_feedback(scored, _topic_label(session)),
         "new_memory_facts": new_facts,
     }
 
@@ -605,7 +793,9 @@ async def _list_sessions(user_id: str) -> List[Dict]:
 # ── AIC-US-06: memory facts management ──────────────────────────────────────────
 async def _list_memory_facts(user_id: str) -> List[Dict]:
     memory = await _get_memory(user_id)
-    return memory["facts"]
+    # Hidden while paused (matches _memory_callback_note's gate below), not deleted — see
+    # _set_memory_opt_out. Reappears as-is the moment memory is turned back on.
+    return [] if memory["opted_out"] else memory["facts"]
 
 
 async def _delete_memory_fact(user_id: str, fact_id: str) -> Dict:
@@ -619,18 +809,18 @@ async def _delete_memory_fact(user_id: str, fact_id: str) -> Dict:
 
 
 async def _set_memory_opt_out(user_id: str, enabled: bool) -> Dict:
-    """E-02: opting out purges existing facts (immediately here — "within 24 hours" in
-    the story accommodates an async job; there is no such job in this codebase, so this
-    purges synchronously, which satisfies the requirement with a tighter bound)."""
+    """Pause, not purge: turning memory off stops new facts being learned
+    (_extract_and_store_facts) and hides/stops using what's already there
+    (_list_memory_facts, _memory_callback_note, _topic_recap_note's gate in
+    _start_session) — it does not delete it. Turning memory back on picks up exactly
+    where it left off instead of starting blank, which a hard purge would prevent."""
     memory = await _get_memory(user_id)
     memory["opted_out"] = enabled
-    if enabled:
-        memory["facts"] = []
     if await kv_store.store.get(MEMORY_NS, user_id) is None:
         await kv_store.store.create(MEMORY_NS, user_id, memory)
     else:
         await kv_store.store.update(MEMORY_NS, user_id, memory)
-    return {"opted_out": enabled, "facts": memory["facts"]}
+    return {"opted_out": enabled, "facts": [] if enabled else memory["facts"]}
 
 
 # ── AIC-US-16: TTS ──────────────────────────────────────────────────────────────
@@ -681,7 +871,10 @@ async def list_sessions(user_id: str = Depends(require_auth)):
 
 
 async def list_memory_facts(user_id: str = Depends(require_auth)):
-    return {"facts": await _list_memory_facts(user_id)}
+    # opted_out included so the profile switch reflects real state on page load instead
+    # of always defaulting to "on" until the user touches it.
+    memory = await _get_memory(user_id)
+    return {"facts": await _list_memory_facts(user_id), "opted_out": memory["opted_out"]}
 
 
 async def delete_memory_fact(fact_id: str, user_id: str = Depends(require_auth)):

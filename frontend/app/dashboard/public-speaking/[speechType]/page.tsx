@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   CheckCircle,
@@ -105,7 +105,7 @@ const DELIVERY_STEP = "Deliver your speech — pause and resume the mic as often
 const SPEECH_TYPE_CONFIG: Record<string, SpeechTypeConfig> = {
   business_pitch: {
     label: "Business Pitch",
-    description: "Structure: Hook → Problem → Solution → Ask",
+    description: "Deliver a persuasive pitch that hooks, states the problem, presents your solution, and lands a clear ask.",
     ideal_wpm: "130-160 WPM",
     qaEnabled: true,
     suggestedLimitMinutes: 5,
@@ -117,7 +117,7 @@ const SPEECH_TYPE_CONFIG: Record<string, SpeechTypeConfig> = {
   },
   casual_event: {
     label: "Casual Event Speech",
-    description: "Focus on warmth, storytelling, and emotional connection",
+    description: "Give a warm, story-driven toast or celebration speech that connects with the room.",
     ideal_wpm: "120-150 WPM",
     qaEnabled: false,
     suggestedLimitMinutes: 3,
@@ -125,7 +125,7 @@ const SPEECH_TYPE_CONFIG: Record<string, SpeechTypeConfig> = {
   },
   motivational: {
     label: "Motivational Speech",
-    description: "Prioritize energy, tone variation, and strategic pausing",
+    description: "Deliver a high-energy speech that rallies your audience toward action.",
     ideal_wpm: "130-160 WPM",
     qaEnabled: false,
     suggestedLimitMinutes: 5,
@@ -133,7 +133,7 @@ const SPEECH_TYPE_CONFIG: Record<string, SpeechTypeConfig> = {
   },
   classroom: {
     label: "Classroom Presentation",
-    description: "Include clear transitions and minimize filler words",
+    description: "Present course material clearly, with smooth transitions and minimal filler words.",
     ideal_wpm: "130-150 WPM",
     qaEnabled: true,
     suggestedLimitMinutes: 10,
@@ -145,7 +145,7 @@ const SPEECH_TYPE_CONFIG: Record<string, SpeechTypeConfig> = {
   },
   ted_talk: {
     label: "TED-Style Talk",
-    description: "Craft a narrative arc with personal stories",
+    description: "Craft a narrative-driven talk built around a personal story and a core idea.",
     ideal_wpm: "130-150 WPM",
     qaEnabled: true,
     suggestedLimitMinutes: 10,
@@ -157,9 +157,11 @@ const SPEECH_TYPE_CONFIG: Record<string, SpeechTypeConfig> = {
   },
 };
 
-export default function PublicSpeakingSessionPage() {
+function PublicSpeakingSessionPageInner() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const resumeSessionId = searchParams.get("resume");
   const speechType = params.speechType as string;
   const config = SPEECH_TYPE_CONFIG[speechType] || SPEECH_TYPE_CONFIG.business_pitch;
 
@@ -195,6 +197,9 @@ export default function PublicSpeakingSessionPage() {
   // The speech-phase one is silent — no STT, LLM or TTS exist in that room — so it is presence
   // to speak to, with nothing to talk over and nothing listening. Gated on in_progress instead.
   const [idleAudienceActive, setIdleAudienceActive] = React.useState(false);
+  // True only while a ?resume= link is being hydrated — keeps the setup card from flashing
+  // before the prior session's transcript/scorecard/Q&A state lands.
+  const [isHydratingResume, setIsHydratingResume] = React.useState(!!resumeSessionId);
 
   const sessionIdRef = React.useRef<string | null>(null);
   sessionIdRef.current = sessionId;
@@ -331,6 +336,45 @@ export default function PublicSpeakingSessionPage() {
     sessionId,
     sessionId !== null && !isSessionDone,
   );
+
+  // Resume: load the prior session's saved state instead of starting fresh. Lands the
+  // user back on the recording screen (transcript restored) or the Q&A step (scorecard +
+  // AI question restored), whichever the session was actually at.
+  React.useEffect(() => {
+    if (!resumeSessionId) return;
+    let cancelled = false;
+    getPublicSpeakingSession(resumeSessionId)
+      .then((data) => {
+        if (cancelled) return;
+        setSessionId(data.session_id);
+        if (data.transcript) {
+          setTextContent(data.transcript);
+          committedTextRef.current = data.transcript;
+        }
+        if (data.scorecard) {
+          setScorecard(data.scorecard);
+          setInputMode(data.input_mode === "text" ? "text" : "audio");
+        }
+        if (data.ai_question) {
+          setQaQuestion(data.ai_question);
+          setQaResponse(data.user_qa_response ?? "");
+          if (data.qa_score) setQaScore(data.qa_score);
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : "Couldn't load that session.");
+      })
+      .finally(() => {
+        if (!cancelled) setIsHydratingResume(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Runs once per resume link — sessionId/etc. setters are stable, resumeSessionId is
+    // the only real dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeSessionId]);
 
   const handleStartVoice = async () => {
     if (isVoiceActive) return;
@@ -489,6 +533,13 @@ export default function PublicSpeakingSessionPage() {
     }
   };
 
+  const handleQaResponseKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    if (!qaResponse.trim() || isSubmitting) return;
+    void handleSubmitQaResponse();
+  };
+
   const handleSubmitQaResponse = async () => {
     if (!sessionId) return;
     setIsSubmitting(true);
@@ -541,7 +592,15 @@ export default function PublicSpeakingSessionPage() {
         </div>
       )}
 
-      {!sessionId ? (
+      {isHydratingResume ? (
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-surface-elevated p-10 text-center">
+          <span
+            className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent text-muted-foreground"
+            aria-hidden="true"
+          />
+          <p className="text-sm text-muted-foreground">Loading your unfinished session…</p>
+        </div>
+      ) : !sessionId ? (
         <div className="flex flex-col gap-6 rounded-2xl border border-border bg-surface-elevated p-6">
           <div>
             <h2 className="font-semibold text-foreground">Session Setup</h2>
@@ -1096,6 +1155,25 @@ export default function PublicSpeakingSessionPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// useSearchParams() in PublicSpeakingSessionPageInner needs a Suspense boundary,
+// otherwise the whole route deopts to client-only rendering with no fallback.
+export default function PublicSpeakingSessionPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <span
+            className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent text-muted-foreground"
+            aria-hidden="true"
+          />
+        </div>
+      }
+    >
+      <PublicSpeakingSessionPageInner />
+    </React.Suspense>
   );
 }
 

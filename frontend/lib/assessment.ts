@@ -8,7 +8,7 @@ export interface StartAssessmentQuestion {
   total_questions: number;
   current_question: string;
   question_index: number;
-  question_mode: "text" | "audio";
+  question_mode: "text" | "audio" | "audio_pronunciation";
   estimated_duration_minutes: number;
   is_re_assessment?: boolean;
   // True when start resumed an existing in-progress assessment (browser back/refresh)
@@ -43,7 +43,7 @@ export interface SubmitResponseInProgress {
   status: "in_progress";
   next_question: string | null;
   question_index: number;
-  next_question_mode: "text" | "audio" | null;
+  next_question_mode: "text" | "audio" | "audio_pronunciation" | null;
   previous_result: {
     question_id: string;
     category: string | null;

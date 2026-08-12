@@ -1,6 +1,7 @@
 import { SectionTitle } from "@/components/common/SectionTitle";
 import { StatsCard } from "@/components/landing/StatsCard";
 import { PROGRESS_STATS } from "@/lib/mock-data";
+import { ScrollReveal } from "@/components/ui/scroll-reveal";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
 
@@ -21,7 +22,7 @@ export function ProgressAnalytics() {
           description="Every session updates your dashboard, so progress feels measurable instead of assumed. This is illustrative sample data."
         />
 
-        <div className="mx-auto w-full max-w-6xl rounded-[2rem] border border-border bg-surface/80 p-4 shadow-[0_22px_70px_hsl(var(--foreground)/0.08)] backdrop-blur sm:p-6">
+        <ScrollReveal className="mx-auto w-full max-w-6xl rounded-[2rem] border border-border bg-surface/80 p-4 shadow-[0_22px_70px_hsl(var(--foreground)/0.08)] backdrop-blur sm:p-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {PROGRESS_STATS.map((stat) => (
               <StatsCard key={stat.id} stat={stat} />
@@ -134,7 +135,7 @@ export function ProgressAnalytics() {
               </div>
             </div>
           </div>
-        </div>
+        </ScrollReveal>
       </div>
     </section>
   );

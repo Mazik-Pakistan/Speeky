@@ -219,14 +219,18 @@ async def _onboarding_funnel(since: datetime) -> List[Dict]:
     return out
 
 
-def _csv_response(rows: List[Dict], fieldnames: List[str], filename: str) -> Response:
+def _rows_to_csv(rows: List[Dict], fieldnames: List[str]) -> str:
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=fieldnames)
     writer.writeheader()
     for row in rows:
         writer.writerow({k: row.get(k, "") for k in fieldnames})
+    return buf.getvalue()
+
+
+def _csv_response(rows: List[Dict], fieldnames: List[str], filename: str) -> Response:
     return Response(
-        content=buf.getvalue(), media_type="text/csv",
+        content=_rows_to_csv(rows, fieldnames), media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
@@ -411,13 +415,7 @@ async def export_retention_by_feature(
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAD-US-11: Platform Revenue & Retention Tracking — System (Super) Admin only, MOCK
 # ═══════════════════════════════════════════════════════════════════════════════
-async def get_revenue(days: int = DEFAULT_DAYS, _super_admin_id: str = Depends(require_super_admin)):
-    bad = _bad_days(days)
-    if bad:
-        return bad
-
-    # US-205: Revenue is in RESTRICTED_ANALYTICS_MODULES; log every view (fire-and-forget)
-    asyncio.ensure_future(_log_view(_super_admin_id, ANALYTICS_MODULE_REVENUE, {"days": days}))
+def _revenue_mock_data(days: int) -> Dict:
     today = datetime.now(timezone.utc).date()
     mrr_series = [
         {"date": (today - timedelta(days=i)).isoformat(), "mrr": round(1200 + (days - i) * 14.5 + (i % 7) * 30, 2)}
@@ -440,3 +438,51 @@ async def get_revenue(days: int = DEFAULT_DAYS, _super_admin_id: str = Depends(r
             {"cohort": "4 weeks ago", "day1": 65.0, "day7": 40.0, "day30": 22.0},
         ],
     }
+
+
+async def get_revenue(days: int = DEFAULT_DAYS, _super_admin_id: str = Depends(require_super_admin)):
+    bad = _bad_days(days)
+    if bad:
+        return bad
+
+    # US-205: Revenue is in RESTRICTED_ANALYTICS_MODULES; log every view (fire-and-forget)
+    asyncio.ensure_future(_log_view(_super_admin_id, ANALYTICS_MODULE_REVENUE, {"days": days}))
+    return _revenue_mock_data(days)
+
+
+# ── POST /analytics/export (audit-logged, fail-closed) ─────────────────────────
+# Dispatches to the same row-computing helpers the GET .../export routes and the
+# on-screen tabs use, so the audit-logged download matches what the admin sees
+# instead of the placeholder `module=...,filters=...` debug line it used to emit.
+async def generate_export_csv(module: str, filters: Dict[str, Any]) -> str:
+    try:
+        days = max(1, min(MAX_DAYS, int(filters.get("days", DEFAULT_DAYS))))
+    except (TypeError, ValueError):
+        days = DEFAULT_DAYS
+
+    if module == "Funnel":
+        rows = await _onboarding_funnel(_period_start(days))
+        return _rows_to_csv(rows, ["step", "count", "pct_of_start", "drop_off_pct"])
+
+    if module == "FeatureUsage":
+        rows = await _feature_usage_counts(_period_start(days), bool(filters.get("showArchived", False)))
+        return _rows_to_csv(
+            rows, ["label", "category", "started", "completed", "completion_rate", "new", "archived"]
+        )
+
+    if module == "RetentionByFeature":
+        feature = filters.get("feature", "scenario_based_learning")
+        if feature not in CROSS_FILTER_FEATURES:
+            feature = "scenario_based_learning"
+        result = await _cross_filter(days, feature)
+        rows = [
+            {"group": "engaged", **(result["engaged"] or {"cohort_size": 0, "retention_rate": ""})},
+            {"group": "general", **(result["general"] or {"cohort_size": 0, "retention_rate": ""})},
+        ]
+        return _rows_to_csv(rows, ["group", "cohort_size", "retention_rate"])
+
+    if module == "Revenue":
+        rows = _revenue_mock_data(days)["mrr_series"]
+        return _rows_to_csv(rows, ["date", "mrr"])
+
+    return _rows_to_csv([{"module": module, "filters": str(filters)}], ["module", "filters"])

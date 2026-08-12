@@ -135,7 +135,7 @@ function PronunciationBreakdown({
 
 const DAILY_CHALLENGE_POLL_MS = 15_000;
 
-export default function ConversationSessionPage() {
+function ConversationSessionPageInner() {
   const params = useParams<{ sessionId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -368,6 +368,12 @@ export default function ConversationSessionPage() {
           created_at: "",
         },
       ]);
+      // Deterministic abuse/exploit/emergency reaction can auto-end the session
+      // server-side (see conversation_service._classify_turn) — don't strand the user
+      // in a chat box that will just 400 on their next message.
+      if (result.session_ended) {
+        await handleEnd();
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
@@ -407,7 +413,10 @@ export default function ConversationSessionPage() {
           <h1 className="mt-3 font-serif text-h2 font-semibold">
             Session Complete
           </h1>
-          <p className="mt-2 text-sm text-primary-foreground/85">
+          <p className="mt-3 text-sm leading-relaxed text-primary-foreground/95">
+            {summary.feedback}
+          </p>
+          <p className="mt-2 text-xs text-primary-foreground/70">
             {Math.round(summary.duration_seconds)}s · Level: {summary.level}
           </p>
         </div>
@@ -689,5 +698,24 @@ export default function ConversationSessionPage() {
         ) : null}
       </div>
     </div>
+  );
+}
+
+// useSearchParams() in ConversationSessionPageInner needs a Suspense boundary,
+// otherwise the whole route deopts to client-only rendering with no fallback.
+export default function ConversationSessionPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <span
+            className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent text-muted-foreground"
+            aria-hidden="true"
+          />
+        </div>
+      }
+    >
+      <ConversationSessionPageInner />
+    </React.Suspense>
   );
 }

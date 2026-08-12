@@ -84,7 +84,7 @@ export const EXPLORE_STATIC_SCENARIOS: ExploreScenario[] = [
     icon: Mic,
     title: "Public Speaking Coach",
     description:
-      "Practice speeches and presentations with AI feedback on pacing, tone, and delivery.",
+      "Practice speeches and presentations with AI feedback on pacing, tone, structure, and delivery.",
     difficulty: "Intermediate",
     showAiAvatar: true,
     featured: true,

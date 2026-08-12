@@ -7,6 +7,7 @@ from services.session_memory_service import (
     log_interruption,
     record_session,
     resume_session,
+    set_memory_opt_out,
 )
 
 router = APIRouter()
@@ -18,3 +19,4 @@ router.add_api_route("/resume", resume_session, methods=["POST"])
 router.add_api_route("/profile/record-session", record_session, methods=["POST"], status_code=201)
 router.add_api_route("/profile", get_memory_profile, methods=["GET"])
 router.add_api_route("/profile/personalized-opening", get_personalized_opening, methods=["GET"])
+router.add_api_route("/profile/opt-out", set_memory_opt_out, methods=["POST"])
