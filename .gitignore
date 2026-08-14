@@ -20,5 +20,4 @@ docker-compose.yml
 
 output
 venv
-.claude
 .devin

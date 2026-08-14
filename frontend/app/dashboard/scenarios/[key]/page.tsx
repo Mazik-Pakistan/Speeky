@@ -72,6 +72,7 @@ type Step =
 
 function ScenarioSessionPageInner() {
   const params = useParams<{ key: string }>();
+  const scenarioKey = decodeURIComponent(params.key);
   const router = useRouter();
   const [step, setStep] = React.useState<Step>({ name: "loading" });
   const [chatInput, setChatInput] = React.useState("");
@@ -149,7 +150,7 @@ function ScenarioSessionPageInner() {
 
     async function load() {
       try {
-        const detail = await getScenarioDetail(params.key);
+        const detail = await getScenarioDetail(scenarioKey);
         if (cancelled) return;
 
         // ?resume=<session_id> (from the Explore resume banner / active-sessions
@@ -204,14 +205,14 @@ function ScenarioSessionPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [params.key, resumeSessionId]);
+  }, [scenarioKey, resumeSessionId]);
 
   async function handleStart() {
     if (step.name !== "intro") return;
     setError(null);
     setIsSubmitting(true);
     try {
-      const session = await startScenarioSession(params.key);
+      const session = await startScenarioSession(scenarioKey);
       setStep({
         name: "chat",
         session,
@@ -431,7 +432,7 @@ function ScenarioSessionPageInner() {
             newlyUnlocked[0] && dismissMilestone(newlyUnlocked[0].hours)
           }
         />
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-nowrap items-center justify-between gap-2">
           <h1 className="font-serif text-h2 font-semibold text-foreground">
             {step.session.label}
           </h1>
@@ -462,6 +463,7 @@ function ScenarioSessionPageInner() {
               variant="outline"
               loading={isSubmitting}
               onClick={handleEnd}
+              className="whitespace-nowrap"
             >
               End Scenario
             </Button>
