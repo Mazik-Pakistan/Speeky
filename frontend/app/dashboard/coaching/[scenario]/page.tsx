@@ -5,6 +5,8 @@ import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "react-toastify";
 import {
+  ArrowRight,
+  Award,
   CheckCircle2,
   Mic,
   MicOff,
@@ -27,6 +29,7 @@ const LiveCallModal = dynamic(
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
+import { evaluateMilestone, pauseModule } from "@/lib/learningPath";
 import {
   getCoachingScenarios,
   getCoachingSessionState,
@@ -69,11 +72,131 @@ type Step =
 function CoachingSessionPageInner() {
   const params = useParams<{ scenario: string }>();
   const router = useRouter();
+
+  /**
+   * Learning Path module launch.
+   *
+   * Entirely query-param driven, and every branch below is guarded on `lpPathId && lpModuleId`,
+   * so a session opened normally — which is almost all of them — behaves exactly as it did
+   * before this integration existed.
+   */
+  const searchParams = useSearchParams();
+  const lpPathId = searchParams.get("lp_path_id");
+  const lpModuleId = searchParams.get("lp_module_id");
+  const lpPassingScoreStr = searchParams.get("lp_passing_score");
+  const lpPassingScore = lpPassingScoreStr ? parseFloat(lpPassingScoreStr) : 60;
+
+  const [lpStatus, setLpStatus] = React.useState<{
+    evaluated: boolean;
+    passed: boolean;
+    score: number;
+    message?: string;
+    badges?: string[];
+  } | null>(null);
+  const [isPausing, setIsPausing] = React.useState(false);
+
+
+  /** Score the finished session against the module's passing threshold and record it.
+   *
+   * The coaching result carries per-dimension scores rather than one headline number, so the
+   * module grade is their mean — a module either clears the bar overall or it doesn't. A failed
+   * `evaluateMilestone` call still shows the user their score: the practice happened either way,
+   * and swallowing it because the write failed would be the worse outcome.
+   */
+  const processLpEvaluation = React.useCallback(
+    async (res: CoachingResult) => {
+      if (!lpPathId || !lpModuleId) return;
+
+      const scoreVals = Object.values(res.scores).filter(
+        (v): v is number => v !== null && v !== undefined,
+      );
+      const avgScore =
+        scoreVals.length > 0
+          ? Math.round(scoreVals.reduce((a, b) => a + b, 0) / scoreVals.length)
+          : 80;
+      const passed = avgScore >= lpPassingScore;
+
+      if (!passed) {
+        setLpStatus({
+          evaluated: true,
+          passed: false,
+          score: avgScore,
+          message: `Scored ${avgScore}% (Passing threshold: ${lpPassingScore}%). Practice again to unlock the next module!`,
+        });
+        toast.warn(`Scored ${avgScore}%. Minimum ${lpPassingScore}% required to pass.`);
+        return;
+      }
+
+      try {
+        const ev = await evaluateMilestone({
+          path_id: lpPathId,
+          module_id: lpModuleId,
+          score: avgScore,
+        });
+        setLpStatus({
+          evaluated: true,
+          passed: true,
+          score: avgScore,
+          message: ev.message,
+          badges: ev.awarded_badges,
+        });
+        toast.success("Learning Path module completed. Next module unlocked.");
+      } catch {
+        setLpStatus({
+          evaluated: true,
+          passed: true,
+          score: avgScore,
+          message: "Module score recorded.",
+        });
+      }
+    },
+    [lpPathId, lpModuleId, lpPassingScore],
+  );
+
   const [step, setStep] = React.useState<Step>({ name: "loading" });
   const [draftText, setDraftText] = React.useState("");
   const [subject, setSubject] = React.useState("");
   const [chatInput, setChatInput] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+  /** Save progress mid-session and return to the path.
+   *
+   * Snapshots whatever the current step actually holds — roleplay turns, or a draft in progress —
+   * so resuming lands the user where they left off rather than at the start of the module.
+   */
+  const handlePauseSession = React.useCallback(async () => {
+    if (!lpPathId || !lpModuleId) return;
+    setIsPausing(true);
+    try {
+      let context: Array<{ role: string; content: string }> = [];
+      let inProgressData: Record<string, unknown> = {};
+
+      if (step.name === "roleplay") {
+        context = step.turns.map((t) => ({ role: t.role, content: t.content }));
+        inProgressData = { transcript: step.transcript };
+      } else if (step.name === "draft" && draftText.trim()) {
+        context = [{ role: "user", content: draftText }];
+        inProgressData = { draftText, subject };
+      }
+
+      await pauseModule({
+        path_id: lpPathId,
+        module_id: lpModuleId,
+        question_index: step.name === "roleplay" ? Math.floor(step.turns.length / 2) : 0,
+        conversation_context: context,
+        in_progress_data: inProgressData,
+        was_interrupted: false,
+      });
+
+      toast.info("Session paused. Progress saved to your Learning Path.");
+      router.push("/dashboard/learning-path");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Failed to pause session.");
+    } finally {
+      setIsPausing(false);
+    }
+  }, [lpPathId, lpModuleId, step, draftText, subject, router]);
+
   const [error, setError] = React.useState<string | null>(null);
   const [voiceStatus, setVoiceStatus] = React.useState("");
   const [liveCallOpen, setLiveCallOpen] = React.useState(false);
@@ -139,7 +262,6 @@ function CoachingSessionPageInner() {
     activePracticeSessionId !== null,
   );
 
-  const searchParams = useSearchParams();
   const resumeSessionId = searchParams.get("resume");
 
   React.useEffect(() => {
@@ -253,6 +375,7 @@ function CoachingSessionPageInner() {
       voiceStartedAt.current = null;
       setVoiceStatus("");
       setStep({ name: "results", result });
+      await processLpEvaluation(result);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
@@ -350,6 +473,7 @@ function CoachingSessionPageInner() {
         audio_features: audioFeatures,
       });
       setStep({ name: "results", result });
+      await processLpEvaluation(result);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
@@ -449,15 +573,29 @@ function CoachingSessionPageInner() {
 
           {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
 
-          <Button
-            size="lg"
-            className="mt-4"
-            loading={isSubmitting}
-            disabled={!draftText.trim()}
-            onClick={handleSubmitDraft}
-          >
-            Submit for Feedback
-          </Button>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              size="lg"
+              loading={isSubmitting}
+              disabled={!draftText.trim() || isPausing}
+              onClick={handleSubmitDraft}
+            >
+              Submit for Feedback
+            </Button>
+            {/* Pause only makes sense inside a Learning Path module — there is nowhere to
+                resume to otherwise. */}
+            {lpPathId && lpModuleId ? (
+              <Button
+                size="lg"
+                variant="outline"
+                loading={isPausing}
+                disabled={isSubmitting}
+                onClick={handlePauseSession}
+              >
+                Pause &amp; Save
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
     );
@@ -487,14 +625,28 @@ function CoachingSessionPageInner() {
           <h1 className="font-serif text-h2 font-semibold text-foreground">
             {step.session.label}
           </h1>
-          <Button
-            size="sm"
-            variant="outline"
-            loading={isSubmitting}
-            onClick={handleEndRoleplay}
-          >
-            End &amp; Get Feedback
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {lpPathId && lpModuleId ? (
+              <Button
+                size="sm"
+                variant="outline"
+                loading={isPausing}
+                disabled={isSubmitting}
+                onClick={handlePauseSession}
+              >
+                Pause &amp; Save
+              </Button>
+            ) : null}
+            <Button
+              size="sm"
+              variant="outline"
+              loading={isSubmitting}
+              disabled={isPausing}
+              onClick={handleEndRoleplay}
+            >
+              End &amp; Get Feedback
+            </Button>
+          </div>
         </div>
 
         <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface-elevated p-6 shadow-sm">
@@ -721,6 +873,69 @@ function CoachingSessionPageInner() {
           <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
             {result.polished_version}
           </p>
+        </div>
+      ) : null}
+
+      {/* Learning Path outcome — only when this session was launched from a module. */}
+      {lpPathId && lpModuleId && lpStatus ? (
+        <div
+          className={cn(
+            "animate-fade-up rounded-2xl border p-5 shadow-sm",
+            lpStatus.passed
+              ? "border-success/30 bg-success/10"
+              : "border-warning/30 bg-warning/10",
+          )}
+          style={{ animationDelay: "340ms" }}
+        >
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/30">
+              {lpStatus.passed ? (
+                <Award className="h-5 w-5 text-success" />
+              ) : (
+                <TriangleAlert className="h-5 w-5 text-warning" />
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p
+                className={cn(
+                  "text-sm font-semibold",
+                  lpStatus.passed ? "text-success" : "text-warning",
+                )}
+              >
+                {lpStatus.passed ? "Module passed" : "Module not yet passed"}
+              </p>
+              {lpStatus.message ? (
+                <p className="mt-1 text-xs text-muted-foreground">{lpStatus.message}</p>
+              ) : null}
+              {lpStatus.passed && lpStatus.badges && lpStatus.badges.length > 0 ? (
+                <p className="mt-1 text-xs text-success">
+                  Badges earned: {lpStatus.badges.join(", ")}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {lpStatus.passed ? (
+              <Button size="sm" onClick={() => router.push("/dashboard/learning-path")}>
+                <ArrowRight className="h-3.5 w-3.5" />
+                Continue Learning Path
+              </Button>
+            ) : (
+              /* A full reload rather than resetting state: the session is already scored and
+                 closed server-side, so re-running the module means starting a new one. */
+              <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
+                Practice Again
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => router.push("/dashboard/learning-path")}
+            >
+              Back to Learning Path
+            </Button>
+          </div>
         </div>
       ) : null}
 

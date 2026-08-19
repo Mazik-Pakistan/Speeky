@@ -2,6 +2,7 @@ import {
   Briefcase,
   Compass,
   Home,
+  Map,
   Mic,
   Sparkles,
   TrendingUp,
@@ -21,6 +22,7 @@ export interface DashboardNavLink {
 export const DASHBOARD_NAV_LINKS: DashboardNavLink[] = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Explore", href: "/dashboard/explore", icon: Compass },
+  { label: "Learning Path", href: "/dashboard/learning-path", icon: Map },
   { label: "Pronunciation", href: "/dashboard/pronunciation", icon: Volume2 },
   { label: "Accent", href: "/dashboard/accent-assessment", icon: Sparkles },
   { label: "Public Speaking", href: "/dashboard/public-speaking", icon: Mic },

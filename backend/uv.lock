@@ -2951,6 +2951,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "prisma" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "taskipy" },
@@ -2992,6 +2993,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "prisma", specifier = ">=0.15,<0.17" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "taskipy", specifier = ">=1.2.1" },
